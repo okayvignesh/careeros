@@ -4,7 +4,7 @@
  * Ensures Qdrant collections exist before accepting embedding jobs.
  */
 import Redis from 'ioredis';
-import { Worker, type ConnectionOptions } from 'bullmq';
+import { Queue, Worker, type ConnectionOptions } from 'bullmq';
 import { PrismaClient } from '@prisma/client';
 import pino from 'pino';
 import { QdrantStore } from '@careeros/embeddings';
@@ -18,6 +18,11 @@ import {
 import { seedSkills } from './skills-seed.js';
 import { handleGithubSync } from './github-sync.js';
 import { handleEmbeddingGenerate } from './embedding-job.js';
+import {
+  handleHallucinationLogRetention,
+  JOB_HALLUCINATION_LOG_RETENTION,
+  QUEUE_RETENTION,
+} from './hallucination-log-retention.worker.js';
 
 const logger = pino({
   name: 'careeros-worker',
@@ -99,7 +104,38 @@ async function bootstrap() {
     logger.error({ id: job?.id, err: err.message }, 'embedding job failed'),
   );
 
-  logger.info(`worker up, listening on queues '${QUEUE_GITHUB}', '${QUEUE_EMBEDDING}'`);
+  // A-M4: daily 30-day retention on llm_hallucination_log. Repeatable job
+  // registered against a static jobId so a restart is idempotent (BullMQ
+  // updates the schedule rather than stacking duplicates).
+  const retentionQueue = new Queue(QUEUE_RETENTION, { connection });
+  await retentionQueue.add(
+    JOB_HALLUCINATION_LOG_RETENTION,
+    {},
+    {
+      jobId: `repeat:${JOB_HALLUCINATION_LOG_RETENTION}`,
+      repeat: { pattern: '17 3 * * *' }, // 03:17 UTC daily, off the top of the hour
+      removeOnComplete: { count: 30 },
+      removeOnFail: { count: 30 },
+    },
+  );
+  const retentionWorker = new Worker(
+    QUEUE_RETENTION,
+    async (job) => {
+      if (job.name !== JOB_HALLUCINATION_LOG_RETENTION) {
+        logger.warn({ name: job.name }, 'unknown retention job name');
+        return { skipped: true };
+      }
+      return handleHallucinationLogRetention(prisma, logger);
+    },
+    { connection, concurrency: 1 },
+  );
+  retentionWorker.on('failed', (job, err) =>
+    logger.error({ id: job?.id, err: err.message }, 'retention job failed'),
+  );
+
+  logger.info(
+    `worker up, listening on queues '${QUEUE_GITHUB}', '${QUEUE_EMBEDDING}', '${QUEUE_RETENTION}'`,
+  );
 }
 
 bootstrap().catch((err) => {

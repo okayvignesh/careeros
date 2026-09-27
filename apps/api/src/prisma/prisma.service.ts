@@ -22,6 +22,9 @@ const KEY = loadMasterKey();
  */
 const ENCRYPTED_FIELDS: Record<string, { column: string; kind: 'string' | 'json' }> = {
   ResumeFact: { column: 'content', kind: 'json' },
+  // A-M4: raw source excerpts logged for eval review. Row still exposes
+  // snippetHash + snippetOffset in cleartext for low-privilege lookups.
+  LlmHallucinationLog: { column: 'snippet', kind: 'string' },
 };
 
 @Injectable()

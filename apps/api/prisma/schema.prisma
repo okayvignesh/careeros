@@ -285,7 +285,12 @@ model SkillStateEvent {
 }
 
 /// Grounded-generation hallucination log. One row per suspicious output.
-/// Feeds the eval loop in slice 7. Append-only; retention lands with slice 7.
+/// Feeds the eval loop. Retention: 30 days via `hallucination-log-retention`
+/// worker (A-M4). `snippet` carries the raw source-text excerpt so an
+/// eval-review UI can show "did the model hallucinate this?" — encrypted at
+/// rest via ENCRYPTED_FIELDS in prisma.service.ts. `snippetHash` +
+/// `snippetOffset` are the low-privilege identifiers: same source produces
+/// the same hash + offset so eval-only paths never need to touch plaintext.
 model LlmHallucinationLog {
   id                String   @id @default(uuid()) @db.Uuid
   userId            String?  @db.Uuid
@@ -295,6 +300,9 @@ model LlmHallucinationLog {
   promptHash        String
   suspectFragments  String[] @default([])
   detail            Json?
+  snippet           String?  /// encrypted at rest (ENCRYPTED_FIELDS: LlmHallucinationLog.snippet)
+  snippetHash       String?  /// sha256 hex of the raw source text (32 chars = 128 bits truncated)
+  snippetOffset     Json?    /// {start:number, end:number} byte offsets into the source
   timestamp         DateTime @default(now()) @db.Timestamptz(6)
 
   user    User?    @relation(fields: [userId], references: [id], onDelete: SetNull)

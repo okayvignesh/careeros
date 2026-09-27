@@ -55,7 +55,7 @@ Cross-cutting security requirements for an open-source, self-hostable developer 
 **Why:** OSS operators regularly leave `SECRET=changeme` in production. We refuse.
 
 **Acceptance criteria:**
-- [ ] `ENCRYPTION_KEY` — must be present, ≥ 32 bytes, not equal to any known example value → else exit 1 with clear message.
+- [x] `ENCRYPTION_KEY` — must be present, ≥ 32 bytes, not equal to any known example value → else exit 1 with clear message. `loadMasterKey` now accepts ONLY 64-char lowercase hex OR 44-char base64 (32 bytes); the old null-pad branch that silently zero-padded short passphrases is gone. Enforced pre-boot by `startup-check.ts:10` (`assertStrongKey`) and again at every key-consumer's module load via `const KEY = loadMasterKey()`. See `packages/secrets/src/master-key.ts:22-53` + `packages/secrets/src/master-key.test.ts` (A-H4).
 - [x] `SESSION_SECRET` — same rules. Enforced at boot by `assertStrongKey('SESSION_SECRET', ...)` in `apps/api/src/startup-check.ts:11`, plus a redundant presence assertion at :14-21 and a lazy re-check inside `SessionService` constructor (`apps/api/src/modules/auth/session.service.ts:33-40`) so a test path that skips startup-check can no longer mask a missing env with `!` (A-H3).
 - [ ] Production mode (`NODE_ENV=production`) requires HTTPS reachable via configured host — else exit 1.
 - [ ] Postgres connection must use TLS in production (`sslmode=require` or higher) → else exit 1.
@@ -134,10 +134,11 @@ Cross-cutting security requirements for an open-source, self-hostable developer 
 **Why:** Belt-and-suspenders. Backup theft or DB leak doesn't equal PII disclosure.
 
 **Acceptance criteria:**
-- [ ] `packages/secrets` exposes `encryptField(text, context)` and `decryptField(cipher, context)`, using AES-GCM with a derived subkey per field type (context binding prevents ciphertext swap attacks).
-- [ ] Prisma middleware (or Drizzle equivalent) auto-encrypts marked columns on write, decrypts on read.
-- [ ] Marked tables: `resume_facts`, `career_goals`, `evidence` (where `type = self | document`), `applications`, `outreach_messages`.
-- [ ] Migration is idempotent — running twice does not double-encrypt.
+- [x] `packages/secrets` exposes `encryptField(text, context)` and `decryptField(cipher, context)`, using AES-GCM with a derived subkey per field type (context binding prevents ciphertext swap attacks). `packages/secrets/src/field.ts:16-56`.
+- [x] Prisma middleware (or Drizzle equivalent) auto-encrypts marked columns on write, decrypts on read. `apps/api/src/prisma/prisma.service.ts:28-116` (`ENCRYPTED_FIELDS` map + `$use` middleware). Note: legacy `$use` does not run inside interactive transactions; callers writing via `tx.<model>` call `encryptField` manually (documented at :14-22).
+- [~] Marked tables: `resume_facts.content` (P1), `llm_hallucination_log.snippet` (A-M4 — raw source excerpts logged for hallucination review encrypted at rest via ENCRYPTED_FIELDS, `apps/api/src/prisma/prisma.service.ts:26`). Remaining `career_goals`, `evidence`, `applications`, `outreach_messages` still to add.
+- [x] Migration is idempotent — running twice does not double-encrypt. Guaranteed by `isEncryptedField()` short-circuit in `packages/secrets/src/field.ts:26,44`; unit-tested in `packages/secrets/src/field.demo.ts` (idempotency case).
+- [x] Hallucination-log retention: rows expire after 30 days via daily BullMQ job `hallucination-log-retention` (`apps/worker/src/hallucination-log-retention.worker.ts` + `hallucination-log-retention.test.ts`); wired in `apps/worker/src/main.ts` (A-M4).
 - [ ] Backup dump inspected in test: PII columns are opaque bytes.
 - [ ] Search on encrypted columns via deterministic-encrypted secondary index only where required (documented per column).
 

@@ -52,7 +52,7 @@ Cross-cutting requirements for every LLM call, every agent, every generated arti
 - [ ] Every generated claim carries `evidence_refs`; empty array = validation failure = reject
 - [ ] `evidence_refs` validated post-generation: every referenced ID must exist and match the injected fact set
 - [ ] Contract used by: resume tailoring, cover letter, outreach messages, company dossier synthesis, skill-extract reasoning, market-brief writeups
-- [ ] Any generated string containing numbers, dates, company names, or role titles that don't appear in `facts` triggers a "hallucination suspected" flag → written to `llm_hallucination_log` for review
+- [x] Any generated string containing numbers, dates, company names, or role titles that don't appear in `facts` triggers a "hallucination suspected" flag → written to `llm_hallucination_log` for review. Suspect fragments detected by `findHallucinations` (`packages/ai/src/hallucination.ts:51`), persisted by `makeHallucinationLogger` (`apps/api/src/common/hallucination-log.ts:20-42`). A-M4: raw source excerpt (`snippet`) is encrypted at rest via ENCRYPTED_FIELDS + only written when the caller opts in with `includeRawSnippet:true`; `snippetHash`+`snippetOffset` are always written so an eval loop can locate the fragment without decrypting. 30-day retention worker at `apps/worker/src/hallucination-log-retention.worker.ts` (registered in `apps/worker/src/main.ts`).
 - [ ] Unit test: seed 3 facts → generation with schema → assert every output claim ID ∈ input IDs
 
 **Phase:** P1 (evidence graph) + P4 (resume/cover-letter engine consumes it)
