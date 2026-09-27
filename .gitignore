@@ -41,3 +41,7 @@ pnpm-debug.log*
 # generated
 apps/api/prisma/generated/
 docs/schema.png
+packages/*/eval-results/
+
+# claude code harness (per-user session cache, worktrees, transcripts)
+.claude/
