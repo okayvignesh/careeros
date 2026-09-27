@@ -1,6 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
-import { DeepSeekProvider, renderPrompt, wrapUntrusted } from '@careeros/ai';
+import { DeepSeekProvider, InjectionBlockedError, renderPrompt, wrapUntrusted } from '@careeros/ai';
 import { decrypt, encryptField, loadMasterKey } from '@careeros/secrets';
 import { type ExtractedFacts } from '@careeros/shared';
 import mammoth from 'mammoth';
@@ -99,6 +99,30 @@ export class ResumeService {
     }).catch(() => {});
   }
 
+  /**
+   * C-P3.7c: audit row for injection-blocked resume text. Same action string
+   * the wrap boundary emits (ai-safety.md item 5) so the audit UI groups both
+   * paths.
+   */
+  private async auditInjectionBlocked(
+    userId: string,
+    err: InjectionBlockedError,
+  ): Promise<void> {
+    await this.prisma.auditEvent
+      .create({
+        data: {
+          userId,
+          actor: 'user',
+          action: 'security.audit.injection_blocked',
+          resourceType: 'resume_extract',
+          payload: { source: 'resume', kinds: err.hits },
+        },
+      })
+      .catch(() => {
+        /* audit must not throw */
+      });
+  }
+
   async extractText(file: Express.Multer.File): Promise<string> {
     const name = file.originalname.toLowerCase();
     const isPdf = file.mimetype === 'application/pdf' || name.endsWith('.pdf');
@@ -135,6 +159,23 @@ export class ResumeService {
   }
 
   async parse(userId: string, text: string): Promise<ExtractedFacts> {
+    // C-P3.7c: injection scan runs BEFORE provider setup so a poisoned PDF
+    // never triggers a decrypt+provider spin-up. wrapUntrusted throws on
+    // `blocked` severity; audit + surface as 400 (single-shot ingest, no
+    // batch to skip within).
+    let wrapped: ReturnType<typeof wrapUntrusted>;
+    try {
+      wrapped = wrapUntrusted(text, 'resume');
+    } catch (err) {
+      if (err instanceof InjectionBlockedError) {
+        await this.auditInjectionBlocked(userId, err);
+        throw new BadRequestException(
+          'Resume text contains prompt-injection markers; extraction refused.',
+        );
+      }
+      throw err;
+    }
+
     await this.usage.assertCallAllowed(userId);
     const cfg = await this.prisma.providerConfig.findFirst({
       where: { userId, isDefault: true },
@@ -157,7 +198,6 @@ export class ResumeService {
       onCall: makeLlmAuditor(this.prisma, userId, this.logger, this.usageCache),
     });
 
-    const wrapped = wrapUntrusted(text, 'resume');
     const rendered = renderPrompt('resume-extract', { resume: wrapped.content });
 
     this.logger.info(
