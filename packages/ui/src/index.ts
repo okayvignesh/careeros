@@ -16,7 +16,24 @@ export {
 } from './primitives/Tooltip';
 export { StepShell } from './layout/StepShell';
 export { AppBackground } from './layout/AppBackground';
-export { CodeEditor, type CodeEditorProps, type CodeEditorLanguage, type CodeEditorTheme } from './CodeEditor';
+// CodeEditor lazily loads @monaco-editor/react (~2MB). Do NOT re-export from
+// the barrel or every page that imports from @careeros/ui pulls in Monaco.
+// Consumers wanting the editor: import { CodeEditor } from '@careeros/ui/CodeEditor';
+export type { CodeEditorProps, CodeEditorLanguage, CodeEditorTheme } from './CodeEditor';
 export { detectLanguage, type SupportedLanguage } from './detectLanguage';
 export { useDrafts, type UseDraftsResult } from './useDrafts';
 export { cn } from './utils';
+export {
+  dur,
+  ease,
+  spring,
+  tMicro,
+  tFast,
+  tStandard,
+  tDeliberate,
+  fadeUp,
+  staggerList,
+  listItem,
+  dialog,
+  popover,
+} from './motion';
