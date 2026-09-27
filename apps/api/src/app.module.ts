@@ -39,6 +39,7 @@ import { ApplicationsModule } from './modules/applications/applications.module';
 import { MatcherModule } from './modules/matcher/matcher.module';
 import { DossierModule } from './modules/dossier/dossier.module';
 import { QuestsModule } from './modules/quests/quests.module';
+import { AgentModule } from './modules/agent/agent.module';
 
 const loggerParams: Params = {
   pinoHttp: {
@@ -98,6 +99,7 @@ const loggerParams: Params = {
     MatcherModule,
     DossierModule,
     QuestsModule,
+    AgentModule,
     HealthModule,
     SetupModule,
   ],
