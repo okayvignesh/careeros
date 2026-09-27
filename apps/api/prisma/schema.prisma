@@ -59,6 +59,37 @@ model Session {
   @@map("sessions")
 }
 
+/// Failed sign-in attempts, per (email, ip). Exponential lockout is derived from
+/// the count of consecutive failures since the last success. Used by A-C1.
+model LoginAttempt {
+  id         String   @id @default(uuid()) @db.Uuid
+  email      String   /// normalized (NFC + lowercase)
+  ip         String
+  ok         Boolean  @default(false)
+  reason     String?
+  attemptedAt DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([email, ip, attemptedAt])
+  @@index([attemptedAt])
+  @@map("login_attempts")
+}
+
+/// Active sealed-cookie sessions, keyed by the `sessionId` embedded in the cookie
+/// payload (A-H3). Cookie is only accepted if a row exists AND its `iat` >=
+/// `revokedBefore`. Password reset bumps `revokedBefore` in one write.
+model ActiveSession {
+  id         String   @id @db.Uuid /// random 128-bit sessionId written into the cookie payload
+  userId     String   @db.Uuid
+  issuedAt   DateTime @default(now()) @db.Timestamptz(6)
+  expiresAt  DateTime @db.Timestamptz(6)
+  ip         String?
+  userAgent  String?
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("active_sessions")
+}
+
 /// Setup wizard state. One row per user (single-user default but multi-user-ready).
 model SetupStateRow {
   userId       String   @id @db.Uuid
