@@ -46,6 +46,12 @@ import {
   JOB_AUDIT_LOG_RETENTION,
   QUEUE_AUDIT_LOG_RETENTION,
 } from './audit-log-retention.worker.js';
+import {
+  GMAIL_WATCH_RENEWAL_CRON,
+  handleGmailWatchRenewal,
+  JOB_GMAIL_WATCH_RENEWAL,
+  QUEUE_GMAIL_WATCH_RENEWAL,
+} from './gmail-watch-renewal.worker.js';
 
 const logger = pino({
   name: 'careeros-worker',
@@ -263,8 +269,37 @@ async function bootstrap() {
     logger.error({ id: job?.id, err: err.message }, 'audit-log-retention job failed'),
   );
 
+  // E.4d: daily 03:00 UTC Gmail watch renewal. Static jobId keeps the schedule
+  // idempotent across restarts. Watches auto-expire 7d after users.watch, so
+  // running daily with a 24h renewal window guarantees at-least-one attempt.
+  const gmailWatchQueue = new Queue(QUEUE_GMAIL_WATCH_RENEWAL, { connection });
+  await gmailWatchQueue.add(
+    JOB_GMAIL_WATCH_RENEWAL,
+    {},
+    {
+      jobId: `repeat:${JOB_GMAIL_WATCH_RENEWAL}`,
+      repeat: { pattern: GMAIL_WATCH_RENEWAL_CRON },
+      removeOnComplete: { count: 30 },
+      removeOnFail: { count: 30 },
+    },
+  );
+  const gmailWatchWorker = new Worker(
+    QUEUE_GMAIL_WATCH_RENEWAL,
+    async (job) => {
+      if (job.name !== JOB_GMAIL_WATCH_RENEWAL) {
+        logger.warn({ name: job.name }, 'unknown gmail-watch-renewal job name');
+        return { skipped: true };
+      }
+      return handleGmailWatchRenewal(prisma, logger);
+    },
+    { connection, concurrency: 1 },
+  );
+  gmailWatchWorker.on('failed', (job, err) =>
+    logger.error({ id: job?.id, err: err.message }, 'gmail-watch-renewal job failed'),
+  );
+
   logger.info(
-    `worker up, listening on queues '${QUEUE_GITHUB}', '${QUEUE_GITLAB}', '${QUEUE_EMBEDDING}', '${QUEUE_RETENTION}', '${QUEUE_CORPUS_REFRESH}', '${QUEUE_MARKET_SNAPSHOT}', '${QUEUE_AUDIT_LOG_RETENTION}'`,
+    `worker up, listening on queues '${QUEUE_GITHUB}', '${QUEUE_GITLAB}', '${QUEUE_EMBEDDING}', '${QUEUE_RETENTION}', '${QUEUE_CORPUS_REFRESH}', '${QUEUE_MARKET_SNAPSHOT}', '${QUEUE_AUDIT_LOG_RETENTION}', '${QUEUE_GMAIL_WATCH_RENEWAL}'`,
   );
 }
 
