@@ -182,6 +182,56 @@ describe('SecurityMiddleware CSRF (A-H1)', () => {
     expect((res2 as unknown as { statusCode: number }).statusCode).toBe(403);
   });
 
+  it('backlog:#70: cross-site POST is allowed when Origin is in TRUSTED_ORIGINS', async () => {
+    // Dev topology (web:3000 -> api:3001) is same-site but NOT same-origin,
+    // so Sec-Fetch-Site='cross-site' arrives at the api. The operator-managed
+    // TRUSTED_ORIGINS allowlist carves that specific origin out; anything
+    // else on cross-site still 403s (covered above).
+    const origin = 'http://web.dev.local:3000';
+    const prevTrusted = process.env.TRUSTED_ORIGINS;
+    process.env.TRUSTED_ORIGINS = `${origin},http://other.trusted:3000`;
+    try {
+      const { mw } = makeMiddleware([sessionId]);
+      const req = makeReq({
+        cookies: { [SESSION_COOKIE_NAME]: sealed, [CSRF_COOKIE_NAME]: csrf },
+        secFetchSite: 'cross-site',
+        headers: { [CSRF_HEADER_NAME]: csrf, origin },
+      });
+      const res = makeRes();
+      const next = vi.fn();
+      await mw.use(req, res, next);
+      expect(next).toHaveBeenCalledOnce();
+      expect((res as unknown as { statusCode: number }).statusCode).toBe(200);
+    } finally {
+      if (prevTrusted === undefined) delete process.env.TRUSTED_ORIGINS;
+      else process.env.TRUSTED_ORIGINS = prevTrusted;
+    }
+  });
+
+  it('backlog:#70: cross-site POST with untrusted Origin still 403s', async () => {
+    // Guard against a regression where the carve-out is too broad. Same
+    // request shape as above but the Origin is NOT in TRUSTED_ORIGINS.
+    const prevTrusted = process.env.TRUSTED_ORIGINS;
+    process.env.TRUSTED_ORIGINS = 'http://only.this.one:3000';
+    try {
+      const { mw, prisma } = makeMiddleware([sessionId]);
+      const req = makeReq({
+        cookies: { [SESSION_COOKIE_NAME]: sealed, [CSRF_COOKIE_NAME]: csrf },
+        secFetchSite: 'cross-site',
+        headers: { [CSRF_HEADER_NAME]: csrf, origin: 'http://attacker.example:3000' },
+      });
+      const res = makeRes();
+      const next = vi.fn();
+      await mw.use(req, res, next);
+      expect(next).not.toHaveBeenCalled();
+      expect((res as unknown as { statusCode: number }).statusCode).toBe(403);
+      expect(prisma.audits[0].payload).toMatchObject({ reason: 'sec_fetch_site' });
+    } finally {
+      if (prevTrusted === undefined) delete process.env.TRUSTED_ORIGINS;
+      else process.env.TRUSTED_ORIGINS = prevTrusted;
+    }
+  });
+
   it('A-H3: revoked sessionId cookie is stripped so downstream sees no session', async () => {
     const { mw } = makeMiddleware([]); // sessionId NOT in active_sessions
     const req = makeReq({
