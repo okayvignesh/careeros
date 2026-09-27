@@ -1,0 +1,78 @@
+# Career OS Slack app manifest (E.2).
+#
+# Load this via: https://api.slack.com/apps -> "Create New App" -> "From an app manifest".
+# Fill in host / redirect URLs before submitting (see docs/slack-setup.md).
+#
+# This app is single-workspace / single-user. Do NOT list it in the Slack
+# App Directory - it is a personal tool.
+
+display_information:
+  name: Career OS
+  description: Self-hosted AI career OS assistant
+  background_color: "#0b0f19"
+  long_description: >
+    Career OS delivers daily briefs, knowledge quizzes, and approval prompts
+    for your job-search workflow. Self-hosted, single-user, everything stays
+    on your own infrastructure.
+
+features:
+  bot_user:
+    display_name: Career OS
+    always_online: true
+
+  slash_commands:
+    - command: /quiz
+      description: Start a knowledge quiz
+      usage_hint: "[topic]"
+      url: https://REPLACE_ME.example.com/webhooks/slack/commands
+      should_escape: false
+    - command: /jobs
+      description: Show top matched jobs
+      usage_hint: "[count]"
+      url: https://REPLACE_ME.example.com/webhooks/slack/commands
+      should_escape: false
+    - command: /approve
+      description: Approve a queued item
+      usage_hint: "<approval_id>"
+      url: https://REPLACE_ME.example.com/webhooks/slack/commands
+      should_escape: false
+    - command: /review
+      description: Review yesterday's activity
+      url: https://REPLACE_ME.example.com/webhooks/slack/commands
+      should_escape: false
+    - command: /brief
+      description: Post the daily brief now
+      url: https://REPLACE_ME.example.com/webhooks/slack/commands
+      should_escape: false
+    - command: /pause
+      description: Pause notifications
+      url: https://REPLACE_ME.example.com/webhooks/slack/commands
+      should_escape: false
+    - command: /resume
+      description: Resume notifications
+      url: https://REPLACE_ME.example.com/webhooks/slack/commands
+      should_escape: false
+
+oauth_config:
+  redirect_urls:
+    - https://REPLACE_ME.example.com/webhooks/slack/oauth/callback
+  scopes:
+    bot:
+      - chat:write
+      - commands
+      - im:history
+      - im:read
+      - im:write
+
+settings:
+  event_subscriptions:
+    request_url: https://REPLACE_ME.example.com/webhooks/slack/events
+    bot_events:
+      - message.im
+      - app_mention
+  interactivity:
+    is_enabled: true
+    request_url: https://REPLACE_ME.example.com/webhooks/slack/interactive
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

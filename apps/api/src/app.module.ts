@@ -42,6 +42,7 @@ import { QuestsModule } from './modules/quests/quests.module';
 import { AgentModule } from './modules/agent/agent.module';
 import { ApprovalsModule } from './modules/approvals/approvals.module';
 import { GmailModule } from './modules/gmail/gmail.module';
+import { SlackModule } from './modules/slack/slack.module';
 
 const loggerParams: Params = {
   pinoHttp: {
@@ -104,6 +105,7 @@ const loggerParams: Params = {
     AgentModule,
     ApprovalsModule,
     GmailModule,
+    SlackModule,
     HealthModule,
     SetupModule,
   ],

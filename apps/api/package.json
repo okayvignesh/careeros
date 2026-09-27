@@ -33,6 +33,7 @@
     "socket.io": "^4.8.1",
     "@prisma/client": "^6.19.3",
     "@simplewebauthn/server": "^11",
+    "@slack/web-api": "^7.11.0",
     "@simplewebauthn/types": "^11",
     "bullmq": "^5.13.0",
     "google-auth-library": "^9.15.0",

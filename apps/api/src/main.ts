@@ -82,7 +82,10 @@ export function buildSecurityMiddleware(): RequestHandler[] {
 async function bootstrap() {
   runStartupChecks();
 
-  const app = await NestFactory.create(AppModule, { bodyParser: true, bufferLogs: true });
+  // E.2: `rawBody: true` keeps `req.rawBody` populated so the Slack webhook
+  // controller can HMAC-verify the exact bytes Slack signed. Nest still parses
+  // JSON / urlencoded normally for every other route.
+  const app = await NestFactory.create(AppModule, { bodyParser: true, rawBody: true, bufferLogs: true });
   app.useLogger(app.get(Logger));
 
   for (const mw of buildSecurityMiddleware()) app.use(mw);
