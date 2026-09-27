@@ -1,0 +1,16 @@
+{
+  "source": "indeed",
+  "subject": "Sponsored: Cloud Engineer",
+  "from": "alert@indeed.com",
+  "receivedAt": "2026-01-01T09:00:00.000Z",
+  "jobs": [
+    {
+      "title": "Sponsored: Cloud Engineer",
+      "company": "MegaCloud",
+      "location": "Remote",
+      "url": "https://www.indeed.com/pagead/clk?jk=99aabbccddeeff00",
+      "snippet": "MegaCloud - Remote",
+      "postedAt": null
+    }
+  ]
+}

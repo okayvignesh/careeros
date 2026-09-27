@@ -1,0 +1,16 @@
+{
+  "source": "indeed",
+  "subject": "Apply to Product Designer",
+  "from": "alert@indeed.com",
+  "receivedAt": "2026-01-01T09:00:00.000Z",
+  "jobs": [
+    {
+      "title": "Product Designer",
+      "company": "DesignCo",
+      "location": "Portland, OR Apply",
+      "url": "https://www.indeed.com/rc/clk?jk=6600aa00bb00cc00",
+      "snippet": "DesignCo - Portland, OR Apply",
+      "postedAt": null
+    }
+  ]
+}

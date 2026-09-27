@@ -1,0 +1,16 @@
+{
+  "source": "indeed",
+  "subject": "Support Engineer role",
+  "from": "alert@indeed.com",
+  "receivedAt": "2026-01-01T09:00:00.000Z",
+  "jobs": [
+    {
+      "title": "Support Engineer",
+      "company": null,
+      "location": null,
+      "url": "https://www.indeed.com/rc/clk?jk=8800aabbccddeeff",
+      "snippet": null,
+      "postedAt": null
+    }
+  ]
+}

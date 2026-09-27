@@ -1,0 +1,16 @@
+{
+  "source": "indeed",
+  "subject": "New job for you on Indeed",
+  "from": "alert@indeed.com",
+  "receivedAt": "2026-01-01T09:00:00.000Z",
+  "jobs": [
+    {
+      "title": "Software Developer",
+      "company": "Acme Corp",
+      "location": "Remote",
+      "url": "https://www.indeed.com/rc/clk?jk=aabbccddeeff0011",
+      "snippet": "Acme Corp - Remote",
+      "postedAt": null
+    }
+  ]
+}

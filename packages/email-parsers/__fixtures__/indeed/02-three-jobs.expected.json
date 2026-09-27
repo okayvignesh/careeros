@@ -1,0 +1,32 @@
+{
+  "source": "indeed",
+  "subject": "3 new jobs matching Software Engineer",
+  "from": "alert@indeed.com",
+  "receivedAt": "2026-01-01T09:00:00.000Z",
+  "jobs": [
+    {
+      "title": "Junior Engineer",
+      "company": "Startup Inc",
+      "location": "Boston, MA",
+      "url": "https://www.indeed.com/rc/clk?jk=1000000000000001",
+      "snippet": "Startup Inc - Boston, MA",
+      "postedAt": null
+    },
+    {
+      "title": "Mid-Level Engineer",
+      "company": "Growthly",
+      "location": "Austin, TX",
+      "url": "https://www.indeed.com/rc/clk?jk=1000000000000002",
+      "snippet": "Growthly - Austin, TX",
+      "postedAt": null
+    },
+    {
+      "title": "Senior Engineer",
+      "company": "Enterprise Co",
+      "location": "Seattle, WA",
+      "url": "https://www.indeed.com/rc/clk?jk=1000000000000003",
+      "snippet": "Enterprise Co - Seattle, WA",
+      "postedAt": null
+    }
+  ]
+}

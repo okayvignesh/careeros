@@ -1,0 +1,48 @@
+{
+  "source": "indeed",
+  "subject": "5 new engineering jobs in Chicago",
+  "from": "emails@indeed.com",
+  "receivedAt": "2026-01-01T09:00:00.000Z",
+  "jobs": [
+    {
+      "title": "Backend Engineer",
+      "company": "AlphaTech",
+      "location": "Chicago, IL",
+      "url": "https://www.indeed.com/rc/clk?jk=7700000000000001",
+      "snippet": "AlphaTech - Chicago, IL",
+      "postedAt": null
+    },
+    {
+      "title": "Frontend Engineer",
+      "company": "BetaWorks",
+      "location": "Chicago, IL",
+      "url": "https://www.indeed.com/rc/clk?jk=7700000000000002",
+      "snippet": "BetaWorks - Chicago, IL",
+      "postedAt": null
+    },
+    {
+      "title": "Fullstack Engineer",
+      "company": "GammaSoft",
+      "location": "Chicago, IL",
+      "url": "https://www.indeed.com/rc/clk?jk=7700000000000003",
+      "snippet": "GammaSoft - Chicago, IL",
+      "postedAt": null
+    },
+    {
+      "title": "Mobile Engineer",
+      "company": "DeltaApps",
+      "location": "Chicago, IL",
+      "url": "https://www.indeed.com/rc/clk?jk=7700000000000004",
+      "snippet": "DeltaApps - Chicago, IL",
+      "postedAt": null
+    },
+    {
+      "title": "Platform Engineer",
+      "company": "EpsilonCloud",
+      "location": "Chicago, IL",
+      "url": "https://www.indeed.com/rc/clk?jk=7700000000000005",
+      "snippet": "EpsilonCloud - Chicago, IL",
+      "postedAt": null
+    }
+  ]
+}

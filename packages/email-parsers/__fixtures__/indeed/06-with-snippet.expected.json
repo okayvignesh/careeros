@@ -1,0 +1,16 @@
+{
+  "source": "indeed",
+  "subject": "Data Scientist - Insight Co",
+  "from": "alert@indeed.com",
+  "receivedAt": "2026-01-01T09:00:00.000Z",
+  "jobs": [
+    {
+      "title": "Data Scientist",
+      "company": "Insight Co",
+      "location": "San Diego, CA",
+      "url": "https://www.indeed.com/rc/clk?jk=5500000000005500",
+      "snippet": "Insight Co - San Diego, CA - $150K/year",
+      "postedAt": null
+    }
+  ]
+}
