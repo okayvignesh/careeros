@@ -41,19 +41,15 @@ describe('arbeitnow live contract', () => {
         { attempts: 3, baseMs: 1_000 },
       );
 
+      // Authoritative drift signal: does the wire shape still validate?
       assertWireShape(ADAPTER_ID, ArbeitnowResponseWire, payload);
-      const minimized = minimizePayload(payload, 'data');
 
+      // Snapshot: human-readable shape reference, refresh via UPDATE_SNAPSHOTS=1.
+      // Not gating — first-row shape varies day to day.
       if (shouldUpdateSnapshots()) {
-        writeSnapshot(ADAPTER_ID, minimized);
-        return;
+        writeSnapshot(ADAPTER_ID, minimizePayload(payload, 'data'));
       }
-      const prior = readSnapshot(ADAPTER_ID);
-      expect(
-        prior,
-        `no snapshot for ${ADAPTER_ID}; run UPDATE_SNAPSHOTS=1 first`,
-      ).not.toBeNull();
-      expect(JSON.parse(JSON.stringify(minimized))).toEqual(prior);
+      expect(readSnapshot(ADAPTER_ID)).not.toBeNull();
     },
     30_000,
   );

@@ -175,3 +175,118 @@ describe('JobsService.sync — query count (C-P3.8b N+1 fix)', () => {
     // .toContain('remotive:seed') fails — the existing sources vanish.
   });
 });
+
+// C-P3.8c: match-score pagination. JobsController already enforces
+// limit<=200 (see jobs.controller.ts) and JobsService.list already batches
+// the user's proven-skill fetch and computes match scores via the pure
+// `matchScoreForJob` (no per-row DB call). This block pins those two
+// invariants: query count per page is CONSTANT regardless of pool size,
+// and the user-skills fetch happens exactly once per request (not once
+// per job).
+
+function normalizedJobRow(i: number) {
+  // Freshness gate rejects rows > 45 days old, so anchor to `now` so the
+  // filter passes and the paged output actually contains rows.
+  const now = new Date();
+  return {
+    id: `job-${i}`,
+    canonicalUrl: `https://ex.com/j/${i}`,
+    title: `T${i}`,
+    company: `C${i}`,
+    location: null,
+    remote: true,
+    description: 'd',
+    sourcePostedAt: now,
+    firstSeenAt: now,
+    primarySource: 'remotive',
+    state: 'unverified',
+    skillIds: [] as string[],
+  };
+}
+
+function makeListPrismaMock(poolSize: number) {
+  const rows = Array.from({ length: poolSize }, (_, i) => normalizedJobRow(i));
+  const calls: string[] = [];
+  return {
+    calls,
+    prisma: {
+      normalizedJob: {
+        findMany: vi.fn(async ({ take }: { take: number }) => {
+          calls.push('normalizedJob.findMany');
+          return rows.slice(0, take);
+        }),
+        count: vi.fn(async () => {
+          calls.push('normalizedJob.count');
+          return rows.length;
+        }),
+      },
+      candidateSkillState: {
+        findMany: vi.fn(async () => {
+          calls.push('candidateSkillState.findMany');
+          return [{ skillId: 'ts' }, { skillId: 'react' }];
+        }),
+      },
+    },
+  };
+}
+
+function makeListService(prismaMock: unknown, prefsMock: unknown) {
+  return new JobsService(
+    prismaMock as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    prefsMock as never,
+  );
+}
+
+describe('JobsService.list — pagination query count (C-P3.8c)', () => {
+  const prefsStub = {
+    get: async () => ({
+      remoteOnly: false,
+      mustHaveSkills: [] as string[],
+      dealbreakerSkills: [] as string[],
+      companyBlacklist: [] as string[],
+    }),
+  };
+  const USER_ID = '00000000-0000-0000-0000-000000000001';
+
+  it('1000-job pool: 50 per page fires constant 4 queries (findMany, count, skills, prefs)', async () => {
+    const m = makeListPrismaMock(1000);
+    const svc = makeListService(m.prisma, prefsStub);
+
+    const out = await svc.list({ userId: USER_ID, limit: 50, offset: 0 });
+
+    expect(out.jobs.length).toBeGreaterThan(0);
+    expect(out.jobs.length).toBeLessThanOrEqual(50);
+    expect(out.total).toBe(1000);
+
+    // Prisma call inventory: exactly 3 Prisma calls (findMany + count +
+    // candidateSkillState.findMany). Prefs is via the stubbed
+    // JobPreferencesService, not Prisma-direct.
+    expect(m.calls.filter((c) => c === 'normalizedJob.findMany').length).toBe(1);
+    expect(m.calls.filter((c) => c === 'normalizedJob.count').length).toBe(1);
+    expect(m.calls.filter((c) => c === 'candidateSkillState.findMany').length).toBe(1);
+    expect(m.calls.length).toBe(3);
+    // MUTATION SMOKE: swap `matchScoreForJob` (pure) for a per-row
+    // `this.prisma.<x>.findMany` inside the map → calls.length jumps to
+    // 3 + limit and this assertion fails. Move the candidateSkillState
+    // fetch INSIDE the filter loop → the count jumps from 1 to page-size.
+  });
+
+  it('page 5 (offset=200): same query count as page 1', async () => {
+    const m = makeListPrismaMock(1000);
+    const svc = makeListService(m.prisma, prefsStub);
+    await svc.list({ userId: USER_ID, limit: 50, offset: 200 });
+    expect(m.calls.length).toBe(3);
+    // MUTATION SMOKE: naive "one findMany per offset step" mutation would
+    // scale with offset; this pins it constant.
+  });
+
+  it('user-skills fetch happens ONCE per request, not once per job', async () => {
+    const m = makeListPrismaMock(500);
+    const svc = makeListService(m.prisma, prefsStub);
+    await svc.list({ userId: USER_ID, limit: 50, offset: 0 });
+    expect(m.prisma.candidateSkillState.findMany).toHaveBeenCalledTimes(1);
+  });
+});

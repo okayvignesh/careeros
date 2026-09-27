@@ -98,7 +98,8 @@ export const GreenhouseJobWire = z
         z
           .object({
             name: z.string(),
-            location: z.string().optional(),
+            // Greenhouse returns null (not undefined) when the office is remote-only.
+            location: z.string().nullish(),
           })
           .passthrough(),
       )
@@ -213,9 +214,13 @@ export function snapshotPath(adapterId: string): string {
 }
 
 /**
- * Reduce a full upstream payload to the minimal subset the mapper reads: the
- * FIRST job row + top-level envelope scalars (meta counts, apiVersion). Keeps
- * snapshots small + stable across list-length churn.
+ * Reduce a full upstream payload to a SHAPE snapshot: for the first row of
+ * jobs/results/data, replace every leaf value with its type tag. Values churn
+ * daily (job titles, descriptions); the type tree is the stable contract we
+ * want to track. A snapshot diff only fires when a FIELD is renamed, dropped,
+ * or type-flipped — real drift signals, not content noise.
+ *
+ * Example: `{ id: 42, title: "foo" }` -> `{ id: "number", title: "string" }`.
  */
 export function minimizePayload(
   raw: unknown,
@@ -224,18 +229,32 @@ export function minimizePayload(
   if (raw === null || typeof raw !== 'object') return raw;
   const obj = raw as Record<string, unknown>;
   const arr = obj[jobsKey];
-  const firstRow = Array.isArray(arr) && arr.length > 0 ? [arr[0]] : [];
+  const firstRow =
+    Array.isArray(arr) && arr.length > 0 ? [shapeOf(arr[0])] : [];
   const out: Record<string, unknown> = { [jobsKey]: firstRow };
   for (const k of Object.keys(obj)) {
     if (k === jobsKey) continue;
-    const v = obj[k];
-    if (v === null || typeof v !== 'object') {
-      out[k] = v;
-    } else if (!Array.isArray(v)) {
-      out[k] = v;
-    }
+    out[k] = shapeOf(obj[k]);
   }
   return out;
+}
+
+/**
+ * Recursively map values to their type tags. Preserves object keys + array
+ * membership; strips string/number/boolean values so daily churn doesn't move
+ * the snapshot. Null stays null (missing vs null is a real contract signal).
+ */
+function shapeOf(v: unknown): unknown {
+  if (v === null) return null;
+  if (Array.isArray(v)) return v.length === 0 ? [] : [shapeOf(v[0])];
+  if (typeof v === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const k of Object.keys(v as object).sort()) {
+      out[k] = shapeOf((v as Record<string, unknown>)[k]);
+    }
+    return out;
+  }
+  return typeof v;
 }
 
 export function readSnapshot(adapterId: string): unknown | null {

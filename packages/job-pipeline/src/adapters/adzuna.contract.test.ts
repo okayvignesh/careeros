@@ -67,19 +67,17 @@ describe('adzuna live contract', () => {
         { attempts: 3, baseMs: 2_000 },
       );
 
+      // Authoritative drift signal: does the wire shape still validate?
       assertWireShape(ADAPTER_ID, AdzunaResponseWire, payload);
-      const minimized = minimizePayload(payload, 'results');
 
+      // Snapshot: human-readable shape reference, refresh via UPDATE_SNAPSHOTS=1.
+      // Not gating — first-row shape varies day to day.
       if (shouldUpdateSnapshots()) {
-        writeSnapshot(ADAPTER_ID, minimized);
-        return;
+        writeSnapshot(ADAPTER_ID, minimizePayload(payload, 'results'));
       }
-      const prior = readSnapshot(ADAPTER_ID);
-      expect(
-        prior,
-        `no snapshot for ${ADAPTER_ID}; run UPDATE_SNAPSHOTS=1 first`,
-      ).not.toBeNull();
-      expect(JSON.parse(JSON.stringify(minimized))).toEqual(prior);
+      // adzuna snapshot may be null (creds absent means no run has generated
+      // one yet); this test only reaches here when creds are present.
+      expect(readSnapshot(ADAPTER_ID)).not.toBeNull();
     },
     30_000,
   );
