@@ -1,0 +1,25 @@
+{
+  "name": "@careeros/testing",
+  "version": "0.0.1",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch --preserveWatchOutput",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@axe-core/playwright": "^4.10.0",
+    "@playwright/test": "^1.48.0",
+    "@types/node": "^22.7.5",
+    "fast-check": "^4.10.2",
+    "msw": "^2.6.0",
+    "testcontainers": "^10.13.2",
+    "typescript": "^5.6.3"
+  }
+}
