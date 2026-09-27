@@ -3,6 +3,8 @@ export { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 export { Input } from './primitives/Input';
 export { Glass } from './primitives/Glass';
 export { Eyebrow } from './primitives/Eyebrow';
+export { SectionHeader } from './primitives/SectionHeader';
+export { Stat } from './primitives/Stat';
 export { SetupProgressBar, type ProgressStep } from './primitives/SetupProgressBar';
 export { PageReveal } from './primitives/PageReveal';
 export {
