@@ -7,7 +7,7 @@ import {
   UNTRUSTED_SYSTEM_CLAUSE,
   wrapUntrusted,
 } from '@careeros/ai';
-import { safeFetch, SsrfBlockedError, type AssertPublicUrlOptions } from '@careeros/shared';
+import { safeFetch, SsrfBlockedError, type AssertPublicUrlOptions } from '@careeros/shared/net';
 import { decrypt, loadMasterKey } from '@careeros/secrets';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UsageService } from '../usage/usage.service';

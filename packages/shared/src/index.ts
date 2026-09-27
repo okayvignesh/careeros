@@ -11,4 +11,5 @@ export * from './chunk';
 export * from './rubrics';
 export * from './match';
 export * from './applications';
-export * from './net';
+// './net' NOT re-exported here on purpose: it uses `node:dns`/`node:net` and
+// must not leak into client bundles. Consumers import from '@careeros/shared/net'.

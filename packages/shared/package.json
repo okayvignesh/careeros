@@ -9,7 +9,8 @@
     "./schemas": { "types": "./dist/schemas/index.d.ts", "default": "./dist/schemas/index.js" },
     "./constants": { "types": "./dist/constants/index.d.ts", "default": "./dist/constants/index.js" },
     "./redact": { "types": "./dist/redact.d.ts", "default": "./dist/redact.js" },
-    "./retry": { "types": "./dist/retry.d.ts", "default": "./dist/retry.js" }
+    "./retry": { "types": "./dist/retry.d.ts", "default": "./dist/retry.js" },
+    "./net": { "types": "./dist/net/index.d.ts", "default": "./dist/net/index.js" }
   },
   "scripts": {
     "build": "tsc",

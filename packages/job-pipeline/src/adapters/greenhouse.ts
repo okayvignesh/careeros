@@ -1,4 +1,5 @@
-import { retry, safeFetch, type AssertPublicUrlOptions } from '@careeros/shared';
+import { retry } from '@careeros/shared';
+import { safeFetch, type AssertPublicUrlOptions } from '@careeros/shared/net';
 import type { JobSourceAdapter, RawJob } from '../types';
 import { MalformedResponseError } from './errors';
 
