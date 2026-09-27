@@ -16,4 +16,5 @@ export { StepShell } from './layout/StepShell';
 export { AppBackground } from './layout/AppBackground';
 export { CodeEditor, type CodeEditorProps, type CodeEditorLanguage, type CodeEditorTheme } from './CodeEditor';
 export { detectLanguage, type SupportedLanguage } from './detectLanguage';
+export { useDrafts, type UseDraftsResult } from './useDrafts';
 export { cn } from './utils';
