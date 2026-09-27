@@ -320,7 +320,7 @@ importers:
   packages/resume-render:
     dependencies:
       '@react-pdf/renderer':
-        specifier: ^4.1.6
+        specifier: ^4.9.0
         version: 4.9.0(react@18.3.1)
       docx:
         specifier: ^9.5.1

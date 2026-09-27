@@ -3,6 +3,10 @@
   "compilerOptions": {
     "module": "commonjs",
     "moduleResolution": "node",
+    "paths": {
+      "@careeros/shared/net": ["../../packages/shared/dist/net/index.d.ts"]
+    },
+    "baseUrl": ".",
     "target": "ES2022",
     "outDir": "./dist",
     "rootDir": "./src",
