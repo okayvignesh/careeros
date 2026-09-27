@@ -362,26 +362,10 @@ export class MarketBriefService {
     pool: Array<{ skillIds: string[]; company: string; remote: boolean; sourcePostedAt: Date | null; firstSeenAt: Date }>,
     windowStart: Date,
   ): BriefStats {
-    const skillCounts = new Map<string, number>();
-    const companyCounts = new Map<string, number>();
-    let remoteCount = 0;
-    let newCount = 0;
-    for (const j of pool) {
-      for (const s of j.skillIds) skillCounts.set(s, (skillCounts.get(s) ?? 0) + 1);
-      companyCounts.set(j.company, (companyCounts.get(j.company) ?? 0) + 1);
-      if (j.remote) remoteCount++;
-      const posted = j.sourcePostedAt ?? j.firstSeenAt;
-      if (posted >= windowStart) newCount++;
-    }
-    const sortDesc = <T>(entries: Array<[T, number]>) => entries.sort((a, b) => b[1] - a[1]).slice(0, TOP_N);
-    return {
-      windowDays: WINDOW_DAYS,
-      totalCount: pool.length,
-      newCount,
-      remoteShare: pool.length === 0 ? 0 : remoteCount / pool.length,
-      topSkills: sortDesc([...skillCounts.entries()]).map(([skillId, count]) => ({ skillId, count })),
-      topCompanies: sortDesc([...companyCounts.entries()]).map(([company, count]) => ({ company, count })),
-    };
+    // ponytail: kept as a method-level indirection so the synthesis path is
+    // untouched; C-P3.4 snapshot service imports the exported computeStatsFn
+    // directly to keep its own compute pure.
+    return computeStatsFn(pool, windowStart);
   }
 
   private toDto(row: {
@@ -455,6 +439,38 @@ export class MarketBriefService {
       return null;
     }
   }
+}
+
+/**
+ * Shared pure-function stats compute used by both `MarketBriefService.generate`
+ * (on-demand brief synthesis) and `SnapshotService.computeSnapshot` (C-P3.4
+ * weekly persisted snapshots). No I/O; the caller supplies the pre-filtered
+ * pool + windowStart. Exported so both callers share the exact same numbers.
+ */
+export function computeStatsFn(
+  pool: Array<{ skillIds: string[]; company: string; remote: boolean; sourcePostedAt: Date | null; firstSeenAt: Date }>,
+  windowStart: Date,
+): BriefStats {
+  const skillCounts = new Map<string, number>();
+  const companyCounts = new Map<string, number>();
+  let remoteCount = 0;
+  let newCount = 0;
+  for (const j of pool) {
+    for (const s of j.skillIds) skillCounts.set(s, (skillCounts.get(s) ?? 0) + 1);
+    companyCounts.set(j.company, (companyCounts.get(j.company) ?? 0) + 1);
+    if (j.remote) remoteCount++;
+    const posted = j.sourcePostedAt ?? j.firstSeenAt;
+    if (posted >= windowStart) newCount++;
+  }
+  const sortDesc = <T>(entries: Array<[T, number]>) => entries.sort((a, b) => b[1] - a[1]).slice(0, TOP_N);
+  return {
+    windowDays: WINDOW_DAYS,
+    totalCount: pool.length,
+    newCount,
+    remoteShare: pool.length === 0 ? 0 : remoteCount / pool.length,
+    topSkills: sortDesc([...skillCounts.entries()]).map(([skillId, count]) => ({ skillId, count })),
+    topCompanies: sortDesc([...companyCounts.entries()]).map(([company, count]) => ({ company, count })),
+  };
 }
 
 /**
