@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { matchScoreForJob, type JobSkillExtraction, type MatchResult } from '@careeros/shared';
-import { DeepSeekProvider, renderPrompt, wrapUntrusted } from '@careeros/ai';
+import { DeepSeekProvider, InjectionBlockedError, renderPrompt, wrapUntrusted } from '@careeros/ai';
 import { decrypt, loadMasterKey } from '@careeros/secrets';
 import {
   adapters as allAdapters,
@@ -371,6 +371,14 @@ export class JobsService {
         });
         stats.extracted++;
       } catch (err) {
+        // C-P3.7a: blocked injection audits + skips (per ai-safety.md item 5)
+        // so a single poisoned JD never sinks the whole batch. Non-injection
+        // errors still bump `errors`; the tail recomputation of `skipped`
+        // below folds injection-blocked jobs into the skipped bucket.
+        if (err instanceof InjectionBlockedError) {
+          await this.auditInjectionBlocked(userId, job.id, err);
+          continue;
+        }
         this.logger.warn(`skill extraction failed for job ${job.id}: ${(err as Error).message}`);
         stats.errors++;
       }
@@ -387,13 +395,52 @@ export class JobsService {
     const catalogue = await this.prisma.skill.findMany({ select: { id: true, name: true } });
     const knownIds = new Set(catalogue.map((s) => s.id));
     const catalogueRendered = catalogue.map((s) => `- ${s.id} (${s.name})`).join('\n');
-    const extracted = await this.extractSkillsForOne(userId, provider, job, catalogueRendered);
+    let extracted: JobSkillExtraction;
+    try {
+      extracted = await this.extractSkillsForOne(userId, provider, job, catalogueRendered);
+    } catch (err) {
+      // C-P3.7a: single-job path returns 400 rather than 500 on a poisoned JD,
+      // and audits `security.audit.injection_blocked` so the operator can review.
+      if (err instanceof InjectionBlockedError) {
+        await this.auditInjectionBlocked(userId, job.id, err);
+        throw new BadRequestException(
+          'Job description contains prompt-injection markers; skill extraction refused.',
+        );
+      }
+      throw err;
+    }
     const validIds = extracted.skillIds.filter((id) => knownIds.has(id));
     await this.prisma.normalizedJob.update({
       where: { id: job.id },
       data: { skillIds: validIds, skillsExtractedAt: new Date() },
     });
     return { skillIds: validIds };
+  }
+
+  /**
+   * C-P3.7a: dedicated audit row per blocked ingest. `action` string matches
+   * the code emitted by `wrapUntrusted`'s audit hook (ai-safety.md item 5) so
+   * downstream dashboards can group both sources of the same event.
+   */
+  private async auditInjectionBlocked(
+    userId: string,
+    jobId: string,
+    err: InjectionBlockedError,
+  ): Promise<void> {
+    await this.prisma.auditEvent
+      .create({
+        data: {
+          userId,
+          actor: 'system',
+          action: 'security.audit.injection_blocked',
+          resourceType: 'normalized_job',
+          resourceId: jobId,
+          payload: { jobId, source: 'job-description', kinds: err.hits },
+        },
+      })
+      .catch(() => {
+        /* audit must not throw */
+      });
   }
 
   private async extractSkillsForOne(
