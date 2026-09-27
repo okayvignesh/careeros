@@ -40,6 +40,12 @@ import {
   MARKET_SNAPSHOT_CRON,
   QUEUE_MARKET_SNAPSHOT,
 } from './market-snapshot.worker.js';
+import {
+  AUDIT_LOG_RETENTION_CRON,
+  handleAuditLogRetention,
+  JOB_AUDIT_LOG_RETENTION,
+  QUEUE_AUDIT_LOG_RETENTION,
+} from './audit-log-retention.worker.js';
 
 const logger = pino({
   name: 'careeros-worker',
@@ -227,8 +233,38 @@ async function bootstrap() {
     logger.error({ id: job?.id, err: err.message }, 'market-snapshot job failed'),
   );
 
+  // F.6b: daily 365-day retention on `audit_log`. Cron 04:00 UTC. Calls the
+  // SECURITY DEFINER stored proc `audit_log_retention_prune()` (see migration
+  // 20261012000005). Static jobId keeps the schedule idempotent across worker
+  // restarts.
+  const auditLogRetentionQueue = new Queue(QUEUE_AUDIT_LOG_RETENTION, { connection });
+  await auditLogRetentionQueue.add(
+    JOB_AUDIT_LOG_RETENTION,
+    {},
+    {
+      jobId: `repeat:${JOB_AUDIT_LOG_RETENTION}`,
+      repeat: { pattern: AUDIT_LOG_RETENTION_CRON },
+      removeOnComplete: { count: 30 },
+      removeOnFail: { count: 30 },
+    },
+  );
+  const auditLogRetentionWorker = new Worker(
+    QUEUE_AUDIT_LOG_RETENTION,
+    async (job) => {
+      if (job.name !== JOB_AUDIT_LOG_RETENTION) {
+        logger.warn({ name: job.name }, 'unknown audit-log-retention job name');
+        return { skipped: true };
+      }
+      return handleAuditLogRetention(prisma, logger);
+    },
+    { connection, concurrency: 1 },
+  );
+  auditLogRetentionWorker.on('failed', (job, err) =>
+    logger.error({ id: job?.id, err: err.message }, 'audit-log-retention job failed'),
+  );
+
   logger.info(
-    `worker up, listening on queues '${QUEUE_GITHUB}', '${QUEUE_GITLAB}', '${QUEUE_EMBEDDING}', '${QUEUE_RETENTION}', '${QUEUE_CORPUS_REFRESH}', '${QUEUE_MARKET_SNAPSHOT}'`,
+    `worker up, listening on queues '${QUEUE_GITHUB}', '${QUEUE_GITLAB}', '${QUEUE_EMBEDDING}', '${QUEUE_RETENTION}', '${QUEUE_CORPUS_REFRESH}', '${QUEUE_MARKET_SNAPSHOT}', '${QUEUE_AUDIT_LOG_RETENTION}'`,
   );
 }
 
