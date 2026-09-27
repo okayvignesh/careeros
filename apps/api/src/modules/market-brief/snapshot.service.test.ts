@@ -180,7 +180,7 @@ describe('prefsToFilter', () => {
       locations: ['NYC'],
       remoteOnly: true,
       currency: 'USD' as const,
-      seniority: ['staff'],
+      seniority: ['staff' as const],
       mustHaveSkills: ['ts'],
       dealbreakerSkills: ['java'],
       companyBlacklist: ['Acme'],
