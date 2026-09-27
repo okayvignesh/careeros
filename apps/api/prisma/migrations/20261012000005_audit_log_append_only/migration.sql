@@ -52,7 +52,7 @@ END
 $$;
 
 -- ---------------------------------------------------------------------------
--- 3. Retention proc — 365-day cutoff, SECURITY DEFINER.
+-- 3. Retention proc, 365-day cutoff, SECURITY DEFINER.
 -- ---------------------------------------------------------------------------
 -- Runs as the function OWNER (the migration role, which is the DB owner in
 -- practice) so the DELETE succeeds even though the caller (worker under
