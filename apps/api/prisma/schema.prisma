@@ -46,8 +46,94 @@ model User {
   passkeyChallenges PasskeyChallenge[]
   skillFacts       SkillFact[]
   factBase         FactBase[]
+  agentDevices     AgentDevice[]
 
   @@map("users")
+}
+
+/// D.2 (P3.5 desktop companion): one row per paired desktop agent instance.
+/// `publicKey` is the raw Ed25519/X25519/etc. public key bytes the agent
+/// generated during pairing (agent keeps the private half in OS keychain).
+/// `revokedAt` is a soft-delete: once set, every JWT-authed request is 401
+/// and the WSS connection is dropped. `lastSeenAt` is bumped on WSS
+/// heartbeat + task-result. `agentVersion` is reported by the agent on
+/// connect so the server can force-upgrade stale builds.
+model AgentDevice {
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String    @db.Uuid
+  name         String
+  publicKey    Bytes
+  pairedAt     DateTime  @default(now()) @db.Timestamptz(6)
+  revokedAt    DateTime? @db.Timestamptz(6)
+  lastSeenAt   DateTime? @db.Timestamptz(6)
+  agentVersion String?
+
+  user     User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tasks    AgentTask[]
+  sessions AgentSession[]
+
+  @@index([userId])
+  @@index([revokedAt])
+  @@map("agent_devices")
+}
+
+/// D.2: queue of work the server pushes to a specific device over WSS.
+/// `params` is a Zod-validated JSON payload (schema owned by
+/// `packages/browser-agent`). `status` transitions:
+///   queued → in_progress → (completed | failed | timeout)
+/// `expiresAt` lets the dispatcher drop rows the device never picked up.
+model AgentTask {
+  id          String    @id @default(uuid()) @db.Uuid
+  deviceId    String    @db.Uuid
+  kind        String
+  params      Json
+  status      String    @default("queued")
+  createdAt   DateTime  @default(now()) @db.Timestamptz(6)
+  startedAt   DateTime? @db.Timestamptz(6)
+  completedAt DateTime? @db.Timestamptz(6)
+  resultJson  Json?
+  expiresAt   DateTime  @db.Timestamptz(6)
+
+  device AgentDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId, status])
+  @@index([expiresAt])
+  @@map("agent_tasks")
+}
+
+/// D.2: server-side JWT store. `jwtHash` is sha256(hex) of the issued token
+/// so a leaked token can be revoked without waiting for TTL. One row per
+/// issued (JWT + refresh) pair; refresh rotation deletes the old row and
+/// inserts a new one. Refresh token hash lives in `refreshHash`.
+model AgentSession {
+  id           String    @id @default(uuid()) @db.Uuid
+  deviceId     String    @db.Uuid
+  jwtHash      String    @unique
+  refreshHash  String    @unique
+  issuedAt     DateTime  @default(now()) @db.Timestamptz(6)
+  expiresAt    DateTime  @db.Timestamptz(6)
+  revokedAt    DateTime? @db.Timestamptz(6)
+
+  device AgentDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId])
+  @@index([expiresAt])
+  @@map("agent_sessions")
+}
+
+/// D.2: short-lived pairing codes minted by `POST /agent/pair/start`.
+/// `codeHash` is sha256(hex) of the 6-digit code (we never store plaintext).
+/// A new start for the same user invalidates prior rows in the same tx.
+model AgentPairingRequest {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @db.Uuid
+  codeHash   String    @unique
+  createdAt  DateTime  @default(now()) @db.Timestamptz(6)
+  expiresAt  DateTime  @db.Timestamptz(6)
+  consumedAt DateTime? @db.Timestamptz(6)
+
+  @@index([userId, expiresAt])
+  @@map("agent_pairing_requests")
 }
 
 /// C-P0.7: registered WebAuthn credentials. One row per passkey per user.
