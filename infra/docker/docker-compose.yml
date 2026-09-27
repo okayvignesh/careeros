@@ -1,8 +1,15 @@
 name: careeros
 
+# A-M7: every image pinned by sha256 digest so a rebuild pulls the exact same
+# bits. Human-readable tag stays as a comment above each digest for upgrade
+# traceability. Digests captured via `docker buildx imagetools inspect <ref>`
+# on 2026-09-27 (see scripts/verify-image-pins.sh which fails CI on any
+# floating tag reintroduced later).
+
 services:
   postgres:
-    image: postgres:16-alpine
+    # postgres:16-alpine
+    image: postgres@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     restart: unless-stopped
     environment:
       POSTGRES_USER: careeros
@@ -20,7 +27,8 @@ services:
       - internal
 
   redis:
-    image: redis:7-alpine
+    # redis:7-alpine
+    image: redis@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
     restart: unless-stopped
     volumes:
       - redisdata:/data
@@ -33,7 +41,8 @@ services:
       - internal
 
   qdrant:
-    image: qdrant/qdrant:v1.12.4
+    # qdrant/qdrant:v1.12.4
+    image: qdrant/qdrant@sha256:241edb9d7778327516ef218f8c74e1bd61b5ea42cd4f193cb8d0896199705636
     restart: unless-stopped
     volumes:
       - qdrantdata:/qdrant/storage
@@ -46,16 +55,24 @@ services:
       - internal
 
   minio:
-    image: quay.io/minio/minio:latest
+    # bitnamilegacy/minio:2024.10.29-debian-12-r1 — switched off
+    # quay.io/minio/minio because that repo now requires authentication for
+    # anonymous pulls, which made CI-side digest verification impossible.
+    # Bitnami bundles the same MinIO server binary and honors MINIO_ROOT_*
+    # env vars. ponytail: swap back to upstream quay if anonymous read
+    # returns.
+    image: bitnamilegacy/minio@sha256:d07cf144fe42fd6d49bc4757e5562baa92407157626e4ffebbeb02e03c716268
     restart: unless-stopped
-    command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-careeros}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-careerosminio}
+      MINIO_SCHEME: http
+      MINIO_API_PORT_NUMBER: '9000'
+      MINIO_CONSOLE_PORT_NUMBER: '9001'
     volumes:
-      - miniodata:/data
+      - miniodata:/bitnami/minio/data
     healthcheck:
-      test: ['CMD', 'mc', 'ready', 'local']
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:9000/minio/health/live || exit 1']
       interval: 10s
       timeout: 5s
       retries: 10

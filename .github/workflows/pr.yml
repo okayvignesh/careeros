@@ -29,3 +29,12 @@ jobs:
 
       - name: Audit prod deps (fail on high/critical)
         run: pnpm audit --prod --audit-level=high
+
+  # A-M7: every image in every compose file must be digest-pinned.
+  image-pins:
+    name: verify docker image pins (@sha256:…)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: verify pins
+        run: bash scripts/verify-image-pins.sh

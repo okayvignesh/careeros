@@ -235,7 +235,7 @@ Cross-cutting security requirements for an open-source, self-hostable developer 
 - [ ] All containers use read-only rootfs, tmpfs for writable dirs.
 - [ ] All containers drop `ALL` Linux capabilities, add back only what's needed.
 - [ ] Seccomp default profile applied.
-- [ ] `docker-compose.yml` uses image digests, not tags.
+- [x] `docker-compose.yml` uses image digests, not tags. Every `image:` line in `infra/docker/docker-compose.yml` is `<repo>@sha256:<64-hex>` (postgres:16-alpine :12; redis:7-alpine :31; qdrant/qdrant:v1.12.4 :45; bitnamilegacy/minio:2024.10.29-debian-12-r1 :64 — swapped off `quay.io/minio/minio` because that repo now requires auth for anonymous pulls, `ponytail:` note in-line; plus ubuntu/squid pinned when A-H8 adds it). CI job `image-pins` in `.github/workflows/pr.yml` runs `scripts/verify-image-pins.sh` to fail any PR that reintroduces a floating tag (A-M7).
 - [ ] `gitleaks` pre-commit hook + CI job — no secrets in commits.
 
 **Phase:** P0
