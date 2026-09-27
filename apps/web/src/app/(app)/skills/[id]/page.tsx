@@ -1,5 +1,6 @@
 import { SkillDetail } from '@/components/skills/SkillDetail';
 
-export default function SkillDetailPage({ params }: { params: { id: string } }) {
-  return <SkillDetail skillId={params.id} />;
+export default async function SkillDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  return <SkillDetail skillId={id} />;
 }

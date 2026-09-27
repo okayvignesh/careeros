@@ -1,5 +1,6 @@
 'use client';
 
+import { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Button, Eyebrow } from '@careeros/ui';
 
@@ -8,11 +9,22 @@ import { Button, Eyebrow } from '@careeros/ui';
  * the URL the user originally requested (?next=), or / if none was preserved.
  */
 export default function ServiceUnavailablePage() {
+  return (
+    <Suspense fallback={<Shell nextHref="/" />}>
+      <ServiceUnavailable />
+    </Suspense>
+  );
+}
+
+function ServiceUnavailable() {
   const params = useSearchParams();
   const rawNext = params.get('next');
   // Only accept same-origin relative paths, avoid open-redirect via ?next=//evil.
   const next = rawNext && rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/';
+  return <Shell nextHref={next} />;
+}
 
+function Shell({ nextHref }: { nextHref: string }) {
   return (
     <main className="relative z-10 mx-auto flex min-h-screen w-full max-w-md flex-col items-start justify-center gap-6 px-6 py-16">
       <Eyebrow>
@@ -31,7 +43,7 @@ export default function ServiceUnavailablePage() {
         The API is not responding. Try again in a moment, or check that the api container is up.
       </p>
       <div className="flex items-center gap-3">
-        <Button variant="primary" size="sm" onClick={() => (window.location.href = next)}>
+        <Button variant="primary" size="sm" onClick={() => (window.location.href = nextHref)}>
           Retry
         </Button>
         <code className="font-mono text-[12px] text-fg-faint">docker compose logs api</code>

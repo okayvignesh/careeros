@@ -1,7 +1,8 @@
 import { Eyebrow } from '@careeros/ui';
 import { AttemptResult } from '@/components/arena/AttemptResult';
 
-export default function AttemptResultPage({ params }: { params: { id: string } }) {
+export default async function AttemptResultPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   return (
     <main className="mx-auto flex w-full max-w-[900px] flex-col gap-8 px-10 py-12">
       <header className="flex flex-col gap-3">
@@ -13,7 +14,7 @@ export default function AttemptResultPage({ params }: { params: { id: string } }
           Grading, XP, streak, and the exact skill deltas your evidence graph moved through.
         </p>
       </header>
-      <AttemptResult id={params.id} />
+      <AttemptResult id={id} />
     </main>
   );
 }

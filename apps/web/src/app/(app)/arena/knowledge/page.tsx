@@ -1,6 +1,11 @@
 import { Eyebrow } from '@careeros/ui';
 import { KnowledgeRunner } from '@/components/arena/KnowledgeRunner';
 
+// ponytail: runner is a 'use client' component calling useSearchParams(). Next 15
+// requires either a <Suspense> boundary around it or opt-out of prerender.
+// This page is fully client-driven (all data via apiGet), so nothing is lost.
+export const dynamic = 'force-dynamic';
+
 export default function KnowledgeArenaPage() {
   return (
     <main className="mx-auto flex w-full max-w-[820px] flex-col gap-8 px-10 py-12">

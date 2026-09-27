@@ -1,6 +1,9 @@
 import { Eyebrow } from '@careeros/ui';
 import { SystemDesignRunner } from '@/components/arena/SystemDesignRunner';
 
+// ponytail: see arena/knowledge/page.tsx for rationale.
+export const dynamic = 'force-dynamic';
+
 export default function SystemDesignArenaPage() {
   return (
     <main className="mx-auto flex w-full max-w-[960px] flex-col gap-8 px-10 py-12">
