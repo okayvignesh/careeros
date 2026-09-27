@@ -31,7 +31,9 @@
     "db:reset": "pnpm --filter @careeros/api prisma migrate reset --force"
   },
   "devDependencies": {
+    "cheerio": "^1.0.0",
     "fast-check": "^4.10.2",
+    "playwright": "^1.48.0",
     "prettier": "^3.3.3",
     "prettier-plugin-tailwindcss": "^0.6.8",
     "testcontainers": "^10.13.2",
