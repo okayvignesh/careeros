@@ -119,54 +119,91 @@ export class JobsService {
       return stats;
     }
 
-    for (const r of raws) {
-      // jobs_raw is append-only per AGENTS.md rule (never overwrite).
-      await this.prisma.jobRaw.create({
+    // C-P3.8b: batch fix. Old shape was 3 sequential Prisma calls per raw
+    // (jobRaw.create + normalizedJob.findUnique + create-or-update), which
+    // grew to 3000+ round-trips on a 1000-row Remotive sync. New shape is
+    // constant round-trips per batch:
+    //   1) jobRaw.createMany({ skipDuplicates:true }) — one write for all raws
+    //   2) normalizedJob.findMany({ canonicalUrl:in }) — one read for the map
+    //   3) normalizedJob.createMany({ skipDuplicates:true }) — one insert
+    //   4) N updates for pre-existing rows (unavoidable because `sourceIds`
+    //      merge is per-row; still one round-trip each, no per-row read).
+    // Total queries: 3 + (existing-row count). For a fresh Remotive sync
+    // (all inserts) that's 3 queries regardless of pool size.
+    //
+    // ponytail: keeping the per-existing-row `update` because merging
+    // `sourceIds` with `uniq([...existing, new])` needs the old value. When
+    // this stops being the bottleneck we can push it to `UPDATE ... SET
+    // source_ids = array(SELECT DISTINCT unnest(source_ids || $new))` in a
+    // single raw query, but a single-adapter deployment rarely re-syncs the
+    // same URL, so today the update path is a small tail on a fresh sync.
+
+    // jobs_raw is append-only per AGENTS.md rule (never overwrite). No
+    // unique constraint on (source, sourceId) today, so every re-sync
+    // appends a fresh fetch row — that's the intended provenance log.
+    const rawRows = raws.map((r) => ({
+      source: r.sourceName,
+      sourceId: r.sourceId,
+      canonicalUrl: r.canonicalUrl,
+      payload: r.payload as Prisma.InputJsonValue,
+      fetchedAt: r.fetchedAt,
+    }));
+    const rawResult = await this.prisma.jobRaw.createMany({ data: rawRows });
+    stats.rawInserted = rawResult.count;
+
+    const normalized = raws.map((r) => normalize(r));
+    const canonicalUrls = normalized.map((n) => n.canonicalUrl);
+    const existingRows = await this.prisma.normalizedJob.findMany({
+      where: { canonicalUrl: { in: canonicalUrls } },
+      select: { canonicalUrl: true, sourceIds: true },
+    });
+    const existingByUrl = new Map(existingRows.map((row) => [row.canonicalUrl, row]));
+
+    const toInsert: Prisma.NormalizedJobCreateManyInput[] = [];
+    const toUpdate: Array<{ n: ReturnType<typeof normalize>; existingSourceIds: string[] }> = [];
+    for (const n of normalized) {
+      const existing = existingByUrl.get(n.canonicalUrl);
+      if (existing) {
+        toUpdate.push({ n, existingSourceIds: existing.sourceIds });
+      } else {
+        toInsert.push({
+          canonicalUrl: n.canonicalUrl,
+          title: n.title,
+          company: n.company,
+          location: n.location,
+          remote: n.remote,
+          description: n.description,
+          sourcePostedAt: n.sourcePostedAt,
+          primarySource: n.primarySource,
+          sourceIds: [n.sourceTag],
+        });
+      }
+    }
+
+    if (toInsert.length > 0) {
+      const insertResult = await this.prisma.normalizedJob.createMany({
+        data: toInsert,
+        skipDuplicates: true,
+      });
+      stats.normalizedInserted = insertResult.count;
+    }
+
+    const now = new Date();
+    for (const { n, existingSourceIds } of toUpdate) {
+      await this.prisma.normalizedJob.update({
+        where: { canonicalUrl: n.canonicalUrl },
         data: {
-          source: r.sourceName,
-          sourceId: r.sourceId,
-          canonicalUrl: r.canonicalUrl,
-          payload: r.payload as Prisma.InputJsonValue,
-          fetchedAt: r.fetchedAt,
+          title: n.title,
+          company: n.company,
+          location: n.location,
+          remote: n.remote,
+          description: n.description,
+          sourcePostedAt: n.sourcePostedAt,
+          lastVerifiedAt: now,
+          sourceIds: uniq([...existingSourceIds, n.sourceTag]),
         },
       });
-      stats.rawInserted++;
-
-      const n = normalize(r);
-      const existing = await this.prisma.normalizedJob.findUnique({
-        where: { canonicalUrl: n.canonicalUrl },
-      });
-      if (existing) {
-        await this.prisma.normalizedJob.update({
-          where: { canonicalUrl: n.canonicalUrl },
-          data: {
-            title: n.title,
-            company: n.company,
-            location: n.location,
-            remote: n.remote,
-            description: n.description,
-            sourcePostedAt: n.sourcePostedAt,
-            lastVerifiedAt: new Date(),
-            sourceIds: uniq([...existing.sourceIds, n.sourceTag]),
-          },
-        });
-        stats.normalizedUpdated++;
-      } else {
-        await this.prisma.normalizedJob.create({
-          data: {
-            canonicalUrl: n.canonicalUrl,
-            title: n.title,
-            company: n.company,
-            location: n.location,
-            remote: n.remote,
-            description: n.description,
-            sourcePostedAt: n.sourcePostedAt,
-            primarySource: n.primarySource,
-            sourceIds: [n.sourceTag],
-          },
-        });
-        stats.normalizedInserted++;
-      }
+      stats.normalizedUpdated++;
     }
     return stats;
   }
