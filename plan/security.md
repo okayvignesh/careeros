@@ -223,7 +223,7 @@ Cross-cutting security requirements for an open-source, self-hostable developer 
 
 **Acceptance criteria:**
 - [ ] Renovate configured, weekly PRs, security-patch PRs auto-merged when CI green.
-- [ ] CI gate: `pnpm audit --prod --audit-level=high` fails the build.
+- [x] CI gate: `pnpm audit --prod --audit-level=high` fails the build. (A-H7: `.github/workflows/pr.yml`)
 - [ ] CI gate: CodeQL runs on every PR, blocks on high-severity SAST findings.
 - [ ] CI gate: Trivy scans built images, blocks on HIGH/CRITICAL CVEs in packages we install.
 - [ ] Base images: distroless (`gcr.io/distroless/nodejs20-debian12`) for api/worker; `nginx:alpine` pinned by digest for nginx.

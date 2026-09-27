@@ -4,7 +4,7 @@ import { DeepSeekProvider, renderPrompt, wrapUntrusted } from '@careeros/ai';
 import { decrypt, encryptField, loadMasterKey } from '@careeros/secrets';
 import { type ExtractedFacts } from '@careeros/shared';
 import mammoth from 'mammoth';
-import pdfParse from 'pdf-parse';
+import { extractText, getDocumentProxy } from 'unpdf';
 import { PrismaService } from '../../prisma/prisma.service';
 import { makeLlmAuditor } from '../../common/llm-audit';
 import { makeHallucinationLogger } from '../../common/hallucination-log';
@@ -50,8 +50,11 @@ export class ResumeService {
     let raw = '';
     if (isPdf) {
       try {
-        const parsed = await pdfParse(file.buffer, { max: MAX_PDF_PAGES });
-        raw = parsed.text ?? '';
+        const pdf = await getDocumentProxy(new Uint8Array(file.buffer));
+        // Cap page count before extraction (parity with pdf-parse `{ max }` option).
+        const { text } = await extractText(pdf, { mergePages: false });
+        const pages = Array.isArray(text) ? text : [text];
+        raw = pages.slice(0, MAX_PDF_PAGES).join('\n');
       } catch {
         throw new BadRequestException('Could not read PDF. It may be encrypted, scanned, or corrupt.');
       }

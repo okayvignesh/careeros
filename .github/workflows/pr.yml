@@ -1,0 +1,31 @@
+# A-H7: dep-vuln gate. Fails PRs on any high/critical advisory across the workspace.
+# Owned by security spec item 10 (Vulnerability + container hygiene).
+name: PR
+
+on:
+  pull_request:
+    branches: [main, master]
+  push:
+    branches: [main, master]
+
+jobs:
+  audit:
+    name: pnpm audit (high+)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Audit prod deps (fail on high/critical)
+        run: pnpm audit --prod --audit-level=high
