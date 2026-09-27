@@ -163,9 +163,8 @@ describe('JobsService.sync — query count (C-P3.8b N+1 fix)', () => {
 
     // Extract the update call args to prove sourceIds got merged with the
     // existing value from findMany (['remotive:seed']) + the new tag.
-    const updateCall = m.prisma.normalizedJob.update.mock.calls[0]![0] as {
-      data: { sourceIds: string[] };
-    };
+    const calls = m.prisma.normalizedJob.update.mock.calls as unknown as Array<Array<{ data: { sourceIds: string[] } }>>;
+    const updateCall = calls[0]![0];
     expect(updateCall.data.sourceIds).toContain('remotive:seed');
     expect(updateCall.data.sourceIds).toContain('remotive:id-0');
     // Dedup invariant: no duplicates.
