@@ -32,14 +32,19 @@ maybe('PrismaService $extends (opt-in: TESTCONTAINERS_E2E=1)', () => {
     infra = await startInfra({ services: { postgres: true, redis: false, qdrant: false, minio: false } });
     process.env.DATABASE_URL = infra.postgresUrl;
 
+    // See sibling encrypted-fields-opacity.integration.test.ts for the
+    // db-push-not-migrate-deploy rationale.
+    raw = new PrismaClient({ datasources: { db: { url: infra.postgresUrl } } });
+    await raw.$executeRawUnsafe('CREATE EXTENSION IF NOT EXISTS citext');
+    await raw.$executeRawUnsafe('CREATE EXTENSION IF NOT EXISTS pgcrypto');
+
     const apiDir = path.resolve(__dirname, '../..');
-    execFileSync('pnpm', ['exec', 'prisma', 'migrate', 'deploy'], {
+    execFileSync('pnpm', ['exec', 'prisma', 'db', 'push', '--skip-generate', '--accept-data-loss'], {
       cwd: apiDir,
       env: { ...process.env, DATABASE_URL: infra.postgresUrl },
       stdio: 'inherit',
     });
 
-    raw = new PrismaClient({ datasources: { db: { url: infra.postgresUrl } } });
     metrics = new MetricsService();
     svc = new PrismaService(metrics);
     await svc.onModuleInit();

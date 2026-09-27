@@ -31,17 +31,23 @@ maybe('ENCRYPTED_FIELDS opacity at rest (opt-in: TESTCONTAINERS_E2E=1)', () => {
     infra = await startInfra({ services: { postgres: true, redis: false, qdrant: false, minio: false } });
     process.env.DATABASE_URL = infra.postgresUrl;
 
-    // `prisma migrate deploy` picks up DATABASE_URL from the env; schema.prisma
-    // lives at apps/api/prisma/schema.prisma. Use the workspace prisma binary
-    // so we exercise the same toolchain the app boots with.
+    // The init migration references `CITEXT`; enable the extension first so
+    // the container matches the shape docker-compose ships.
+    raw = new PrismaClient({ datasources: { db: { url: infra.postgresUrl } } });
+    await raw.$executeRawUnsafe('CREATE EXTENSION IF NOT EXISTS citext');
+    await raw.$executeRawUnsafe('CREATE EXTENSION IF NOT EXISTS pgcrypto');
+
+    // Sync schema via `prisma db push` (no migrations table, no custom-SQL
+    // migration replay). We only need `users` + `llm_hallucination_log`; the
+    // full migrations dir contains a few index expressions that require
+    // session-tuning outside this test's scope.
     const apiDir = path.resolve(__dirname, '../..');
-    execFileSync('pnpm', ['exec', 'prisma', 'migrate', 'deploy'], {
+    execFileSync('pnpm', ['exec', 'prisma', 'db', 'push', '--skip-generate', '--accept-data-loss'], {
       cwd: apiDir,
       env: { ...process.env, DATABASE_URL: infra.postgresUrl },
       stdio: 'inherit',
     });
 
-    raw = new PrismaClient({ datasources: { db: { url: infra.postgresUrl } } });
     svc = new PrismaService();
     await svc.onModuleInit();
 
