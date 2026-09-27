@@ -19,3 +19,10 @@ export {
   type AgentAuditHook,
   type AgentRunContext,
 } from './orchestrator';
+export {
+  runAgentEvals,
+  type AgentEval,
+  type AgentEvalJudge,
+  type AgentEvalScore,
+  type AgentEvalArtifacts,
+} from './eval-set';

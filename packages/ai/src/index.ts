@@ -94,6 +94,7 @@ export {
   AgentRegistry,
   agentRegistry,
   runAgent,
+  runAgentEvals,
   setAgentAuditHook,
   type AgentDef,
   type AgentInfo,
@@ -106,4 +107,8 @@ export {
   type AgentAuditEvent,
   type AgentAuditHook,
   type AgentRunContext,
+  type AgentEval,
+  type AgentEvalJudge,
+  type AgentEvalScore,
+  type AgentEvalArtifacts,
 } from './agents';
