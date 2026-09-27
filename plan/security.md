@@ -63,6 +63,7 @@ Cross-cutting security requirements for an open-source, self-hostable developer 
 - [ ] `startup-check.ts` runs before Nest bootstrap, tested in unit tests with negative cases.
 - [x] Web middleware fails CLOSED to `/service-unavailable?next=<path>` when the API is unreachable (network error, 5s timeout, non-2xx); public routes still render. See `apps/web/src/middleware.ts:24-53` + `apps/web/src/middleware.test.ts` (A-M8).
 - [x] MinIO credentials never fall back to a default: `StorageService` reads `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` via `requireEnv()` at construction and throws if missing (`apps/api/src/common/storage.service.ts:82-90,100-107`); regression in `apps/api/src/common/storage.service.test.ts` asserts the throw on both missing keys (A-M5).
+- [x] Datastore credentials refuse defaults + weak values at BOTH layers. Compose interpolates `${POSTGRES_PASSWORD:?…}` and `${MINIO_ROOT_PASSWORD:?…}` so a missing env aborts the stack before boot (`infra/docker/docker-compose.yml:20,72`); startup-check.ts adds an `A-infra` block that refuses boot on missing, known-weak (careeros, careerosminio, changeme, admin, minioadmin, root, …) or <24-byte values via `assertStrongDatastoreCred` (`apps/api/src/startup-check.ts:23-34,76-97` + `apps/api/src/startup-check.test.ts`, A-H9).
 
 **Phase:** P0
 
