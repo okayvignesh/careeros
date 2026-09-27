@@ -831,3 +831,38 @@ model CompanyDossier {
   @@index([staleAfter])
   @@map("company_dossiers")
 }
+
+/// C-P3.2d: per-verify-rejection audit row.
+/// Written whenever the verify stage returns verdict='rejected' during a
+/// sync. Powers the reject-audit admin UI (deferred to web wave) and the
+/// re-verify POST endpoint that lets an operator promote a fixed row back
+/// into `jobs_normalized`.
+///
+/// `details.rawJd` carries the full job description so an operator can
+/// inspect and reason about the rejection without cross-referencing
+/// `jobs_raw`. Retention: none today (single-user MVP); a cleanup worker
+/// lands with the reject-log UI slice.
+model JobRejectLog {
+  id           String   @id @default(uuid()) @db.Uuid
+  /// FK-shaped only — `jobs_raw` never deletes rows so a hard FK would
+  /// prevent expiry cleanup. String not @db.Uuid because the reject may
+  /// come from a non-adapter source (email alert, agent) with no raw row.
+  jobRawId     String?  @db.Uuid
+  sourceId     String   /// adapter's stable id for the job posting
+  sourceName   String   /// adapter id (e.g. "remotive")
+  rejectedAt   DateTime @default(now()) @db.Timestamptz(6)
+  /// Primary reason code (first entry from verify.reasons). Full list lives
+  /// in `details.reasons`. Indexed so the admin filter (`?reason=`) is fast.
+  reason       String
+  /// Copy of the verify verdict at rejection time. Always 'rejected' today
+  /// but stored explicitly so a future promotion to `flagged`-only logging
+  /// doesn't require a schema change.
+  verdict      String   @default("rejected")
+  /// { reasons: string[], rawJd: string, canonicalUrl: string, title: string, company: string, ... }
+  details      Json
+
+  @@index([rejectedAt(sort: Desc)])
+  @@index([sourceName, rejectedAt(sort: Desc)])
+  @@index([reason, rejectedAt(sort: Desc)])
+  @@map("job_reject_log")
+}
