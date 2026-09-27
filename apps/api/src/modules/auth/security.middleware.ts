@@ -50,8 +50,19 @@ export class SecurityMiddleware implements NestMiddleware {
 
     if (isMutation) {
       // A-H1a: Sec-Fetch-Site must be same-origin OR none (top-level nav).
+      // Cross-origin allowed only if the Origin header matches an explicit
+      // TRUSTED_ORIGINS entry. Handles dev topology (web:3000 -> api:3001 =
+      // same-site not same-origin) without weakening prod: the origin must
+      // still be in the operator-managed allowlist.
       const secFetch = req.headers['sec-fetch-site'];
-      if (secFetch && secFetch !== 'same-origin' && secFetch !== 'none') {
+      const origin = req.headers.origin as string | undefined;
+      const trusted = (process.env.TRUSTED_ORIGINS ?? '')
+        .split(',')
+        .map((o) => o.trim())
+        .filter(Boolean);
+      const originTrusted = Boolean(origin && trusted.includes(origin));
+      const secFetchBad = secFetch && secFetch !== 'same-origin' && secFetch !== 'none';
+      if (secFetchBad && !originTrusted) {
         await this.auditCsrfReject(sealed?.userId ?? null, req, 'sec_fetch_site', String(secFetch));
         res.status(403).json({ statusCode: 403, message: 'CSRF check failed (origin)' });
         return;
