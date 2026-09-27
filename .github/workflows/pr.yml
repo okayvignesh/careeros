@@ -1,5 +1,6 @@
-# A-H7: dep-vuln gate. Fails PRs on any high/critical advisory across the workspace.
-# Owned by security spec item 10 (Vulnerability + container hygiene).
+# PR gate. Extended by C-P0.5a: test + typecheck jobs alongside the
+# existing A-H7 (dep-vuln) and A-M7 (image-pin) gates.
+# Owning specs: security.md item 10, testing.md phase-0 CI wiring.
 name: PR
 
 on:
@@ -9,6 +10,58 @@ on:
     branches: [main, master]
 
 jobs:
+  test:
+    name: vitest (unit)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Root vitest run walks every workspace via the shared config.
+      # Must stay green: all 325+ tests pass or the PR is blocked.
+      - name: Run vitest
+        run: pnpm exec vitest run
+
+  typecheck:
+    name: tsc (all workspaces)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm -r typecheck
+
   audit:
     name: pnpm audit (high+)
     runs-on: ubuntu-latest
@@ -32,7 +85,7 @@ jobs:
 
   # A-M7: every image in every compose file must be digest-pinned.
   image-pins:
-    name: verify docker image pins (@sha256:…)
+    name: verify docker image pins (@sha256:...)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
