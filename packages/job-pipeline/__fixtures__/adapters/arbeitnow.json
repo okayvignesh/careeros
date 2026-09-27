@@ -1,0 +1,42 @@
+{
+  "data": [
+    {
+      "slug": "senior-backend-engineer-acme-1234",
+      "company_name": "Acme GmbH",
+      "title": "Senior Backend Engineer",
+      "description": "Build our distributed platform. Node.js, PostgreSQL, Kubernetes. Fully remote in the EU.",
+      "remote": true,
+      "url": "https://www.arbeitnow.com/jobs/companies/acme/senior-backend-engineer-acme-1234",
+      "tags": ["backend", "nodejs", "postgres"],
+      "job_types": ["full_time"],
+      "location": "Berlin, Germany",
+      "created_at": 1758369600
+    },
+    {
+      "slug": "product-manager-beta-5678",
+      "company_name": "Beta AG",
+      "title": "Product Manager",
+      "description": "Own the roadmap for our developer platform.",
+      "remote": false,
+      "url": "https://www.arbeitnow.com/jobs/companies/beta/product-manager-beta-5678",
+      "tags": ["product"],
+      "job_types": ["full_time"],
+      "location": "Munich, Germany",
+      "created_at": 1758542400
+    }
+  ],
+  "links": {
+    "first": "https://www.arbeitnow.com/api/job-board-api?page=1",
+    "last": "https://www.arbeitnow.com/api/job-board-api?page=5",
+    "prev": null,
+    "next": "https://www.arbeitnow.com/api/job-board-api?page=2"
+  },
+  "meta": {
+    "current_page": 1,
+    "from": 1,
+    "last_page": 5,
+    "path": "https://www.arbeitnow.com/api/job-board-api",
+    "per_page": 100,
+    "to": 100
+  }
+}

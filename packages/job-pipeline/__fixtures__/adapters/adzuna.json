@@ -1,0 +1,40 @@
+{
+  "__CLASS__": "Adzuna::API::Response::JobSearchResults",
+  "count": 2,
+  "mean": 65000,
+  "results": [
+    {
+      "id": "4567890123",
+      "title": "Senior Full Stack Engineer",
+      "description": "Join our team to build modern web applications with Node.js, PostgreSQL, and React. Fully remote across the UK.",
+      "redirect_url": "https://www.adzuna.co.uk/jobs/details/4567890123",
+      "company": { "display_name": "Acme Tech" },
+      "location": {
+        "display_name": "London, UK",
+        "area": ["UK", "London"]
+      },
+      "created": "2026-09-22T09:15:00Z",
+      "category": { "label": "IT Jobs", "tag": "it-jobs" },
+      "contract_type": "permanent",
+      "contract_time": "full_time",
+      "salary_min": 70000,
+      "salary_max": 90000,
+      "salary_is_predicted": "0",
+      "latitude": 51.5074,
+      "longitude": -0.1278
+    },
+    {
+      "id": "4567890124",
+      "title": "DevOps Engineer",
+      "description": "Own our AWS estate. Terraform, EKS, GitOps. Hybrid (2 days on-site in Manchester).",
+      "redirect_url": "https://www.adzuna.co.uk/jobs/details/4567890124",
+      "company": { "display_name": "Beta Corp" },
+      "location": {
+        "display_name": "Manchester, UK",
+        "area": ["UK", "North West", "Manchester"]
+      },
+      "created": "2026-09-24T14:00:00Z",
+      "category": { "label": "IT Jobs", "tag": "it-jobs" }
+    }
+  ]
+}
