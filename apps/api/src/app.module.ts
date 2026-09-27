@@ -1,12 +1,16 @@
 import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { LoggerModule, type Params } from 'nestjs-pino';
-import { randomUUID } from 'node:crypto';
 import { PrismaModule } from './prisma/prisma.module';
 import { StorageModule } from './common/storage.module';
 import { QueueModule } from './common/queue.module';
 import { SensitivityGateModule } from './common/sensitivity-gate.module';
 import { MetricsModule } from './common/metrics/metrics.module';
 import { HttpMetricsMiddleware } from './common/metrics/http-metrics.middleware';
+import {
+  RequestIdMiddleware,
+  generateRequestId,
+  REDACTION_PATHS,
+} from './common/logging/request-id.middleware';
 import { HealthModule } from './modules/health/health.module';
 import { SetupModule } from './modules/setup/setup.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -38,39 +42,9 @@ import { DossierModule } from './modules/dossier/dossier.module';
 const loggerParams: Params = {
   pinoHttp: {
     level: process.env.LOG_LEVEL ?? 'info',
-    genReqId: (req, res) => {
-      const incoming = (req.headers['x-request-id'] as string | undefined) ?? randomUUID();
-      res.setHeader('x-request-id', incoming);
-      return incoming;
-    },
+    genReqId: generateRequestId,
     redact: {
-      paths: [
-        // Request/response headers that carry credentials.
-        'req.headers.cookie',
-        'req.headers.authorization',
-        'req.headers["x-api-key"]',
-        'res.headers["set-cookie"]',
-        // Request bodies for known secret-carrying endpoints.
-        'req.body.password',
-        'req.body.apiKey',
-        'req.body.apikey',
-        'req.body.token',
-        'req.body.access_token',
-        'req.body.refresh_token',
-        'req.body.client_secret',
-        'req.body.secretKey',
-        'req.body.ciphertext',
-        // One-level wildcards for internal objects passed to loggers.
-        '*.password',
-        '*.apiKey',
-        '*.apikey',
-        '*.token',
-        '*.access_token',
-        '*.refresh_token',
-        '*.client_secret',
-        '*.secretKey',
-        '*.ciphertext',
-      ],
+      paths: REDACTION_PATHS,
       censor: '[REDACTED]',
     },
     customLogLevel: (_req, res, err) => {
@@ -127,10 +101,9 @@ const loggerParams: Params = {
   ],
 })
 export class AppModule implements NestModule {
-  // C-P4.8: HTTP metrics on every route so the counter matches the pino
-  // request log 1:1. Runs after AuthModule's SecurityMiddleware (order
-  // doesn't matter for the counter, but keeps the auth path uninterrupted).
+  // C-P4.8: request-id first so pino, the HTTP metrics middleware, and any
+  // downstream handler all see the same `req.reqId`. Metrics second.
   configure(consumer: MiddlewareConsumer): void {
-    consumer.apply(HttpMetricsMiddleware).forRoutes('*');
+    consumer.apply(RequestIdMiddleware, HttpMetricsMiddleware).forRoutes('*');
   }
 }
