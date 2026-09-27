@@ -4,21 +4,18 @@ import { Queue, type ConnectionOptions } from 'bullmq';
 import {
   QUEUE_EMBEDDING,
   QUEUE_GITHUB,
+  QUEUE_GITLAB,
   type EmbeddingGeneratePayload,
   type EmbeddingJobName,
   type GithubJobName,
   type GithubSyncPayload,
+  type GitlabJobName,
+  type GitlabSyncPayload,
 } from '@careeros/shared';
 
-// C-P1.6: gitlab queue definitions. Kept here (not in packages/shared) because
-// Wave C-delta rules forbid touching packages/**; move to shared alongside the
-// CodeHost refactor per the plan.
-export const QUEUE_GITLAB = 'gitlab';
-export type GitlabJobName = 'sync';
-export interface GitlabSyncPayload {
-  userId: string;
-  reason: 'setup' | 'manual' | 'scheduled';
-}
+// backlog:#74 - gitlab queue definitions moved to packages/shared/queues.ts
+// so producer (api) and consumer (worker) import the same source of truth.
+export { QUEUE_GITLAB, type GitlabJobName, type GitlabSyncPayload };
 
 @Injectable()
 export class QueueService implements OnModuleDestroy {

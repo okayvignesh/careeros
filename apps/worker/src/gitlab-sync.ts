@@ -23,8 +23,12 @@ import {
   retry,
   type CommitWithFiles,
   type EvidenceRow,
+  type GitlabSyncPayload,
   type KnownEmails,
 } from '@careeros/shared';
+// backlog:#74 - re-export so existing importers (apps/worker/src/main.ts)
+// keep resolving `GitlabSyncPayload` from this module.
+export type { GitlabSyncPayload };
 import { syncSkillState } from './aggregator.js';
 import { GH_LANGUAGE_TO_SKILL } from './skills-seed.js';
 
@@ -42,11 +46,6 @@ const COMMITS_PER_PROJECT = 100;
 const PROJECT_SOURCE_KIND = 'gitlab_project';
 const MR_SOURCE_KIND = 'gitlab_mr';
 const PIPELINE_SOURCE_KIND = 'gitlab_pipeline';
-
-export interface GitlabSyncPayload {
-  userId: string;
-  reason: 'setup' | 'manual' | 'scheduled';
-}
 
 export async function handleGitlabSync(
   prisma: PrismaClient,

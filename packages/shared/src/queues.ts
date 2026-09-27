@@ -10,6 +10,15 @@ export interface GithubSyncPayload {
   reason: 'setup' | 'manual' | 'scheduled';
 }
 
+export const QUEUE_GITLAB = 'gitlab';
+
+export type GitlabJobName = 'sync';
+
+export interface GitlabSyncPayload {
+  userId: string;
+  reason: 'setup' | 'manual' | 'scheduled';
+}
+
 export const QUEUE_EMBEDDING = 'embedding';
 
 export type EmbeddingJobName = 'generate';
