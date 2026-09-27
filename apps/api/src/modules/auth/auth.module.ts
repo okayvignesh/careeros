@@ -7,6 +7,10 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { SessionService } from './session.service';
 import { SecurityMiddleware } from './security.middleware';
+import { PasskeyService } from './passkey.service';
+import { PasskeyController } from './passkey.controller';
+import { RecoveryCodesService } from './recovery.service';
+import { RecoveryCodesController } from './recovery.controller';
 
 @Global()
 @Module({
@@ -26,14 +30,17 @@ import { SecurityMiddleware } from './security.middleware';
       }),
     }),
   ],
-  controllers: [AuthController],
+  controllers: [AuthController, PasskeyController, RecoveryCodesController],
   providers: [
     AuthService,
     SessionService,
     SecurityMiddleware,
+    // C-P0.7: passkey + recovery-code services.
+    PasskeyService,
+    RecoveryCodesService,
     { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
-  exports: [AuthService, SessionService],
+  exports: [AuthService, SessionService, PasskeyService, RecoveryCodesService],
 })
 export class AuthModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {

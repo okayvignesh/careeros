@@ -114,7 +114,7 @@ async function audit(
         action,
         resourceType: 'passkey',
         resourceId: null,
-        payload: payload ?? undefined,
+        payload: (payload ?? undefined) as never,
         ip: requestIp(req),
         userAgent: String(req.headers['user-agent'] ?? '').slice(0, 512) || null,
       },

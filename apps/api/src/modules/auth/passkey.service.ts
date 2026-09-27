@@ -131,7 +131,7 @@ export class PasskeyService {
     const options = await generateAuthenticationOptions({
       rpID,
       userVerification: 'preferred',
-      allowCredentials,
+      ...(allowCredentials ? { allowCredentials } : {}),
     });
     await this.parkChallenge(options.challenge, userId ?? null, 'authenticate');
     return options;
