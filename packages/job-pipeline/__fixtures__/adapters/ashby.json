@@ -1,0 +1,28 @@
+{
+  "apiVersion": "1",
+  "jobs": [
+    {
+      "id": "1b2c3d4e-5678-4321-9abc-def012345678",
+      "title": "Senior Backend Engineer",
+      "location": "Remote — Americas",
+      "isRemote": true,
+      "descriptionHtml": "<p>Own our distributed platform.</p>",
+      "descriptionPlain": "Own our distributed platform. Ship the boring code.",
+      "publishedAt": "2026-09-20T08:00:00.000Z",
+      "jobUrl": "https://jobs.ashbyhq.com/acme/1b2c3d4e-5678-4321-9abc-def012345678",
+      "employmentType": "FullTime",
+      "team": "Platform",
+      "department": "Engineering"
+    },
+    {
+      "id": "2c3d4e5f-6789-4321-9abc-def012345679",
+      "title": "Staff Data Scientist",
+      "location": "San Francisco, CA",
+      "isRemote": false,
+      "descriptionPlain": "Own the ML lifecycle end to end.",
+      "publishedAt": "2026-09-22T12:00:00.000Z",
+      "jobUrl": "https://jobs.ashbyhq.com/acme/2c3d4e5f-6789-4321-9abc-def012345679",
+      "employmentType": "FullTime"
+    }
+  ]
+}

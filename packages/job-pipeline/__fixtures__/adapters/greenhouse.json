@@ -1,0 +1,29 @@
+{
+  "jobs": [
+    {
+      "id": 4501234567,
+      "internal_job_id": 4500001,
+      "title": "Senior Platform Engineer",
+      "updated_at": "2026-09-24T10:00:00.000Z",
+      "first_published": "2026-09-20T09:00:00.000Z",
+      "requisition_id": "REQ-001",
+      "location": { "name": "Remote — US" },
+      "absolute_url": "https://boards.greenhouse.io/acme/jobs/4501234567",
+      "content": "<div><p>Own the shared platform. Kubernetes, PostgreSQL, Node.js.</p></div>",
+      "company_name": "Acme Inc",
+      "departments": [{ "name": "Engineering" }],
+      "offices": [{ "name": "Remote — US", "location": "United States" }]
+    },
+    {
+      "id": 4501234568,
+      "title": "Product Designer",
+      "updated_at": "2026-09-25T12:00:00.000Z",
+      "first_published": "2026-09-25T12:00:00.000Z",
+      "location": { "name": "New York, NY" },
+      "absolute_url": "https://boards.greenhouse.io/acme/jobs/4501234568",
+      "content": "<p>Own design end to end.</p>",
+      "company_name": "Acme Inc"
+    }
+  ],
+  "meta": { "total": 2 }
+}
