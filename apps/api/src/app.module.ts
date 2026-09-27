@@ -103,6 +103,7 @@ const loggerParams: Params = {
     QuestsModule,
     AgentModule,
     ApprovalsModule,
+    GmailModule,
     HealthModule,
     SetupModule,
   ],
