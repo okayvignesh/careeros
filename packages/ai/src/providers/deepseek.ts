@@ -1,6 +1,7 @@
 import type { AIProvider, ChatMessage, ProviderCapabilities } from '../provider';
-import type { z } from 'zod';
+import { ZodError, type z } from 'zod';
 import { assertPublicUrl, assertPublicUrlShape } from '@careeros/shared';
+import { StructuredOutputError } from '../errors';
 
 export interface LlmCallRecord {
   provider: string;
@@ -23,6 +24,8 @@ interface DeepSeekConfig {
   onCall?: LlmCallHook | undefined;
   /** Extra hostnames to allow (self-hosted GitLab, ollama alt hostname, etc). */
   allowlist?: string[] | undefined;
+  /** Per-call max output tokens. Defaults to 4096 in chat/chatStructured. */
+  maxTokens?: number | undefined;
 }
 
 interface OpenAIChoice {
@@ -46,6 +49,7 @@ export class DeepSeekProvider implements AIProvider {
   readonly name = 'deepseek';
   private readonly base: string;
   private readonly allowlist: string[];
+  private readonly defaultMaxTokens: number;
   // Cached DNS validation. Runs on first request so construction stays sync
   // (matches every existing new DeepSeekProvider(...) call site).
   private baseUrlValidated: Promise<void> | null = null;
@@ -53,6 +57,7 @@ export class DeepSeekProvider implements AIProvider {
   constructor(private readonly cfg: DeepSeekConfig) {
     this.base = (cfg.baseUrl ?? 'https://api.deepseek.com/v1').replace(/\/$/, '');
     this.allowlist = cfg.allowlist ?? [];
+    this.defaultMaxTokens = cfg.maxTokens ?? 4096;
     // A-C2: sync shape check at construction so an obviously-bad baseUrl fails
     // fast (before any prompt tokens spend). Full DNS check runs before first
     // fetch in ensureBaseUrlSafe().
@@ -71,13 +76,20 @@ export class DeepSeekProvider implements AIProvider {
   async chat({
     messages,
     temperature = 0.2,
+    maxTokens,
   }: {
     messages: ChatMessage[];
     temperature?: number;
+    maxTokens?: number;
   }): Promise<string> {
     const res = await this.request(
       '/chat/completions',
-      { model: this.cfg.chatModel, messages, temperature },
+      {
+        model: this.cfg.chatModel,
+        messages,
+        temperature,
+        max_tokens: maxTokens ?? this.defaultMaxTokens,
+      },
       'chat',
     );
     return res.choices[0]?.message?.content ?? '';
@@ -87,23 +99,50 @@ export class DeepSeekProvider implements AIProvider {
     messages,
     schema,
     temperature = 0,
+    maxTokens,
   }: {
     messages: ChatMessage[];
     schema: S;
     temperature?: number;
+    maxTokens?: number;
   }): Promise<z.output<S>> {
-    const res = await this.request(
-      '/chat/completions',
-      {
-        model: this.cfg.chatModel,
-        messages,
-        temperature,
-        response_format: { type: 'json_object' },
-      },
-      'chatStructured',
-    );
+    const body = {
+      model: this.cfg.chatModel,
+      messages,
+      temperature,
+      response_format: { type: 'json_object' },
+      max_tokens: maxTokens ?? this.defaultMaxTokens,
+    };
+    const res = await this.request('/chat/completions', body, 'chatStructured');
     const raw = res.choices[0]?.message?.content ?? '{}';
-    return schema.parse(JSON.parse(raw)) as z.output<S>;
+    try {
+      return schema.parse(JSON.parse(raw)) as z.output<S>;
+    } catch (err) {
+      if (!(err instanceof ZodError || err instanceof SyntaxError)) throw err;
+      // A-H5: retry once with the parse error appended as a schema-error tag so
+      // the model can self-correct. Second failure is a hard StructuredOutputError.
+      const errMsg = err instanceof ZodError ? err.message : String((err as SyntaxError).message);
+      const retryMessages: ChatMessage[] = [
+        ...messages,
+        { role: 'assistant', content: raw },
+        {
+          role: 'user',
+          content: `Previous response failed schema validation. Return valid JSON only. <schema-error>${errMsg}</schema-error>`,
+        },
+      ];
+      const retryRes = await this.request(
+        '/chat/completions',
+        { ...body, messages: retryMessages },
+        'chatStructured:retry',
+      );
+      const retryRaw = retryRes.choices[0]?.message?.content ?? '{}';
+      try {
+        return schema.parse(JSON.parse(retryRaw)) as z.output<S>;
+      } catch (err2) {
+        const reason = err2 instanceof ZodError ? err2.message : String((err2 as Error).message);
+        throw new StructuredOutputError(reason);
+      }
+    }
   }
 
   async probeCapabilities(): Promise<ProviderCapabilities> {

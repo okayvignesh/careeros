@@ -3,6 +3,18 @@ export { DeepSeekProvider, type LlmCallRecord, type LlmCallHook } from './provid
 export { probeProvider, type ProbeResult } from './probe';
 export { estimateCostUsd } from './pricing';
 export { wrapUntrusted, UNTRUSTED_SYSTEM_CLAUSE, type UntrustedSourceKind, type Wrapped } from './wrap';
+export {
+  StructuredOutputError,
+  InjectionBlockedError,
+} from './errors';
+export {
+  scanForInjection,
+  wrapUntrusted as scanAndWrap,
+  setInjectionAuditHook,
+  type InjectionScanResult,
+  type InjectionHit,
+  type Severity as InjectionSeverity,
+} from './injection-scan';
 export { findHallucinations, type HallucinationReport } from './hallucination';
 export {
   SENSITIVITY_LEVELS,
