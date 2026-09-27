@@ -53,4 +53,45 @@ describe('normalize (B-10)', () => {
     // the two calls diverge; freezing the input catches any in-place mutation.
     expect(a).toEqual(b);
   });
+
+  // --- C-P3.3 extensions ---
+
+  it('classifies seniority from title (backward-compat call shape)', () => {
+    const n = normalize(remotiveRaw); // "Senior Backend Engineer"
+    expect(n.seniority.level).toBe('senior');
+    expect(n.seniority.confidence).toBeGreaterThan(0);
+  });
+
+  it('classifies role from title + description', () => {
+    const n = normalize(remotiveRaw); // "Senior Backend Engineer" + Node.js/PostgreSQL desc
+    expect(n.role.family).toBe('backend');
+  });
+
+  it('comp fields are null when no salaryText passed (old callers)', () => {
+    const n = normalize(remotiveRaw);
+    expect(n.compBandOriginal).toBeNull();
+    expect(n.compBandUsd).toBeNull();
+    expect(n.compCurrency).toBeNull();
+  });
+
+  it('parses + FX-converts comp band when salaryText provided (new call shape)', () => {
+    const n = normalize({ raw: remotiveRaw, salaryText: '$150k - $200k' });
+    expect(n.compBandOriginal).toEqual({ min: 150_000, max: 200_000, currency: 'USD', period: 'year' });
+    expect(n.compBandUsd).toEqual({ min: 150_000, max: 200_000, currency: 'USD', period: 'year' });
+    expect(n.compCurrency).toBe('USD');
+  });
+
+  it('FX-converts EUR comp to USD', () => {
+    const n = normalize({ raw: remotiveRaw, salaryText: '€90k-120k' });
+    expect(n.compBandOriginal?.currency).toBe('EUR');
+    expect(n.compBandUsd?.currency).toBe('USD');
+    expect(n.compBandUsd!.min).toBeGreaterThan(90_000); // EUR/USD > 1
+  });
+
+  it('unparseable salaryText leaves comp fields null (no fabrication)', () => {
+    const n = normalize({ raw: remotiveRaw, salaryText: 'competitive + equity' });
+    expect(n.compBandOriginal).toBeNull();
+    expect(n.compBandUsd).toBeNull();
+    expect(n.compCurrency).toBeNull();
+  });
 });

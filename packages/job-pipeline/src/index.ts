@@ -28,7 +28,27 @@ export {
   type ArbeitnowJob,
   type RemotiveJob,
 } from './adapters';
-export { normalize, type NormalizedJob } from './stages/normalize';
+export { normalize, type NormalizedJob, type NormalizeInput } from './stages/normalize';
+export {
+  classifySeniority,
+  type SeniorityLevel,
+  type SeniorityResult,
+} from './stages/classify-seniority';
+export {
+  classifyRole,
+  type RoleFamily,
+  type RoleResult,
+} from './stages/classify-role';
+export { parseCompBand } from './stages/comp-band';
+export {
+  convertToUsd,
+  convertToUsdBand,
+  rates,
+  type Money,
+  type CompBand,
+  type CompBandUsd,
+  type RatesSnapshot,
+} from './fx/rates';
 export { dedupe, type DedupeResult } from './stages/dedupe';
 export {
   freshness,
