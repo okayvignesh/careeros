@@ -6,6 +6,11 @@ export type {
 } from './provider';
 export { DeepSeekProvider, type LlmCallRecord, type LlmCallHook } from './providers/deepseek';
 export { probeProvider, type ProbeResult } from './probe';
+export {
+  ProviderRegistry,
+  type ProviderFactory,
+  type ProviderInfo,
+} from './registry';
 export { estimateCostUsd } from './pricing';
 export {
   wrapUntrusted,
