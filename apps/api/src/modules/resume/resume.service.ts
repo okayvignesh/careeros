@@ -165,14 +165,17 @@ export class ResumeService {
       'invoking prompt',
     );
 
-    const result = await provider.chatStructured({
-      messages: [
-        { role: 'system', content: rendered.system },
-        { role: 'user', content: rendered.user },
-      ],
-      schema: rendered.schema,
-      temperature: 0,
-    });
+    // A-M9: per-user LLM concurrency ceiling.
+    const result = await this.usage.runWithUserLimit(userId, () =>
+      provider.chatStructured({
+        messages: [
+          { role: 'system', content: rendered.system },
+          { role: 'user', content: rendered.user },
+        ],
+        schema: rendered.schema,
+        temperature: 0,
+      }),
+    );
 
     // Post-hoc hallucination check against the raw resume text. Suspect fragments
     // land in llm_hallucination_log for the eval loop; parse itself doesn't fail.

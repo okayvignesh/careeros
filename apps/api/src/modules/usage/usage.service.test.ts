@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ForbiddenException, ServiceUnavailableException } from '@nestjs/common';
-import { UsageService } from './usage.service';
+import { LLM_PER_USER_CONCURRENCY, UsageService } from './usage.service';
 
 // Minimal Prisma fake. Only the surface the service touches is stubbed. If a
 // method is called that isn't wired, it throws so the missing coverage is loud.
@@ -146,3 +146,80 @@ describe('UsageService.assertSingleUserForGlobalConfig (A-M6)', () => {
   });
 });
 
+// --- A-M9 per-user LLM concurrency ceiling ---
+
+describe('UsageService.runWithUserLimit (A-M9)', () => {
+  it(`caps at ${LLM_PER_USER_CONCURRENCY} concurrent per user`, async () => {
+    const prisma = { user: { count: async () => 1 } };
+    const svc = new UsageService(prisma as never, fakeCache);
+
+    let active = 0;
+    let peakActive = 0;
+    const trace: number[] = []; // snapshot of `active` at each fn start
+    // 5 tasks each resolves after 50ms. If the limiter works, peakActive===2.
+    const jobs = Array.from({ length: 5 }, () =>
+      svc.runWithUserLimit('u1', async () => {
+        active++;
+        trace.push(active);
+        peakActive = Math.max(peakActive, active);
+        await new Promise((r) => setTimeout(r, 50));
+        active--;
+        return 'ok';
+      }),
+    );
+    const results = await Promise.all(jobs);
+    expect(results).toHaveLength(5);
+    expect(results.every((r) => r === 'ok')).toBe(true);
+    expect(peakActive).toBe(LLM_PER_USER_CONCURRENCY);
+    expect(Math.max(...trace)).toBeLessThanOrEqual(LLM_PER_USER_CONCURRENCY);
+    // MUTATION-SMOKE: replace `return limit(fn)` with `return fn()` inside
+    // runWithUserLimit and peakActive becomes 5 -> this test fails on the
+    // strict-equal assertion.
+  });
+
+  it('isolates limits per user (u1 saturated does not block u2)', async () => {
+    const prisma = { user: { count: async () => 1 } };
+    const svc = new UsageService(prisma as never, fakeCache);
+
+    let u1Active = 0;
+    let u2Active = 0;
+    let peakU1 = 0;
+    let peakU2Concurrent = 0;
+    // Fill u1's slots with slow tasks so its queue is deep.
+    const u1Jobs = Array.from({ length: 4 }, () =>
+      svc.runWithUserLimit('u1', async () => {
+        u1Active++;
+        peakU1 = Math.max(peakU1, u1Active);
+        await new Promise((r) => setTimeout(r, 40));
+        u1Active--;
+        return 'u1';
+      }),
+    );
+    // u2 fires in parallel; if per-user isolation works, both u2 tasks run
+    // together even while u1 is saturated.
+    const u2Jobs = Array.from({ length: 2 }, () =>
+      svc.runWithUserLimit('u2', async () => {
+        u2Active++;
+        peakU2Concurrent = Math.max(peakU2Concurrent, u2Active);
+        await new Promise((r) => setTimeout(r, 20));
+        u2Active--;
+        return 'u2';
+      }),
+    );
+    await Promise.all([...u1Jobs, ...u2Jobs]);
+    expect(peakU1).toBe(LLM_PER_USER_CONCURRENCY);
+    expect(peakU2Concurrent).toBe(2);
+    // MUTATION-SMOKE: swap the Map for a single shared LimitFunction (drop the
+    // userId key) and peakU2Concurrent falls to 0 or 1 while u1 hogs the slots.
+  });
+
+  it('propagates errors from the wrapped function', async () => {
+    const prisma = { user: { count: async () => 1 } };
+    const svc = new UsageService(prisma as never, fakeCache);
+    await expect(
+      svc.runWithUserLimit('u1', async () => {
+        throw new Error('provider blew up');
+      }),
+    ).rejects.toThrow(/blew up/);
+  });
+});

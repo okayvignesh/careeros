@@ -141,14 +141,17 @@ export class CoverLettersService {
       jobDescription: descWrapped.content,
       facts: factsRendered,
     });
-    const raw = (await provider.chatStructured({
-      messages: [
-        { role: 'system', content: rendered.system },
-        { role: 'user', content: rendered.user },
-      ],
-      schema: rendered.schema,
-      temperature: 0.3,
-    })) as CoverLetterContent;
+    // A-M9: per-user LLM concurrency ceiling.
+    const raw = (await this.usage.runWithUserLimit(userId, () =>
+      provider.chatStructured({
+        messages: [
+          { role: 'system', content: rendered.system },
+          { role: 'user', content: rendered.user },
+        ],
+        schema: rendered.schema,
+        temperature: 0.3,
+      }),
+    )) as CoverLetterContent;
 
     // Hallucination guard: drop cited fact IDs that aren't in our list. Unlike
     // resume bullets (where empty-refs → drop bullet), a cover-letter paragraph
@@ -170,7 +173,7 @@ export class CoverLettersService {
     // Fact-check pass (paragraph-level). Reuses the same `resume-bullet-fact-check`
     // prompt since the shape is identical (indexed items with cited fact refs).
     const factById = new Map(facts.map((f) => [f.id, f]));
-    const { finalParagraphs, audit } = await this.runFactCheck(provider, cleanedParagraphs, factById);
+    const { finalParagraphs, audit } = await this.runFactCheck(userId, provider, cleanedParagraphs, factById);
 
     if (finalParagraphs.length === 0) {
       throw new BadRequestException(
@@ -211,6 +214,7 @@ export class CoverLettersService {
   }
 
   private async runFactCheck(
+    userId: string,
     provider: DeepSeekProvider,
     paragraphs: CoverLetterContent['paragraphs'],
     factById: Map<string, { id: string; kind: string; content: Prisma.JsonValue }>,
@@ -230,14 +234,17 @@ export class CoverLettersService {
     let verdicts: Map<number, { supported: boolean; reason: string }> | null = null;
     try {
       const prompt = renderPrompt('resume-bullet-fact-check', { bullets: rendered });
-      const result = (await provider.chatStructured({
-        messages: [
-          { role: 'system', content: prompt.system },
-          { role: 'user', content: prompt.user },
-        ],
-        schema: prompt.schema,
-        temperature: 0,
-      })) as FactCheckResult;
+      // A-M9: per-user LLM concurrency ceiling.
+      const result = (await this.usage.runWithUserLimit(userId, () =>
+        provider.chatStructured({
+          messages: [
+            { role: 'system', content: prompt.system },
+            { role: 'user', content: prompt.user },
+          ],
+          schema: prompt.schema,
+          temperature: 0,
+        }),
+      )) as FactCheckResult;
       verdicts = new Map(result.results.map((r) => [r.bulletIndex, { supported: r.supported, reason: r.reason }]));
     } catch (err) {
       this.logger.warn(`cover-letter fact-check failed, marking unchecked: ${(err as Error).message}`);

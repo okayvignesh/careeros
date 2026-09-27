@@ -1,6 +1,18 @@
-import { ForbiddenException, Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
+import pLimit from 'p-limit';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UsageCache } from './usage.cache';
+
+// p-limit@3 exposes its Limit type as a namespace member, not a top-level export.
+type Limit = ReturnType<typeof pLimit>;
+
+// A-M9: per-user concurrency ceiling on LLM work. Two in flight per user; the
+// rest queue. Single-user today so this is effectively a global cap of 2, but
+// keyed by userId so multi-tenant is a config change, not a rewrite.
+//
+// ponytail: in-process Map. If we ever go multi-replica, hoist to Redis via
+// bullmq/redis-semaphore. Not worth today at N=1.
+export const LLM_PER_USER_CONCURRENCY = 2;
 
 export type Window = '7d' | '30d' | '90d' | 'mtd';
 
@@ -63,10 +75,40 @@ const BUDGET_KEY = 'llm.budget';
 
 @Injectable()
 export class UsageService {
+  private readonly logger = new Logger(UsageService.name);
+  private readonly userLimits = new Map<string, Limit>();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly cache: UsageCache,
   ) {}
+
+  // ---------- A-M9 per-user concurrency ----------
+
+  /**
+   * Run `fn` under the per-user LLM concurrency ceiling. Every provider call
+   * site (`provider.chatStructured` / `provider.chat`) goes through this so a
+   * runaway loop can't fire N parallel completions and blow the provider's
+   * per-key RPS cap or the local budget.
+   */
+  async runWithUserLimit<T>(userId: string, fn: () => Promise<T>): Promise<T> {
+    const limit = this.limiterFor(userId);
+    if (limit.activeCount >= LLM_PER_USER_CONCURRENCY) {
+      this.logger.debug(
+        `llm-limiter[${userId}] queue depth=${limit.pendingCount} active=${limit.activeCount}`,
+      );
+    }
+    return limit(fn);
+  }
+
+  private limiterFor(userId: string): Limit {
+    let limit = this.userLimits.get(userId);
+    if (!limit) {
+      limit = pLimit(LLM_PER_USER_CONCURRENCY);
+      this.userLimits.set(userId, limit);
+    }
+    return limit;
+  }
 
   // ---------- A-M6 multi-tenant guard ----------
 

@@ -97,7 +97,8 @@ export class ProvidersService {
       chatModel: cfg.chatModel,
       onCall: makeLlmAuditor(this.prisma, userId, this.logger, this.usageCache),
     });
-    return probeProvider(provider);
+    // A-M9: per-user LLM concurrency ceiling.
+    return this.usage.runWithUserLimit(userId, () => probeProvider(provider));
   }
 
   async listProviders(userId: string) {

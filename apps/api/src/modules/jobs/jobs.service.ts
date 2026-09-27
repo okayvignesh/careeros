@@ -317,7 +317,7 @@ export class JobsService {
 
     for (const job of jobs) {
       try {
-        const extracted = await this.extractSkillsForOne(provider, job, catalogueRendered);
+        const extracted = await this.extractSkillsForOne(userId, provider, job, catalogueRendered);
         const validIds = extracted.skillIds.filter((id) => knownIds.has(id));
         await this.prisma.normalizedJob.update({
           where: { id: job.id },
@@ -341,7 +341,7 @@ export class JobsService {
     const catalogue = await this.prisma.skill.findMany({ select: { id: true, name: true } });
     const knownIds = new Set(catalogue.map((s) => s.id));
     const catalogueRendered = catalogue.map((s) => `- ${s.id} (${s.name})`).join('\n');
-    const extracted = await this.extractSkillsForOne(provider, job, catalogueRendered);
+    const extracted = await this.extractSkillsForOne(userId, provider, job, catalogueRendered);
     const validIds = extracted.skillIds.filter((id) => knownIds.has(id));
     await this.prisma.normalizedJob.update({
       where: { id: job.id },
@@ -351,6 +351,7 @@ export class JobsService {
   }
 
   private async extractSkillsForOne(
+    userId: string,
     provider: DeepSeekProvider,
     job: { title: string; company: string; description: string },
     catalogueRendered: string,
@@ -362,14 +363,17 @@ export class JobsService {
       company: job.company,
       description: wrapped.content,
     });
-    return (await provider.chatStructured({
-      messages: [
-        { role: 'system', content: rendered.system },
-        { role: 'user', content: rendered.user },
-      ],
-      schema: rendered.schema,
-      temperature: 0,
-    })) as JobSkillExtraction;
+    // A-M9: per-user LLM concurrency ceiling.
+    return (await this.usage.runWithUserLimit(userId, () =>
+      provider.chatStructured({
+        messages: [
+          { role: 'system', content: rendered.system },
+          { role: 'user', content: rendered.user },
+        ],
+        schema: rendered.schema,
+        temperature: 0,
+      }),
+    )) as JobSkillExtraction;
   }
 
   /**

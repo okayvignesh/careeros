@@ -152,14 +152,17 @@ export class ResumeVariantsService {
       facts: factsRendered,
       candidateSkills: skillList,
     });
-    const raw = (await provider.chatStructured({
-      messages: [
-        { role: 'system', content: rendered.system },
-        { role: 'user', content: rendered.user },
-      ],
-      schema: rendered.schema,
-      temperature: 0.2,
-    })) as TailoredResumeContent;
+    // A-M9: per-user LLM concurrency ceiling.
+    const raw = (await this.usage.runWithUserLimit(userId, () =>
+      provider.chatStructured({
+        messages: [
+          { role: 'system', content: rendered.system },
+          { role: 'user', content: rendered.user },
+        ],
+        schema: rendered.schema,
+        temperature: 0.2,
+      }),
+    )) as TailoredResumeContent;
 
     // Hallucination guard: drop cited fact IDs that aren't in our list, drop
     // bullets that end up with zero valid refs (except summary — that's
@@ -189,6 +192,7 @@ export class ResumeVariantsService {
     // to ship an un-audited draft than to lose the generation entirely.
     const factById = new Map(facts.map((f) => [f.id, f]));
     const { finalSections, audit } = await this.runFactCheck(
+      userId,
       provider,
       cleanedSections,
       factById,
@@ -229,6 +233,7 @@ export class ResumeVariantsService {
    * a draft they can trust less, not no draft at all.
    */
   private async runFactCheck(
+    userId: string,
     provider: DeepSeekProvider,
     sections: TailoredResumeContent['sections'],
     factById: Map<string, { id: string; kind: string; content: Prisma.JsonValue }>,
@@ -268,14 +273,17 @@ export class ResumeVariantsService {
     let verdicts: Map<number, { supported: boolean; reason: string }> | null = null;
     try {
       const rendered = renderPrompt('resume-bullet-fact-check', { bullets: bulletsRendered });
-      const result = (await provider.chatStructured({
-        messages: [
-          { role: 'system', content: rendered.system },
-          { role: 'user', content: rendered.user },
-        ],
-        schema: rendered.schema,
-        temperature: 0,
-      })) as FactCheckResult;
+      // A-M9: per-user LLM concurrency ceiling.
+      const result = (await this.usage.runWithUserLimit(userId, () =>
+        provider.chatStructured({
+          messages: [
+            { role: 'system', content: rendered.system },
+            { role: 'user', content: rendered.user },
+          ],
+          schema: rendered.schema,
+          temperature: 0,
+        }),
+      )) as FactCheckResult;
       verdicts = new Map(result.results.map((r) => [r.bulletIndex, { supported: r.supported, reason: r.reason }]));
     } catch (err) {
       this.logger.warn(`fact-check pass failed, marking variant unchecked: ${(err as Error).message}`);

@@ -86,7 +86,7 @@ export class CorpusService {
 
       let keyPoints: string[] = [];
       if (provider) {
-        const extracted = await this.extractKeyPoints(provider, q.prompt).catch((err) => {
+        const extracted = await this.extractKeyPoints(userId, provider, q.prompt).catch((err) => {
           this.logger.warn(`keyPoints extraction failed for prompt: ${(err as Error).message}`);
           return null;
         });
@@ -124,19 +124,23 @@ export class CorpusService {
   }
 
   private async extractKeyPoints(
+    userId: string,
     provider: DeepSeekProvider,
     question: string,
   ): Promise<KeyPointsExtraction | null> {
     const wrapped = wrapUntrusted(question, 'readme');
     const rendered = renderPrompt('keypoints-extractor', { question: wrapped.content });
-    const result = (await provider.chatStructured({
-      messages: [
-        { role: 'system', content: rendered.system },
-        { role: 'user', content: rendered.user },
-      ],
-      schema: rendered.schema,
-      temperature: 0.2,
-    })) as KeyPointsExtraction;
+    // A-M9: per-user LLM concurrency ceiling.
+    const result = (await this.usage.runWithUserLimit(userId, () =>
+      provider.chatStructured({
+        messages: [
+          { role: 'system', content: rendered.system },
+          { role: 'user', content: rendered.user },
+        ],
+        schema: rendered.schema,
+        temperature: 0.2,
+      }),
+    )) as KeyPointsExtraction;
     return result;
   }
 

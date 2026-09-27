@@ -272,14 +272,17 @@ export class AssessmentsService {
         skillName: skill.name,
         difficulty,
       });
-      const result = (await provider.chatStructured({
-        messages: [
-          { role: 'system', content: rendered.system },
-          { role: 'user', content: rendered.user },
-        ],
-        schema: rendered.schema,
-        temperature: 0.7,
-      })) as GeneratedQuestion;
+      // A-M9: per-user LLM concurrency ceiling.
+      const result = (await this.usage.runWithUserLimit(userId, () =>
+        provider.chatStructured({
+          messages: [
+            { role: 'system', content: rendered.system },
+            { role: 'user', content: rendered.user },
+          ],
+          schema: rendered.schema,
+          temperature: 0.7,
+        }),
+      )) as GeneratedQuestion;
 
       const promptHash = hashPrompt(result.prompt);
       const row = await this.prisma.question.upsert({
@@ -576,14 +579,17 @@ export class AssessmentsService {
         skillName: skill.name,
         difficulty,
       });
-      const result = (await provider.chatStructured({
-        messages: [
-          { role: 'system', content: rendered.system },
-          { role: 'user', content: rendered.user },
-        ],
-        schema: rendered.schema,
-        temperature: 0.7,
-      })) as GeneratedCodeReview;
+      // A-M9: per-user LLM concurrency ceiling.
+      const result = (await this.usage.runWithUserLimit(userId, () =>
+        provider.chatStructured({
+          messages: [
+            { role: 'system', content: rendered.system },
+            { role: 'user', content: rendered.user },
+          ],
+          schema: rendered.schema,
+          temperature: 0.7,
+        }),
+      )) as GeneratedCodeReview;
 
       const promptHash = hashPrompt(result.diff);
       const row = await this.prisma.question.upsert({
@@ -793,14 +799,17 @@ export class AssessmentsService {
         skillName: skill.name,
         difficulty,
       });
-      const result = (await provider.chatStructured({
-        messages: [
-          { role: 'system', content: rendered.system },
-          { role: 'user', content: rendered.user },
-        ],
-        schema: rendered.schema,
-        temperature: 0.7,
-      })) as GeneratedSystemDesign;
+      // A-M9: per-user LLM concurrency ceiling.
+      const result = (await this.usage.runWithUserLimit(userId, () =>
+        provider.chatStructured({
+          messages: [
+            { role: 'system', content: rendered.system },
+            { role: 'user', content: rendered.user },
+          ],
+          schema: rendered.schema,
+          temperature: 0.7,
+        }),
+      )) as GeneratedSystemDesign;
 
       const promptHash = hashPrompt(result.scenario);
       const row = await this.prisma.question.upsert({
@@ -973,14 +982,17 @@ export class AssessmentsService {
         onCall: makeLlmAuditor(this.prisma, userId, this.logger as never, this.usageCache),
       });
       const rendered = renderPrompt(cfg.promptId, cfg.vars);
-      const result = (await provider.chatStructured({
-        messages: [
-          { role: 'system', content: rendered.system },
-          { role: 'user', content: rendered.user },
-        ],
-        schema: rendered.schema,
-        temperature: 0,
-      })) as T;
+      // A-M9: per-user LLM concurrency ceiling.
+      const result = (await this.usage.runWithUserLimit(userId, () =>
+        provider.chatStructured({
+          messages: [
+            { role: 'system', content: rendered.system },
+            { role: 'user', content: rendered.user },
+          ],
+          schema: rendered.schema,
+          temperature: 0,
+        }),
+      )) as T;
       return Object.assign(result, { grader: 'llm' as const });
     } catch (err) {
       this.logger.warn(`LLM grader ${cfg.promptId} failed, using rule fallback: ${(err as Error).message}`);
@@ -1109,14 +1121,17 @@ export class AssessmentsService {
         skillName: skill.name,
         difficulty,
       });
-      const result = (await provider.chatStructured({
-        messages: [
-          { role: 'system', content: rendered.system },
-          { role: 'user', content: rendered.user },
-        ],
-        schema: rendered.schema,
-        temperature: 0.7,
-      })) as GeneratedDebuggingTask;
+      // A-M9: per-user LLM concurrency ceiling.
+      const result = (await this.usage.runWithUserLimit(userId, () =>
+        provider.chatStructured({
+          messages: [
+            { role: 'system', content: rendered.system },
+            { role: 'user', content: rendered.user },
+          ],
+          schema: rendered.schema,
+          temperature: 0.7,
+        }),
+      )) as GeneratedDebuggingTask;
 
       const promptHash = hashPrompt(result.brokenCode);
       const row = await this.prisma.question.upsert({
@@ -1351,14 +1366,17 @@ export class AssessmentsService {
         skillName: skill.name,
         difficulty,
       });
-      const result = (await provider.chatStructured({
-        messages: [
-          { role: 'system', content: rendered.system },
-          { role: 'user', content: rendered.user },
-        ],
-        schema: rendered.schema,
-        temperature: 0.7,
-      })) as GeneratedMockInterview;
+      // A-M9: per-user LLM concurrency ceiling.
+      const result = (await this.usage.runWithUserLimit(userId, () =>
+        provider.chatStructured({
+          messages: [
+            { role: 'system', content: rendered.system },
+            { role: 'user', content: rendered.user },
+          ],
+          schema: rendered.schema,
+          temperature: 0.7,
+        }),
+      )) as GeneratedMockInterview;
 
       const promptHash = hashPrompt(result.scenario + result.questions.map((q) => q.prompt).join('|'));
       const row = await this.prisma.question.upsert({

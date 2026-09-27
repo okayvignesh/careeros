@@ -125,14 +125,17 @@ export class MarketBriefService {
       sources: sources.map((s) => `- ${s.url}`).join('\n'),
       jobSample: sampleWrapped.content,
     });
-    const result = (await provider.chatStructured({
-      messages: [
-        { role: 'system', content: rendered.system },
-        { role: 'user', content: rendered.user },
-      ],
-      schema: rendered.schema,
-      temperature: 0.3,
-    })) as MarketBriefContent;
+    // A-M9: per-user LLM concurrency ceiling.
+    const result = (await this.usage.runWithUserLimit(userId, () =>
+      provider.chatStructured({
+        messages: [
+          { role: 'system', content: rendered.system },
+          { role: 'user', content: rendered.user },
+        ],
+        schema: rendered.schema,
+        temperature: 0.3,
+      }),
+    )) as MarketBriefContent;
 
     // Drop cited URLs that aren't in our sources list (hallucination guard).
     const sourceSet = new Set(sources.map((s) => s.url));
