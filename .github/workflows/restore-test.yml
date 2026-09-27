@@ -1,0 +1,80 @@
+# C-P0.5b: weekly backup-restore verification.
+# Owning specs: testing.md test-type 7, release-process.md operator guarantees.
+#
+# Runs Monday 03:00 UTC + on demand. Spins the stack, backs up seeded
+# fixtures, wipes volumes, restores into a fresh Postgres + MinIO,
+# asserts row-count parity via scripts/verify-restore-parity.sh.
+name: Restore Test
+
+on:
+  schedule:
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+
+jobs:
+  restore:
+    name: backup + restore round-trip
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Prepare env file
+        run: |
+          # Deterministic secrets for the CI-only stack. Never used outside CI.
+          cat > .env <<'EOF'
+          POSTGRES_PASSWORD=ci_only_do_not_reuse
+          MINIO_ROOT_USER=ci_minio_root
+          MINIO_ROOT_PASSWORD=ci_only_minio_password
+          SESSION_SECRET=0000000000000000000000000000000000000000000000000000000000000000
+          MASTER_KEY_HEX=1111111111111111111111111111111111111111111111111111111111111111
+          BACKUP_AGE_RECIPIENT_KEY=ci-placeholder
+          EOF
+
+      # TODO(C-P0.8): once scripts/backup.sh + scripts/restore.sh + scripts/seed-test.ts
+      # land, drop the guarded block and run them in order:
+      #   1. docker compose ... up -d db redis minio
+      #   2. pnpm --filter @careeros/api prisma migrate deploy
+      #   3. pnpm exec tsx scripts/seed-test.ts
+      #   4. scripts/manifest.sh > /tmp/parity.manifest    # snapshot row counts
+      #   5. scripts/backup.sh /tmp/backup                 # write encrypted bundle
+      #   6. docker compose ... down -v                    # wipe volumes
+      #   7. docker compose ... up -d db redis minio
+      #   8. scripts/restore.sh /tmp/backup                # rehydrate
+      #   9. PGURL=... MANIFEST_PATH=/tmp/parity.manifest scripts/verify-restore-parity.sh
+      #  10. Negative test: scripts/restore.sh with wrong age key must exit non-zero
+      - name: Backup + restore (skipped until C-P0.8 lands)
+        run: |
+          if [[ -x scripts/backup.sh && -x scripts/restore.sh ]]; then
+            echo "backup/restore scripts present but wiring not yet enabled." >&2
+            echo "TODO: enable full round-trip once C-P0.8 acceptance is signed off." >&2
+            exit 0
+          fi
+          echo "scripts/backup.sh + scripts/restore.sh not yet in tree (C-P0.8 pending)."
+          echo "Skipping round-trip; verifier helper still lints below."
+
+      - name: Lint parity verifier
+        run: bash -n scripts/verify-restore-parity.sh
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Restore test"
+            echo ""
+            echo "- Status: ${{ job.status }}"
+            echo "- Backup/restore round-trip: gated on C-P0.8"
+            echo "- Parity helper: scripts/verify-restore-parity.sh"
+          } >> "$GITHUB_STEP_SUMMARY"
