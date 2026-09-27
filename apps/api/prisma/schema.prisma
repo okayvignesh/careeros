@@ -43,6 +43,8 @@ model User {
   passkeyCredentials PasskeyCredential[]
   recoveryCodes    RecoveryCode[]
   passkeyChallenges PasskeyChallenge[]
+  skillFacts       SkillFact[]
+  factBase         FactBase[]
 
   @@map("users")
 }
@@ -273,18 +275,76 @@ model RecoveryKey {
 }
 
 /// Canonical skill catalog. Seeded from ESCO subset (see docs). `id` is a stable ESCO-derived slug.
+/// C-P1.3: `escoId` is the canonical ESCO code where one exists, or `careeros:<slug>`
+/// for skills ESCO does not cover. Unique so the seed can idempotently upsert.
+/// `category` is the seed-time bucket (`language`, `framework`, `data`, `cloud`,
+/// `devops`, `practice`); `cluster` remains the legacy field used by the aggregator.
 model Skill {
   id          String   @id
   name        String
   cluster     String?  /// "language" | "framework" | "tool" | "domain" | "practice"
+  category    String?  @default("uncategorized")
+  escoId      String?  @unique
+  escoUri     String?
   aliases     String[] @default([])
   createdAt   DateTime @default(now()) @db.Timestamptz(6)
 
   evidence             Evidence[]
   candidateSkillStates CandidateSkillState[]
+  skillFacts           SkillFact[]
 
   @@index([cluster])
+  @@index([category])
   @@map("skills")
+}
+
+/// C-P1.3: per-user, per-skill claim log used by grounded generation. One row
+/// per atomic assertion the user can make about a skill (evidence pointer,
+/// self-declaration, certification, or commit-touch summary). Distinct from
+/// `Evidence` (which is the aggregator's structured signal) — this table is
+/// the user-editable + LLM-consumable "what can I say about this skill" list.
+model SkillFact {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @db.Uuid
+  skillId    String
+  factType   String   /// 'evidence' | 'declaration' | 'certification' | 'commit_touch'
+  claim      String   @db.Text
+  sourceRef  String?
+  verifiedAt DateTime? @db.Timestamptz(6)
+  confidence Float    @default(0.5)
+  createdAt  DateTime @default(now()) @db.Timestamptz(6)
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  skill Skill @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@index([userId, skillId])
+  @@index([userId, factType])
+  @@map("skill_facts")
+}
+
+/// C-P1.3: master fact base — subject/predicate/object triples the user can
+/// stand behind. Consumed by resume-variants, cover-letters, dossier
+/// grounded-generation to keep prose tied to a citable row. `factHash` is a
+/// content hash so upserts stay idempotent; `source` is the origin (`github`,
+/// `resume`, `manual`, ...) and `sourceRef` is the pointer inside that source.
+model FactBase {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @db.Uuid
+  factHash   String   @unique
+  subject    String
+  predicate  String
+  object     String   @db.Text
+  source     String
+  sourceRef  String?
+  verifiedAt DateTime? @db.Timestamptz(6)
+  confidence Float    @default(0.5)
+  createdAt  DateTime @default(now()) @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, subject])
+  @@index([userId, predicate])
+  @@map("fact_base")
 }
 
 /// Every atomic proof a candidate can point to. Immutable append-only.
