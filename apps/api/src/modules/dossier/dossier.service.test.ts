@@ -483,6 +483,144 @@ describe('DossierService.assembleFor employer redaction', () => {
 // getCached + requireCached
 // -----------------------------------------------------------------------------
 
+// -----------------------------------------------------------------------------
+// C-P4.7d: per-claim fact-check after grounded-generation.
+// Grounded-generation drops claims that CITE unknown ids; the fact-check
+// pass drops claims whose text isn't supported by the cited fact content.
+// -----------------------------------------------------------------------------
+
+// Multi-call script provider (writer + fact-check).
+class MultiScriptDossierService extends DossierService {
+  constructor(
+    deps: ConstructorParameters<typeof DossierService>,
+    scripts: unknown[],
+  ) {
+    super(...deps);
+    let i = 0;
+    (this as unknown as { tryLoadProvider: () => Promise<unknown> }).tryLoadProvider =
+      async () => ({
+        chatStructured: async () => {
+          const out = scripts[i++];
+          if (out === undefined) throw new Error(`no scripted response for call ${i}`);
+          return out;
+        },
+      });
+  }
+}
+
+describe('DossierService.assembleFor per-claim fact-check (C-P4.7d)', () => {
+  it('drops claim marked unsupported by the fact-check auditor + audits factcheck.claim.dropped', async () => {
+    server.use(
+      http.get('https://blog.example.com/feed', () => HttpResponse.xml(RSS_TWO_POSTS)),
+    );
+    const hints: CompanySourceHints = {
+      companyId: 'Acme',
+      engineeringBlogRss: 'https://blog.example.com/feed',
+      extraAllowlist: ALLOWLIST,
+    };
+    const writer = {
+      narrative: '',
+      claims: [
+        { text: 'Acme uses Postgres.', factRefs: ['fact-1'] },
+        { text: 'Acme has 40k engineers.', factRefs: ['fact-1'] },
+      ],
+    };
+    // Auditor marks claim 1 unsupported.
+    const audit = {
+      results: [
+        { bulletIndex: 0, supported: true, reason: 'stack hint matches' },
+        { bulletIndex: 1, supported: false, reason: 'headcount not in facts' },
+      ],
+    };
+    const prisma = fakePrisma();
+    const svc = new MultiScriptDossierService(
+      [prisma as never, fakeUsage() as never, {} as never, fakeSensitivity() as never],
+      [writer, audit],
+    );
+    svc.registerHints(hints);
+
+    const dto = await svc.assembleFor('user-1', 'Acme');
+    expect(dto.synthesis).toContain('Acme uses Postgres.');
+    expect(dto.synthesis).not.toContain('40k engineers');
+
+    const drops = prisma.calls.auditWrites.filter((a) => a.action === 'factcheck.claim.dropped');
+    expect(drops).toHaveLength(1);
+    expect(drops[0].payload).toMatchObject({
+      service: 'dossier',
+      claim: 'Acme has 40k engineers.',
+      reason: 'headcount not in facts',
+    });
+    // The synthesised audit event also fires with claimsDropped incremented.
+    const syn = prisma.calls.auditWrites.find((a) => a.action === 'dossier.synthesized');
+    expect(syn?.payload).toMatchObject({ claimsKept: 1, claimsDropped: 1 });
+  });
+
+  it('missing verdict = DROP with reason "no verdict returned by fact-check"', async () => {
+    server.use(
+      http.get('https://blog.example.com/feed', () => HttpResponse.xml(RSS_TWO_POSTS)),
+    );
+    const hints: CompanySourceHints = {
+      companyId: 'Acme',
+      engineeringBlogRss: 'https://blog.example.com/feed',
+      extraAllowlist: ALLOWLIST,
+    };
+    const writer = {
+      narrative: '',
+      claims: [
+        { text: 'A.', factRefs: ['fact-1'] },
+        { text: 'B.', factRefs: ['fact-1'] },
+      ],
+    };
+    // Only verdict for index 0.
+    const audit = { results: [{ bulletIndex: 0, supported: true, reason: 'ok' }] };
+    const prisma = fakePrisma();
+    const svc = new MultiScriptDossierService(
+      [prisma as never, fakeUsage() as never, {} as never, fakeSensitivity() as never],
+      [writer, audit],
+    );
+    svc.registerHints(hints);
+    await svc.assembleFor('user-1', 'Acme');
+
+    const drops = prisma.calls.auditWrites.filter((a) => a.action === 'factcheck.claim.dropped');
+    expect(drops).toHaveLength(1);
+    expect(drops[0].payload).toMatchObject({
+      claim: 'B.',
+      reason: 'no verdict returned by fact-check',
+    });
+  });
+
+  it('auditor-throws → fail-open (grounded set kept, no factcheck.claim.dropped audits)', async () => {
+    server.use(
+      http.get('https://blog.example.com/feed', () => HttpResponse.xml(RSS_TWO_POSTS)),
+    );
+    const hints: CompanySourceHints = {
+      companyId: 'Acme',
+      engineeringBlogRss: 'https://blog.example.com/feed',
+      extraAllowlist: ALLOWLIST,
+    };
+    const writer = {
+      narrative: '',
+      claims: [
+        { text: 'Grounded claim one.', factRefs: ['fact-1'] },
+        { text: 'Grounded claim two.', factRefs: ['fact-1'] },
+      ],
+    };
+    const prisma = fakePrisma();
+    const svc = new MultiScriptDossierService(
+      [prisma as never, fakeUsage() as never, {} as never, fakeSensitivity() as never],
+      [writer, new Error('deepseek 500')],
+    );
+    svc.registerHints(hints);
+    const dto = await svc.assembleFor('user-1', 'Acme');
+
+    // Both grounded claims kept (fail-open).
+    expect(dto.synthesis).toContain('Grounded claim one.');
+    expect(dto.synthesis).toContain('Grounded claim two.');
+    const drops = prisma.calls.auditWrites.filter((a) => a.action === 'factcheck.claim.dropped');
+    expect(drops).toHaveLength(0);
+  });
+});
+
 describe('DossierService.requireCached', () => {
   it('returns the cached row or 404', async () => {
     const { svc, prisma } = build();

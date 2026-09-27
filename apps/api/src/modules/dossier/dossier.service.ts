@@ -5,7 +5,9 @@ import {
   DeepSeekProvider,
   InjectionBlockedError,
   UNTRUSTED_SYSTEM_CLAUSE,
+  runFactCheck,
   wrapUntrusted,
+  type FactCheckClaim,
 } from '@careeros/ai';
 import { safeFetch, SsrfBlockedError, type AssertPublicUrlOptions } from '@careeros/shared/net';
 import { decrypt, loadMasterKey } from '@careeros/secrets';
@@ -537,8 +539,8 @@ export class DossierService {
 
     // Grounded-generation contract: drop any claim whose factRefs are empty or
     // reference an id we did not put in the prompt.
-    const kept: string[] = [];
-    const usedRefs = new Set<string>();
+    interface GroundedClaim { text: string; cleanRefs: string[] }
+    const grounded: GroundedClaim[] = [];
     let dropped = 0;
     for (const c of result.claims) {
       const cleanRefs = c.factRefs.filter((r) => knownFactIds.has(r));
@@ -546,16 +548,77 @@ export class DossierService {
         dropped++;
         continue;
       }
-      kept.push(c.text);
-      for (const r of cleanRefs) usedRefs.add(r);
+      grounded.push({ text: c.text, cleanRefs });
+    }
+
+    // C-P4.7d: second-pass per-claim fact-check. Grounded-generation ensures
+    // the claim CITES a real fact; this pass checks the claim TEXT is actually
+    // supported by that cited fact's content (matches the resume-variants
+    // slice-20 gate). Missing verdict OR unsupported = DROP; auditor throw
+    // = fail-open (keep grounded set, no additional drops).
+    const factById = new Map(facts.map((f) => [f.id, f]));
+    const claims: FactCheckClaim[] = grounded.map((g, i) => ({
+      index: i,
+      text: g.text,
+      cited: g.cleanRefs.map((id) => {
+        const f = factById.get(id);
+        return f
+          ? { id: f.id, kind: f.sourceKind, summary: f.content }
+          : { id, kind: 'missing', summary: '(MISSING)' };
+      }),
+    }));
+
+    const outcome = await runFactCheck({
+      provider,
+      claims,
+      runWithUserLimit: (fn) => this.usage.runWithUserLimit(input.userId, fn),
+    });
+
+    const kept: string[] = [];
+    const usedRefs = new Set<string>();
+    let factCheckDropped = 0;
+    for (let i = 0; i < grounded.length; i++) {
+      const g = grounded[i];
+      if (outcome.ok) {
+        const v = outcome.verdicts.get(i);
+        if (!v || !v.supported) {
+          factCheckDropped++;
+          const reason = v?.reason ?? 'no verdict returned by fact-check';
+          await this.auditDropped(input.userId, input.companyId, g.text, reason, g.cleanRefs[0] ?? null);
+          continue;
+        }
+      } else if (i === 0) {
+        // Auditor threw. Log once (i===0 gate keeps the warn count sane in a
+        // loop) and fall through to keep the grounded set — same "unchecked"
+        // fail-open contract slice 20 uses. No factcheck.claim.dropped rows.
+        this.logger.warn(`dossier fact-check failed, keeping unchecked: ${outcome.reason}`);
+      }
+      kept.push(g.text);
+      for (const r of g.cleanRefs) usedRefs.add(r);
     }
 
     return {
       narrative: kept.length ? kept.join('\n') : '(no grounded claims produced)',
       factRefs: [...usedRefs],
       claimsKept: kept.length,
-      claimsDropped: dropped,
+      claimsDropped: dropped + factCheckDropped,
     };
+  }
+
+  /** Cross-service audit row on every dropped claim. Never throws. */
+  private async auditDropped(
+    userId: string,
+    companyId: string,
+    claim: string,
+    reason: string,
+    sourceRef: string | null,
+  ): Promise<void> {
+    await this.audit(userId, 'factcheck.claim.dropped', companyId, {
+      service: 'dossier',
+      claim,
+      reason,
+      ...(sourceRef ? { sourceRef } : {}),
+    });
   }
 
   // ---------------------------------------------------------------------------
