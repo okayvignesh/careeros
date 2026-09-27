@@ -3,8 +3,15 @@
 // in a prompt. The delimiter tells the model this is inert data; the SHA-256 hash lets
 // us verify the wrapped content wasn't tampered with between wrap and dispatch.
 //
-// This is Blueprint AI-Safety Item 4: prompt-injection defence.
+// Blueprint AI-Safety items 4 (structural isolation) + 5 (injection detection):
+// scanForInjection runs before wrapping. `blocked` severity throws
+// InjectionBlockedError so the untrusted string never enters a prompt; `suspect`
+// severity emits an audit event then continues (structural isolation still
+// protects). Signature preserved so every existing caller inherits the ceiling
+// without a call-site change.
 import { createHash } from 'node:crypto';
+import { scanForInjection, type InjectionHit, type Severity } from './injection-scan';
+import { InjectionBlockedError } from './errors';
 
 export type UntrustedSourceKind =
   | 'resume'
@@ -26,16 +33,55 @@ export interface Wrapped {
 const START_TAG = '<untrusted';
 const END_TAG = '</untrusted>';
 
+// -- audit hook -------------------------------------------------------------
+
+type WrapAuditHook = (event: {
+  code: string;
+  sourceKind: UntrustedSourceKind;
+  severity: Severity;
+  hits: InjectionHit[];
+}) => void;
+
+let auditHook: WrapAuditHook | null = null;
+
+/** Register a callback for every suspect / blocked scan at the wrap boundary. */
+export function setWrapAuditHook(hook: WrapAuditHook | null): void {
+  auditHook = hook;
+}
+
+function audit(sourceKind: UntrustedSourceKind, severity: Severity, hits: InjectionHit[]): void {
+  const code =
+    severity === 'blocked'
+      ? 'security.audit.injection_blocked'
+      : 'security.audit.injection_suspect';
+  const evt = { code, sourceKind, severity, hits };
+  try {
+    auditHook?.(evt);
+  } catch {
+    /* audit must never throw */
+  }
+  // ponytail: console.warn is the fallback until packages/* gain a shared pino
+  // logger. Downstream pipes the code prefix into the api pino stream.
+  // eslint-disable-next-line no-console
+  console.warn(JSON.stringify(evt));
+}
+
 /**
- * Wrap a raw string for safe inclusion in a prompt. The system prompt must instruct
- * the model to treat anything between `<untrusted>...</untrusted>` as inert data,
- * NOT as instructions.
- *
- * The `sourceKind` attribute is echoed into the tag so callers can identify which
- * chunk in a multi-source prompt came from where.
+ * Wrap a raw string for safe inclusion in a prompt. Runs an injection scan
+ * first; `blocked` severity aborts with `InjectionBlockedError`, `suspect`
+ * audit-logs and continues, `clean` wraps silently. The system prompt must
+ * still instruct the model to treat anything between `<untrusted>...</untrusted>`
+ * as inert data.
  */
 export function wrapUntrusted(raw: string, sourceKind: UntrustedSourceKind): Wrapped {
   const trimmed = raw ?? '';
+  const scan = scanForInjection(trimmed);
+  if (scan.severity !== 'clean') {
+    audit(sourceKind, scan.severity, scan.hits);
+    if (scan.severity === 'blocked') {
+      throw new InjectionBlockedError(sourceKind, scan.hits.map((h) => h.kind));
+    }
+  }
   const hash = createHash('sha256').update(trimmed).digest('hex').slice(0, 16);
   const content = `${START_TAG} source="${sourceKind}" hash="${hash}">\n${sanitise(trimmed)}\n${END_TAG}`;
   return { content, sourceKind, hash, bytes: trimmed.length };

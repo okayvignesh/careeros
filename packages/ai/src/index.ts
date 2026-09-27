@@ -2,7 +2,13 @@ export type { AIProvider, ProviderCapabilities, ChatMessage } from './provider';
 export { DeepSeekProvider, type LlmCallRecord, type LlmCallHook } from './providers/deepseek';
 export { probeProvider, type ProbeResult } from './probe';
 export { estimateCostUsd } from './pricing';
-export { wrapUntrusted, UNTRUSTED_SYSTEM_CLAUSE, type UntrustedSourceKind, type Wrapped } from './wrap';
+export {
+  wrapUntrusted,
+  UNTRUSTED_SYSTEM_CLAUSE,
+  setWrapAuditHook,
+  type UntrustedSourceKind,
+  type Wrapped,
+} from './wrap';
 export {
   LLMProviderError,
   StructuredOutputError,
@@ -10,7 +16,7 @@ export {
 } from './errors';
 export {
   scanForInjection,
-  wrapUntrusted as scanAndWrap,
+  auditScan,
   setInjectionAuditHook,
   type InjectionScanResult,
   type InjectionHit,

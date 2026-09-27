@@ -9,8 +9,6 @@
 //
 // Blueprint AI-Safety Item 5.
 
-import { InjectionBlockedError } from './errors';
-
 export type Severity = 'clean' | 'suspect' | 'blocked';
 
 export interface InjectionHit {
@@ -141,21 +139,14 @@ function audit(kind: string, severity: Severity, hits: InjectionHit[]): void {
 }
 
 /**
- * Wrap untrusted text for prompt inclusion after an injection scan.
- *   blocked → throw InjectionBlockedError (never enters a prompt)
- *   suspect → audit-log + wrap normally + continue (model sees data-only)
- *   clean   → wrap normally, no audit
+ * Explicit scan-and-audit entry point for callers that want to inspect a
+ * string without invoking the wrap boundary. Returns the scan result and
+ * side-effects the audit hook + console.warn on suspect/blocked. The real
+ * throw+wrap path lives in `wrap.ts::wrapUntrusted`, which every ingest
+ * caller uses; this helper exists for standalone scanners.
  */
-export function wrapUntrusted(kind: string, text: string): string {
+export function auditScan(kind: string, text: string): InjectionScanResult {
   const scan = scanForInjection(text);
-  if (scan.severity === 'blocked') {
-    audit(kind, scan.severity, scan.hits);
-    throw new InjectionBlockedError(kind, scan.hits.map((h) => h.kind));
-  }
-  if (scan.severity === 'suspect') {
-    audit(kind, scan.severity, scan.hits);
-  }
-  // Escape closing tag so untrusted content cannot terminate its own block.
-  const safe = text.replace(/<\/untrusted-content>/gi, '&lt;/untrusted-content&gt;');
-  return `<untrusted-content kind="${kind}">${safe}</untrusted-content>`;
+  if (scan.severity !== 'clean') audit(kind, scan.severity, scan.hits);
+  return scan;
 }
