@@ -10,15 +10,35 @@ import {
   type GithubSyncPayload,
 } from '@careeros/shared';
 
+// C-P1.6: gitlab queue definitions. Kept here (not in packages/shared) because
+// Wave C-delta rules forbid touching packages/**; move to shared alongside the
+// CodeHost refactor per the plan.
+export const QUEUE_GITLAB = 'gitlab';
+export type GitlabJobName = 'sync';
+export interface GitlabSyncPayload {
+  userId: string;
+  reason: 'setup' | 'manual' | 'scheduled';
+}
+
 @Injectable()
 export class QueueService implements OnModuleDestroy {
   private readonly connection: ConnectionOptions;
   private readonly github: Queue<GithubSyncPayload, unknown, GithubJobName>;
+  private readonly gitlab: Queue<GitlabSyncPayload, unknown, GitlabJobName>;
   private readonly embedding: Queue<EmbeddingGeneratePayload, unknown, EmbeddingJobName>;
 
   constructor(@InjectPinoLogger(QueueService.name) private readonly logger: PinoLogger) {
     this.connection = { url: process.env.REDIS_URL ?? 'redis://redis:6379' };
     this.github = new Queue<GithubSyncPayload, unknown, GithubJobName>(QUEUE_GITHUB, {
+      connection: this.connection,
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 5_000 },
+        removeOnComplete: { count: 100 },
+        removeOnFail: { count: 500 },
+      },
+    });
+    this.gitlab = new Queue<GitlabSyncPayload, unknown, GitlabJobName>(QUEUE_GITLAB, {
       connection: this.connection,
       defaultJobOptions: {
         attempts: 3,
@@ -44,14 +64,29 @@ export class QueueService implements OnModuleDestroy {
   }
 
   async enqueueGithubSync(payload: GithubSyncPayload): Promise<void> {
+    // BullMQ 5.81+ rejects `:` in custom jobIds (Redis key-separator
+    // collision). Use `-` so dedup semantics stay intact: scheduled runs
+    // dedupe by userId, manual retries get a fresh timestamp suffix.
     const jobId =
       payload.reason === 'manual'
-        ? `sync:${payload.userId}:${Date.now()}`
-        : `sync:${payload.userId}`;
+        ? `sync-${payload.userId}-${Date.now()}`
+        : `sync-${payload.userId}`;
     const job = await this.github.add('sync', payload, { jobId });
     this.logger.info(
       { jobId: job.id, userId: payload.userId, reason: payload.reason },
       'enqueued github.sync',
+    );
+  }
+
+  async enqueueGitlabSync(payload: GitlabSyncPayload): Promise<void> {
+    const jobId =
+      payload.reason === 'manual'
+        ? `sync-${payload.userId}-${Date.now()}`
+        : `sync-${payload.userId}`;
+    const job = await this.gitlab.add('sync', payload, { jobId });
+    this.logger.info(
+      { jobId: job.id, userId: payload.userId, reason: payload.reason },
+      'enqueued gitlab.sync',
     );
   }
 
@@ -60,7 +95,9 @@ export class QueueService implements OnModuleDestroy {
     // sits in the waiting queue is a no-op. Once the earlier job completes and ages out
     // of `removeOnComplete: 200`, the same jobId is free to run again — which is exactly
     // what we want for re-embed after a content edit.
-    const jobId = `embed:${payload.collection}:${payload.sourceId}`;
+    // BullMQ 5.81+ rejects `:` in custom jobIds. `-` keeps the dedup key
+    // stable per (collection, sourceId).
+    const jobId = `embed-${payload.collection}-${payload.sourceId}`;
     const job = await this.embedding.add('generate', payload, { jobId });
     this.logger.info(
       {
@@ -76,6 +113,7 @@ export class QueueService implements OnModuleDestroy {
 
   async onModuleDestroy(): Promise<void> {
     await this.github.close();
+    await this.gitlab.close();
     await this.embedding.close();
   }
 
@@ -83,12 +121,13 @@ export class QueueService implements OnModuleDestroy {
 
   private queueByName(name: string): Queue<unknown, unknown, string> {
     if (name === QUEUE_GITHUB) return this.github as unknown as Queue<unknown, unknown, string>;
+    if (name === QUEUE_GITLAB) return this.gitlab as unknown as Queue<unknown, unknown, string>;
     if (name === QUEUE_EMBEDDING) return this.embedding as unknown as Queue<unknown, unknown, string>;
     throw new Error(`unknown queue: ${name}`);
   }
 
   async stats(): Promise<Array<{ name: string; counts: Record<string, number>; isPaused: boolean }>> {
-    const queues = [QUEUE_GITHUB, QUEUE_EMBEDDING];
+    const queues = [QUEUE_GITHUB, QUEUE_GITLAB, QUEUE_EMBEDDING];
     return Promise.all(
       queues.map(async (name) => {
         const q = this.queueByName(name);
