@@ -67,7 +67,7 @@ Cross-cutting requirements for every LLM call, every agent, every generated arti
 **Acceptance criteria:**
 - [ ] `AIProvider.chatStructured<T>({ schema, ... })` is the only method used when code consumes the output
 - [ ] `AIProvider.chat` (prose) reserved for chat UIs where the user reads the response
-- [ ] Schema validation runs on every response; validation failure → retry once with error appended, second failure → hard fail + log
+- [x] Schema validation runs on every response; validation failure → retry once with error appended, second failure → hard fail + log. See `packages/ai/src/providers/deepseek.ts:98-146` (Zod parse → single retry with `<schema-error>` tag appended to messages → `StructuredOutputError` on second failure); regression `packages/ai/src/providers/deepseek.test.ts` cases "chatStructured retries once ..." + "chatStructured throws StructuredOutputError after second failure" (A-H5).
 - [ ] JSON mode / function calling used per provider capability; capability probe (from P0) determines fallback
 - [ ] Every prompt file declares its schema in the same module — cannot ship a prompt without a schema
 - [ ] Linter rule / CI check: any call to `chat` (not `chatStructured`) in a non-UI module fails the build
@@ -115,7 +115,7 @@ Cross-cutting requirements for every LLM call, every agent, every generated arti
 **Why:** Layered defense. Structural wrapping (item 4) is the primary; detection catches the obvious cases and logs them for review.
 
 **Acceptance criteria:**
-- [ ] `packages/ai/injection-scan.ts` — regex + heuristic scan for known-bad patterns; returns `{clean, flagged, score}`
+- [x] `packages/ai/injection-scan.ts` — regex + heuristic scan for known-bad patterns; returns `{hits, severity: clean|suspect|blocked}` (pattern rules + unicode-tag block + zero-width cluster + Cyrillic homoglyph detectors at `packages/ai/src/injection-scan.ts:1-172`). Wired into every untrusted-content ingest via `wrapUntrusted` in `packages/ai/src/wrap.ts`, which throws `InjectionBlockedError` on `blocked` and audit-logs on `suspect`. Regression in `packages/ai/src/injection-scan.test.ts` + `packages/ai/src/wrap.test.ts` (A-H5).
 - [ ] Also uses `injection-scan.prompt.ts` for a cheap LLM classifier (deepseek-flash) on content that regex flags borderline
 - [ ] Score above threshold → content marked `SUSPECTED_INJECTION`; goes into prompt with additional warning wrapper OR blocked entirely for high-risk paths (resume generation, application submission)
 - [ ] Every flag written to `llm_injection_log` with source, snippet, score, action taken
@@ -201,7 +201,7 @@ Cross-cutting requirements for every LLM call, every agent, every generated arti
 - [ ] `packages/ai/tokenize.ts` — `estimateTokens(text, model)` using `js-tiktoken`; correct encoding per model (cl100k_base for DeepSeek/GPT-3.5/4, o200k_base for GPT-4o)
 - [ ] Pre-flight cap enforcement: if `estimateTokens(prompt) + max_output_tokens > per_call_cap` → reject before dispatch
 - [ ] Per-user daily / monthly token + cost budget in `app_config`; over budget = 429 with clear error naming remaining budget + reset time
-- [ ] Per-call caps: max input tokens (32k default), max output tokens (4k default) — per-prompt override
+- [x] Per-call caps: max input tokens (32k default), max output tokens (4k default) — per-prompt override. `DeepSeekProvider.defaultMaxTokens = 4096` at construction; every `chat` and `chatStructured` call sends `max_tokens: maxTokens ?? this.defaultMaxTokens` in the body so no unbounded completions leave the process. See `packages/ai/src/providers/deepseek.ts:20-28,48-95,98-115` + regression `packages/ai/src/providers/deepseek.test.ts` cases "chatStructured sends max_tokens (default 4096) in body" + "chatStructured respects per-call maxTokens override" (A-H5). Input-cap tokenizer gate deferred to the P0 `llm_calls` middleware.
 - [ ] `llm_calls` retention: 90 days default, configurable
 - [ ] Circuit breaker: provider error rate > 20% in 5 min → auto-fallback to configured backup provider
 
