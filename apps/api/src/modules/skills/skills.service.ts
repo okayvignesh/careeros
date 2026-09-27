@@ -1,6 +1,17 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 
+/// C-P1.3: shape returned by `resolveByAlias`. Deliberately narrow -- callers
+/// (skill extractors, job-import stages, resume graders) only need the id +
+/// display name + the matched alias for logging.
+export interface ResolvedSkill {
+  id: string;
+  name: string;
+  cluster: string | null;
+  category: string | null;
+  matchedOn: 'name' | 'alias' | 'id';
+}
+
 export interface SkillRow {
   id: string;
   name: string;
@@ -42,6 +53,42 @@ export interface SkillDetail {
 @Injectable()
 export class SkillsService {
   constructor(private readonly prisma: PrismaService) {}
+
+  /// C-P1.3: resolve a free-form term (e.g. "K8s", "Postgres", "react.js") to
+  /// the canonical Skill row via case-insensitive match on `id`, `name`, or
+  /// `aliases`. Returns null when no match -- callers decide whether to log,
+  /// create a placeholder, or drop the term. Order of preference: exact id ->
+  /// name -> alias, so an alias never shadows a real skill named the same.
+  async resolveByAlias(term: string): Promise<ResolvedSkill | null> {
+    const needle = term.trim().toLowerCase();
+    if (!needle) return null;
+
+    // Single query, then in-memory rank. The taxonomy is ~200 rows -- scanning
+    // is cheaper than three round-trips with case-insensitive comparators.
+    // ponytail: linear scan is fine at this size; move to a Postgres query
+    // (`WHERE lower(id)=$1 OR lower(name)=$1 OR $1 = ANY(lower_aliases)`) if
+    // the taxonomy ever grows past a few thousand rows.
+    const skills = await this.prisma.skill.findMany({
+      select: { id: true, name: true, cluster: true, category: true, aliases: true },
+    });
+
+    let byId: ResolvedSkill | null = null;
+    let byName: ResolvedSkill | null = null;
+    let byAlias: ResolvedSkill | null = null;
+    for (const s of skills) {
+      if (!byId && s.id.toLowerCase() === needle) {
+        byId = { id: s.id, name: s.name, cluster: s.cluster, category: s.category, matchedOn: 'id' };
+      }
+      if (!byName && s.name.toLowerCase() === needle) {
+        byName = { id: s.id, name: s.name, cluster: s.cluster, category: s.category, matchedOn: 'name' };
+      }
+      if (!byAlias && s.aliases.some((a) => a.toLowerCase() === needle)) {
+        byAlias = { id: s.id, name: s.name, cluster: s.cluster, category: s.category, matchedOn: 'alias' };
+      }
+      if (byId) break; // id match wins outright
+    }
+    return byId ?? byName ?? byAlias;
+  }
 
   async list(userId: string): Promise<SkillRow[]> {
     // Left-join: every seeded skill appears, even ones the user has no state for yet.

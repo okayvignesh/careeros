@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --ext .ts",
     "test": "cd ../.. && vitest run apps/api/src",
-    "prisma": "prisma"
+    "prisma": "prisma",
+    "seed:esco": "ts-node src/seed/esco.ts"
   },
   "dependencies": {
     "@careeros/ai": "workspace:*",

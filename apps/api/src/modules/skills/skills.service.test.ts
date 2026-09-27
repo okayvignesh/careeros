@@ -340,6 +340,82 @@ describe('SkillsService.detail', () => {
   });
 });
 
+describe('SkillsService.resolveByAlias', () => {
+  // Shared taxonomy stand-in used by the resolveByAlias cases. Mirrors the
+  // shape returned by the real `prisma.skill.findMany({ select: ... })` call.
+  const TAXONOMY = [
+    { id: 'kubernetes', name: 'Kubernetes', cluster: 'tool',      category: 'cloud',    aliases: ['kubernetes', 'k8s', 'kube'] },
+    { id: 'postgres',   name: 'PostgreSQL', cluster: 'tool',      category: 'data',     aliases: ['postgres', 'postgresql', 'pg', 'psql'] },
+    { id: 'react',      name: 'React',      cluster: 'framework', category: 'frontend', aliases: ['react', 'reactjs', 'react.js'] },
+  ];
+
+  function withTaxonomy(): PrismaMock {
+    return makePrismaMock({ skillFindMany: TAXONOMY });
+  }
+
+  it('resolves "K8s" -> kubernetes via alias, case-insensitive', async () => {
+    const svc = new SkillsService(withTaxonomy() as never);
+    const hit = await svc.resolveByAlias('K8s');
+    expect(hit).toEqual({
+      id: 'kubernetes',
+      name: 'Kubernetes',
+      cluster: 'tool',
+      category: 'cloud',
+      matchedOn: 'alias',
+    });
+    // MUTATION SMOKE: drop the `.toLowerCase()` on the needle -> "K8s" no
+    // longer matches "k8s" and this test flips to null.
+  });
+
+  it('resolves an exact id match with matchedOn=id', async () => {
+    const svc = new SkillsService(withTaxonomy() as never);
+    const hit = await svc.resolveByAlias('kubernetes');
+    expect(hit?.matchedOn).toBe('id');
+    expect(hit?.id).toBe('kubernetes');
+  });
+
+  it('resolves a display-name match with matchedOn=name', async () => {
+    const svc = new SkillsService(withTaxonomy() as never);
+    const hit = await svc.resolveByAlias('PostgreSQL');
+    expect(hit?.matchedOn).toBe('name');
+    expect(hit?.id).toBe('postgres');
+  });
+
+  it('returns null for an unknown term', async () => {
+    const svc = new SkillsService(withTaxonomy() as never);
+    const hit = await svc.resolveByAlias('cobol-on-cogs');
+    expect(hit).toBeNull();
+  });
+
+  it('returns null for blank input without hitting the db', async () => {
+    const prisma = withTaxonomy();
+    const svc = new SkillsService(prisma as never);
+    const hit = await svc.resolveByAlias('   ');
+    expect(hit).toBeNull();
+    expect(prisma.skill.findMany).not.toHaveBeenCalled();
+    // MUTATION SMOKE: drop the `if (!needle) return null` guard -> the db is
+    // queried on every whitespace call (wasteful) and the not.toHaveBeenCalled
+    // assert fails.
+  });
+
+  it('prefers id > name > alias when several rows could match', async () => {
+    // "postgres" is a taxonomy id AND an alias of the same row -- id wins.
+    // Then invent a row whose name equals another row's alias to prove the
+    // rank order picks name over alias.
+    const prisma = makePrismaMock({
+      skillFindMany: [
+        { id: 'ambiguous', name: 'K8s', cluster: null, category: 'devops', aliases: [] },
+        { id: 'kubernetes', name: 'Kubernetes', cluster: 'tool', category: 'cloud', aliases: ['k8s'] },
+      ],
+    });
+    const svc = new SkillsService(prisma as never);
+    const hit = await svc.resolveByAlias('k8s');
+    // Name match on "K8s" (row 1) beats alias match on "k8s" (row 2).
+    expect(hit?.id).toBe('ambiguous');
+    expect(hit?.matchedOn).toBe('name');
+  });
+});
+
 // ------ B-7 scope reconciliation (belongs in report, kept here for traceability) ------
 // The plan row asked for tests of:
 //   (a) aggregation math       — lives in packages/shared/src/knowledge-rules.ts
