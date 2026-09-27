@@ -654,3 +654,26 @@ model BossBattle {
   @@index([userId, status])
   @@map("boss_battles")
 }
+
+/// C-P4.4 company dossier. One row per company (`companyId` is the free-form
+/// company name — no Company table yet, matches `NormalizedJob.company`).
+/// Every JSON field is a snapshot of one pipeline stage; `synthesis` is the
+/// grounded LLM narrative, and `factRefs` lists the fact ids the LLM cited.
+/// Cache invariant: rows are re-used until `staleAfter` passes; `assembleFor`
+/// short-circuits before hitting any external stage while still fresh.
+model CompanyDossier {
+  id             String   @id @default(uuid()) @db.Uuid
+  companyId      String   @unique
+  identity       Json     /// { website, linkedinUrl, employeeCount?, hq? }
+  techSignals    Json     /// { stackHints: string[], engineeringBlogPosts: [{url,title,summary}] }
+  reviews        Json     /// { ambitionbox?, comparably?, reddit?: {threads:[]} }
+  interviews     Json     /// { leetcodeDiscuss?: [], glassdoorScraped?: [] }
+  recentEvents   Json     /// { fundingRounds:[], layoffs:[], productLaunches:[], acquisitions:[] }
+  synthesis      String   @db.Text
+  factRefs       String[] @default([])
+  generatedAt    DateTime @default(now()) @db.Timestamptz(6)
+  staleAfter     DateTime @db.Timestamptz(6)
+
+  @@index([staleAfter])
+  @@map("company_dossiers")
+}

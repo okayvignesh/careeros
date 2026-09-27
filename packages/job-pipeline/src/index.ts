@@ -42,3 +42,20 @@ export {
   type VerifyResult,
   type VerifyVerdict,
 } from './stages/verify';
+// Wire-shape schemas per adapter (C-P3.6a). Used by contract tests + optional
+// pre-parse guards. The `node:fs`-backed snapshot helpers in schemas.ts are
+// intentionally NOT re-exported — they are test-time only.
+export {
+  RemotiveFeedWire,
+  RemotiveJobWire,
+  AshbyBoardWire,
+  AshbyJobWire,
+  GreenhouseBoardWire,
+  GreenhouseJobWire,
+  AdzunaResponseWire,
+  AdzunaJobWire,
+  ArbeitnowResponseWire,
+  ArbeitnowJobWire,
+  adapterWireSchemas,
+  type AdapterId,
+} from './adapters/schemas';
