@@ -23,7 +23,7 @@
 // both toolchains without a per-package vitest override.
 
 import dynamic from 'next/dynamic';
-import { createElement, useCallback, useEffect, useMemo, useState } from 'react';
+import { createElement, useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
 import type { OnChange, OnMount } from '@monaco-editor/react';
 
 const MonacoEditor = dynamic(
@@ -86,7 +86,7 @@ function hslToHex(hslStr: string): string {
   return '#' + to(r) + to(g) + to(b);
 }
 
-function renderSkeleton(): JSX.Element {
+function renderSkeleton(): ReactElement {
   return createElement('div', {
     'aria-hidden': true,
     className:
@@ -95,7 +95,7 @@ function renderSkeleton(): JSX.Element {
   });
 }
 
-export function CodeEditor(props: CodeEditorProps): JSX.Element {
+export function CodeEditor(props: CodeEditorProps): ReactElement {
   const {
     value,
     onChange,

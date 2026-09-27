@@ -1,3 +1,5 @@
+'use client';
+
 import { ThinkingOrb } from 'thinking-orbs';
 
 export default function Loading() {

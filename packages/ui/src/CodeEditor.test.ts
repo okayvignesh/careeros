@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createElement } from 'react';
+import { createElement, type ReactElement } from 'react';
 import { cleanup, fireEvent, render } from '@testing-library/react';
 
 // next/dynamic in a test context should just synchronously return the
@@ -14,7 +14,7 @@ vi.mock('next/dynamic', () => ({
     return function MockMonaco(props: {
       value: string;
       onChange?: (v: string | undefined) => void;
-    }): JSX.Element {
+    }): ReactElement {
       return createElement('textarea', {
         'data-testid': 'mock-monaco',
         value: props.value,
