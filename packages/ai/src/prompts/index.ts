@@ -20,3 +20,24 @@ import './cover-letter-writer';
 
 export { allPrompts, getPrompt, promptHash, renderPrompt } from './registry';
 export type { PromptDef, RenderedPrompt, PromptExample } from './types';
+
+// C-P0.2: versioned catalog + hash-log audit hook. Parallel to the runtime
+// PromptDef registry above; tracks (id, version) pairs for CI version-bump
+// gate + audit log rows.
+export {
+  PromptRegistry,
+  promptCatalog,
+  setPromptUseHook,
+  logPromptUse,
+  resumeFactCheck,
+  coverLetterGeneration,
+  skillExtract,
+  marketBriefSynthesis,
+  assessmentGraderKnowledge,
+  assessmentGraderCodeReview,
+  type Prompt,
+  type PromptInfo,
+  type PromptUseHook,
+  type PromptUseEvent,
+  type LogPromptUseInput,
+} from './catalog';
