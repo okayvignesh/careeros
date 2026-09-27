@@ -62,6 +62,12 @@ export {
   type VerifyResult,
   type VerifyVerdict,
 } from './stages/verify';
+export {
+  trustOrder,
+  tierFor,
+  TIER_BY_ADAPTER,
+  type TrustOrderOpts,
+} from './stages/trust-order';
 // Wire-shape schemas per adapter (C-P3.6a). Used by contract tests + optional
 // pre-parse guards. The `node:fs`-backed snapshot helpers in schemas.ts are
 // intentionally NOT re-exported — they are test-time only.
