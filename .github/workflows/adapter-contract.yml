@@ -1,0 +1,158 @@
+# C-P3.6b: Weekly adapter contract check.
+#
+# Owning specs: plan/phase-3-market-engine.md lines 153-156, plan/COMPLETION_PLAN.md
+# C-P3.6. Hits each job-source adapter's LIVE upstream once, validates the wire
+# response against the Zod schemas in packages/job-pipeline/src/adapters/schemas.ts,
+# and on failure opens a tracking issue with the response shape diff.
+#
+# Rate-limit budget: Adzuna free tier is ~25 req/day/app; this workflow burns
+# exactly 1 Adzuna request per run, 4 per month against a ~750/month budget.
+# Public feeds (ashby / greenhouse / arbeitnow / remotive) have no formal cap.
+#
+# Repository secrets required to enable Adzuna drift detection (test skips
+# with a warning if absent):
+#   - ADZUNA_APP_ID
+#   - ADZUNA_APP_KEY
+name: Adapter contract
+
+on:
+  schedule:
+    # Monday 06:00 UTC. Weekly cadence keeps upstream budget minimal and
+    # aligns with the "weekly drift PR" cadence in phase-3-market-engine.md.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+jobs:
+  contract:
+    name: live upstream contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Run contract tests
+        id: run
+        continue-on-error: true
+        env:
+          ADAPTER_CONTRACT: '1'
+          # Optional Adzuna creds; when absent the adzuna contract test soft-skips
+          # and prints a warning. Add ADZUNA_APP_ID + ADZUNA_APP_KEY to repo
+          # secrets (Settings -> Secrets and variables -> Actions) to enable.
+          ADZUNA_APP_ID: ${{ secrets.ADZUNA_APP_ID }}
+          ADZUNA_APP_KEY: ${{ secrets.ADZUNA_APP_KEY }}
+        # Run only the contract tests. `contract.test.ts` naming filters out
+        # every other unit test in the pipeline package.
+        run: |
+          set +e
+          pnpm exec vitest run \
+            packages/job-pipeline/src/adapters/adzuna.contract.test.ts \
+            packages/job-pipeline/src/adapters/arbeitnow.contract.test.ts \
+            packages/job-pipeline/src/adapters/ashby.contract.test.ts \
+            packages/job-pipeline/src/adapters/greenhouse.contract.test.ts \
+            packages/job-pipeline/src/adapters/remotive.contract.test.ts \
+            --reporter=default \
+            > contract.log 2>&1
+          echo "exit=$?" >> "$GITHUB_OUTPUT"
+          cat contract.log
+
+      - name: Upload contract log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: adapter-contract-log
+          path: |
+            contract.log
+            packages/job-pipeline/__contracts__/
+          if-no-files-found: warn
+          retention-days: 60
+
+      - name: File drift issue
+        if: steps.run.outputs.exit != '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            let log = '';
+            try {
+              log = fs.readFileSync('contract.log', 'utf8').slice(-8000);
+            } catch (e) {
+              log = '(no contract.log)';
+            }
+
+            // Pull last-known-good snapshots into the issue body so the operator
+            // can eyeball what shape we expected. Snapshot files are small
+            // (see packages/job-pipeline/__contracts__/*).
+            const snapDir = 'packages/job-pipeline/__contracts__';
+            let snapshots = '';
+            try {
+              for (const f of fs.readdirSync(snapDir)) {
+                const body = fs.readFileSync(path.join(snapDir, f), 'utf8');
+                snapshots += `\n\n### ${f}\n\n\`\`\`json\n${body}\n\`\`\``;
+              }
+            } catch (e) {
+              snapshots = '(no snapshot dir)';
+            }
+
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = [
+              'Weekly adapter-contract check detected drift on one or more upstream job-source APIs.',
+              '',
+              `Workflow run: ${runUrl}`,
+              '',
+              '## Test output (tail)',
+              '',
+              '```',
+              log,
+              '```',
+              '',
+              '## Last-known-good snapshots',
+              snapshots,
+              '',
+              '## Next steps',
+              '',
+              '1. Inspect the failing adapter (which schema field diffed?).',
+              '2. If the mapper still works, update the Zod schema in `packages/job-pipeline/src/adapters/schemas.ts` and refresh the snapshot: `ADAPTER_CONTRACT=1 UPDATE_SNAPSHOTS=1 pnpm exec vitest run <adapter>.contract.test.ts`.',
+              '3. If the mapper broke, patch it and re-run.',
+              '',
+              'See `plan/phase-3-market-engine.md` (C-P3.6).',
+            ].join('\n');
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Adapter contract drift (${new Date().toISOString().slice(0, 10)})`,
+              body,
+              labels: ['adapter-drift', 'phase-3'],
+            });
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Adapter contract"
+            echo ""
+            echo "- Exit code: ${{ steps.run.outputs.exit }}"
+            echo "- Adzuna creds present: ${{ secrets.ADZUNA_APP_ID != '' }}"
+            echo ""
+            echo "See adapter-contract-log artifact for full test output + snapshots."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail workflow on drift
+        if: steps.run.outputs.exit != '0'
+        run: exit 1

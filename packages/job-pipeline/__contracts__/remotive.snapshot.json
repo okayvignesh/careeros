@@ -1,0 +1,25 @@
+{
+  "jobs": [
+    {
+      "candidate_required_location": "string",
+      "category": "string",
+      "company_logo": "string",
+      "company_logo_url": "string",
+      "company_name": "string",
+      "description": "string",
+      "id": "number",
+      "job_type": "string",
+      "publication_date": "string",
+      "salary": "string",
+      "tags": [
+        "string"
+      ],
+      "title": "string",
+      "url": "string"
+    }
+  ],
+  "00-warning": "string",
+  "0-legal-notice": "string",
+  "job-count": "number",
+  "total-job-count": "number"
+}

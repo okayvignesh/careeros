@@ -1,0 +1,36 @@
+{
+  "data": [
+    {
+      "company_name": "string",
+      "created_at": "number",
+      "description": "string",
+      "job_types": [
+        "string"
+      ],
+      "location": "string",
+      "remote": "boolean",
+      "slug": "string",
+      "tags": [
+        "string"
+      ],
+      "title": "string",
+      "url": "string"
+    }
+  ],
+  "links": {
+    "first": "string",
+    "last": null,
+    "next": "string",
+    "prev": null
+  },
+  "meta": {
+    "current_page": "number",
+    "current_page_url": "string",
+    "from": "number",
+    "info": "string",
+    "path": "string",
+    "per_page": "number",
+    "terms": "string",
+    "to": "number"
+  }
+}

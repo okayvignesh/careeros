@@ -1,0 +1,57 @@
+{
+  "jobs": [
+    {
+      "absolute_url": "string",
+      "ai_disclaimer": null,
+      "ai_opt_out_request_url": "string",
+      "application_deadline": null,
+      "company_name": "string",
+      "content": "string",
+      "data_compliance": [
+        {
+          "demographic_data_consent_applies": "boolean",
+          "requires_consent": "boolean",
+          "requires_processing_consent": "boolean",
+          "requires_retention_consent": "boolean",
+          "retention_period": null,
+          "type": "string"
+        }
+      ],
+      "departments": [
+        {
+          "child_ids": [],
+          "id": "number",
+          "name": "string",
+          "parent_id": "number"
+        }
+      ],
+      "education": "string",
+      "first_published": "string",
+      "id": "number",
+      "include_ai_disclaimer": "boolean",
+      "internal_job_id": "number",
+      "language": "string",
+      "location": {
+        "name": "string"
+      },
+      "metadata": null,
+      "offices": [
+        {
+          "child_ids": [
+            "number"
+          ],
+          "id": "number",
+          "location": null,
+          "name": "string",
+          "parent_id": "number"
+        }
+      ],
+      "requisition_id": "string",
+      "title": "string",
+      "updated_at": "string"
+    }
+  ],
+  "meta": {
+    "total": "number"
+  }
+}

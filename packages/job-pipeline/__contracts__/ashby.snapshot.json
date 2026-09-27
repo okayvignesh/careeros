@@ -1,0 +1,74 @@
+{
+  "jobs": [
+    {
+      "address": {
+        "postalAddress": {
+          "addressCountry": "string",
+          "addressLocality": "string",
+          "addressRegion": "string",
+          "postalCode": "string"
+        }
+      },
+      "applyUrl": "string",
+      "compensation": {
+        "compensationTierSummary": "string",
+        "compensationTiers": [
+          {
+            "additionalInformation": null,
+            "components": [
+              {
+                "compensationType": "string",
+                "currencyCode": "string",
+                "id": "string",
+                "interval": "string",
+                "maxValue": null,
+                "minValue": null,
+                "summary": "string"
+              }
+            ],
+            "id": "string",
+            "tierSummary": "string",
+            "title": "string"
+          }
+        ],
+        "scrapeableCompensationSalarySummary": "string",
+        "summaryComponents": [
+          {
+            "compensationType": "string",
+            "currencyCode": "string",
+            "interval": "string",
+            "maxValue": null,
+            "minValue": null
+          }
+        ]
+      },
+      "department": "string",
+      "descriptionHtml": "string",
+      "descriptionPlain": "string",
+      "employmentType": "string",
+      "id": "string",
+      "isListed": "boolean",
+      "isRemote": "boolean",
+      "jobUrl": "string",
+      "location": "string",
+      "publishedAt": "string",
+      "secondaryLocations": [
+        {
+          "address": {
+            "postalAddress": {
+              "addressCountry": "string",
+              "addressLocality": "string",
+              "addressRegion": "string"
+            }
+          },
+          "location": "string"
+        }
+      ],
+      "shouldDisplayCompensationOnJobPostings": "boolean",
+      "team": "string",
+      "title": "string",
+      "workplaceType": "string"
+    }
+  ],
+  "apiVersion": "string"
+}
