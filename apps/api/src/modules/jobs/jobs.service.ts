@@ -7,7 +7,10 @@ import {
   adapters as allAdapters,
   normalize,
   freshness,
+  crossSourceDedupe,
+  verify,
   type JobSourceAdapter,
+  type NormalizedJob,
 } from '@careeros/job-pipeline';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UsageService } from '../usage/usage.service';
@@ -24,6 +27,10 @@ export interface JobsSyncStats {
   rawInserted: number;
   normalizedInserted: number;
   normalizedUpdated: number;
+  /** C-P3.2e: rows that verify() rejected — never entered jobs_normalized, one row each in job_reject_log. */
+  rejected: number;
+  /** C-P3.2e: rows folded into a higher-tier sibling by crossSourceDedupe. */
+  merged: number;
 }
 
 export interface JobListItem {
@@ -110,6 +117,8 @@ export class JobsService {
       rawInserted: 0,
       normalizedInserted: 0,
       normalizedUpdated: 0,
+      rejected: 0,
+      merged: 0,
     };
 
     const raws = await adapter.fetch();
@@ -151,8 +160,55 @@ export class JobsService {
     const rawResult = await this.prisma.jobRaw.createMany({ data: rawRows });
     stats.rawInserted = rawResult.count;
 
-    const normalized = raws.map((r) => normalize(r));
-    const canonicalUrls = normalized.map((n) => n.canonicalUrl);
+    // C-P3.2e wiring: normalize → cross-source fuzzy dedupe → verify.
+    // Rejected rows never touch jobs_normalized; every rejected row lands as
+    // one job_reject_log row for the reject-audit UI (web slice deferred).
+    // Flagged + trusted continue into the existing N+1-safe upsert flow.
+    const normalizedAll = raws.map((r) => normalize(r));
+    const dedupeResult = crossSourceDedupe(normalizedAll);
+    stats.merged = dedupeResult.duplicates.length;
+
+    // Look up jobRawId for each surviving canonicalUrl so the reject-log can
+    // point at the exact provenance row. One extra query per sync (still O(1)
+    // per batch, preserves the C-P3.8b N+1 invariant).
+    const rejectRows: Prisma.JobRejectLogCreateManyInput[] = [];
+    const survivors: NormalizedJob[] = [];
+    for (const n of dedupeResult.unique) {
+      const v = verify(n);
+      if (v.verdict === 'rejected') {
+        rejectRows.push({
+          jobRawId: null, // filled below via the raws map
+          sourceId: extractSourceIdFromTag(n.sourceTag),
+          sourceName: n.primarySource,
+          reason: v.reasons[0] ?? 'unknown',
+          verdict: 'rejected',
+          details: {
+            reasons: v.reasons,
+            canonicalUrl: n.canonicalUrl,
+            title: n.title,
+            company: n.company,
+            rawJd: n.description,
+            sourcePostedAt: n.sourcePostedAt?.toISOString() ?? null,
+          } as Prisma.InputJsonValue,
+        });
+        continue;
+      }
+      survivors.push(n);
+    }
+    // Fold merged loser sourceTags onto each survivor before persist.
+    // ponytail: this stage-owned merged-tag map is per-batch; the existing-row
+    // update path re-merges with the DB-side sourceIds below to cover the case
+    // where the same URL was persisted in a prior sync.
+    const mergedTags = dedupeResult.mergedSourceTagsByWinner;
+
+    if (rejectRows.length > 0) {
+      await this.prisma.jobRejectLog.createMany({ data: rejectRows });
+      stats.rejected = rejectRows.length;
+    }
+
+    if (survivors.length === 0) return stats;
+
+    const canonicalUrls = survivors.map((n) => n.canonicalUrl);
     const existingRows = await this.prisma.normalizedJob.findMany({
       where: { canonicalUrl: { in: canonicalUrls } },
       select: { canonicalUrl: true, sourceIds: true },
@@ -160,8 +216,13 @@ export class JobsService {
     const existingByUrl = new Map(existingRows.map((row) => [row.canonicalUrl, row]));
 
     const toInsert: Prisma.NormalizedJobCreateManyInput[] = [];
-    const toUpdate: Array<{ n: ReturnType<typeof normalize>; existingSourceIds: string[] }> = [];
-    for (const n of normalized) {
+    const toUpdate: Array<{ n: NormalizedJob; existingSourceIds: string[] }> = [];
+    for (const n of survivors) {
+      // Accumulated in-batch sourceIds from cross-source-dedupe (includes the
+      // winner's own tag + every merged loser's tag). Falls back to just the
+      // winner's own tag if the map lookup misses (shouldn't happen, but
+      // safe).
+      const batchTags = mergedTags.get(n) ?? [n.sourceTag];
       const existing = existingByUrl.get(n.canonicalUrl);
       if (existing) {
         toUpdate.push({ n, existingSourceIds: existing.sourceIds });
@@ -175,7 +236,7 @@ export class JobsService {
           description: n.description,
           sourcePostedAt: n.sourcePostedAt,
           primarySource: n.primarySource,
-          sourceIds: [n.sourceTag],
+          sourceIds: batchTags,
         });
       }
     }
@@ -190,6 +251,7 @@ export class JobsService {
 
     const now = new Date();
     for (const { n, existingSourceIds } of toUpdate) {
+      const batchTags = mergedTags.get(n) ?? [n.sourceTag];
       await this.prisma.normalizedJob.update({
         where: { canonicalUrl: n.canonicalUrl },
         data: {
@@ -200,7 +262,7 @@ export class JobsService {
           description: n.description,
           sourcePostedAt: n.sourcePostedAt,
           lastVerifiedAt: now,
-          sourceIds: uniq([...existingSourceIds, n.sourceTag]),
+          sourceIds: uniq([...existingSourceIds, ...batchTags]),
         },
       });
       stats.normalizedUpdated++;
@@ -503,4 +565,14 @@ export class JobsService {
 
 function uniq<T>(arr: T[]): T[] {
   return Array.from(new Set(arr));
+}
+
+/**
+ * `sourceTag = "${sourceName}:${sourceId}"`. Strip the source-name prefix to
+ * recover the adapter-native id for reject-log persistence. If the format
+ * ever drifts, fall back to the whole tag so we never lose provenance.
+ */
+function extractSourceIdFromTag(sourceTag: string): string {
+  const idx = sourceTag.indexOf(':');
+  return idx >= 0 ? sourceTag.slice(idx + 1) : sourceTag;
 }

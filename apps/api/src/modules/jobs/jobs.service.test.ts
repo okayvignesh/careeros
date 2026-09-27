@@ -16,17 +16,23 @@ import { InjectionBlockedError } from '@careeros/ai';
 // Mutation smoke: comments name the mutation each assertion catches.
 
 function raw(i: number): RawJob {
+  // C-P3.2e: description padded to 60+ chars so verify() doesn't `flag
+  // thin-description`; sourcePostedAt anchored to `now - 5d` so verify()
+  // doesn't `reject stale` — the N+1 assertion is orthogonal to verify's
+  // rule set, we just want every row to survive into the persist path.
+  const now = Date.now();
+  const fiveDaysAgo = new Date(now - 5 * 86_400_000);
   return {
     sourceId: `id-${i}`,
     sourceName: 'remotive',
     canonicalUrl: `https://example.com/jobs/${i}`,
-    title: `Role ${i}`,
-    company: `Co ${i}`,
+    title: `Role ${i} Engineering Position`,
+    company: `Company ${i} Ltd`,
     location: null,
     remote: true,
-    description: `desc ${i}`,
-    sourcePostedAt: new Date('2026-05-01T00:00:00Z'),
-    fetchedAt: new Date('2026-05-15T00:00:00Z'),
+    description: `Detailed job description number ${i} with enough characters to pass the 50-char verify threshold.`,
+    sourcePostedAt: fiveDaysAgo,
+    fetchedAt: new Date(now),
     payload: { i },
   };
 }
@@ -58,6 +64,12 @@ function makePrismaMock(opts: { existingUrls?: string[] } = {}) {
         update: vi.fn(async () => {
           calls.push('normalizedJob.update');
           return {};
+        }),
+      },
+      jobRejectLog: {
+        createMany: vi.fn(async ({ data }: { data: unknown[] }) => {
+          calls.push('jobRejectLog.createMany');
+          return { count: data.length };
         }),
       },
     },
