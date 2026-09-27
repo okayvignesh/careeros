@@ -33,9 +33,12 @@ export const SETUP_SECTIONS = ['Account', 'Data', 'Profile', 'Finish'] as const;
  * addition/rename can't silently drift from the state machine.
  * ponytail: single source of truth; middleware + guards import this instead
  * of duplicating the mapping.
+ * 'not_started' points at '02-account' because '01-preflight' is a pure
+ * browser-capability check (no POST). The user is allowed on either — see
+ * allowedSetupSlugs — but the *next actionable* step is account creation.
  */
 export const SETUP_STATE_TO_SLUG: Record<string, string | null> = {
-  not_started: '01-preflight',
+  not_started: '02-account',
   account_created: '03-provider',
   provider_configured: '04-capability',
   provider_verified: '05-embedding',

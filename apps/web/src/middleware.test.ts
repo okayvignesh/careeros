@@ -45,8 +45,8 @@ const stateComplete: StateBody = {
 const stateFresh: StateBody = {
   state: 'not_started',
   hasUser: false,
-  currentStepSlug: '01-preflight',
-  allowedSlugs: ['01-preflight'],
+  currentStepSlug: '02-account',
+  allowedSlugs: ['01-preflight', '02-account'],
 };
 
 // The middleware uses AbortController + a 5s timer; drive it with fake timers
@@ -202,18 +202,25 @@ describe('middleware — URL-jump prevention', () => {
     expect(new URL(res.headers.get('location')!).pathname).toBe('/setup/06-embedding-test');
   });
 
-  it('fresh install: /dashboard → redirect to /setup/01-preflight', async () => {
+  it('fresh install: /dashboard → redirect to /setup/02-account (first actionable step)', async () => {
     mockState(stateFresh);
     const res = await middleware(req('/dashboard'));
     expect(res.status).toBe(307);
-    expect(new URL(res.headers.get('location')!).pathname).toBe('/setup/01-preflight');
+    expect(new URL(res.headers.get('location')!).pathname).toBe('/setup/02-account');
   });
 
-  it('fresh install: /setup/02-account (not yet allowed) → redirect to /setup/01-preflight', async () => {
+  it('fresh install: /setup/03-provider (not yet allowed) → redirect to /setup/02-account', async () => {
     mockState(stateFresh);
-    const res = await middleware(req('/setup/02-account'));
+    const res = await middleware(req('/setup/03-provider'));
     expect(res.status).toBe(307);
-    expect(new URL(res.headers.get('location')!).pathname).toBe('/setup/01-preflight');
+    expect(new URL(res.headers.get('location')!).pathname).toBe('/setup/02-account');
+  });
+
+  it('fresh install: /setup/01-preflight (browser check, no POST) is allowed', async () => {
+    mockState(stateFresh);
+    const res = await middleware(req('/setup/01-preflight'));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-middleware-next')).toBe('1');
   });
 
   it('/sign-in stays reachable while setup incomplete (recovery path)', async () => {
