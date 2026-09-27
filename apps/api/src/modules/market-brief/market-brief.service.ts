@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { MarketBriefContent } from '@careeros/shared';
-import { DeepSeekProvider, renderPrompt, wrapUntrusted } from '@careeros/ai';
+import { DeepSeekProvider, InjectionBlockedError, renderPrompt, wrapUntrusted } from '@careeros/ai';
 import { decrypt, loadMasterKey } from '@careeros/secrets';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UsageService } from '../usage/usage.service';
@@ -111,19 +111,40 @@ export class MarketBriefService {
       `- Top companies: ${stats.topCompanies.map((c) => `${c.company} (${c.count})`).join(', ') || '(none)'}`,
     ].join('\n');
 
-    // Sample is untrusted third-party content — wrap so any prompt-injection
-    // prose in a title can't re-steer the writer.
-    const sampleWrapped = wrapUntrusted(
-      sample.map((s) => `- ${s.title} @ ${s.company} | ${s.canonicalUrl}`).join('\n'),
-      'job-description',
-    );
+    // C-P3.7b: wrap EACH sample line individually so a single poisoned title
+    // never sinks the whole brief. wrapUntrusted throws InjectionBlockedError
+    // on blocked severity; catch per-line, audit `security.audit.injection_blocked`
+    // with the job ref, drop the line, continue.
+    const wrappedLines: string[] = [];
+    const droppedRefs: string[] = [];
+    for (const s of sample) {
+      try {
+        const w = wrapUntrusted(
+          `- ${s.title} @ ${s.company} | ${s.canonicalUrl}`,
+          'job-description',
+        );
+        wrappedLines.push(w.content);
+      } catch (err) {
+        if (err instanceof InjectionBlockedError) {
+          droppedRefs.push(s.canonicalUrl);
+          await this.auditInjectionBlocked(userId, s.canonicalUrl, err);
+          continue;
+        }
+        throw err;
+      }
+    }
+    if (wrappedLines.length === 0) {
+      throw new BadRequestException(
+        'Every sampled job was refused by the injection filter. Sync fresh jobs and retry.',
+      );
+    }
 
     const rendered = renderPrompt('market-brief-writer', {
       candidateContext,
       windowDays: String(WINDOW_DAYS),
       stats: statsRendered,
       sources: sources.map((s) => `- ${s.url}`).join('\n'),
-      jobSample: sampleWrapped.content,
+      jobSample: wrappedLines.join('\n'),
     });
     // A-M9: per-user LLM concurrency ceiling.
     const result = (await this.usage.runWithUserLimit(userId, () =>
@@ -232,6 +253,32 @@ export class MarketBriefService {
       content: JSON.parse(row.content) as MarketBriefContent,
       sources: row.sourcesJson as unknown as BriefSource[],
     };
+  }
+
+  /**
+   * C-P3.7b: dedicated audit row per blocked ingest so per-source drops are
+   * reviewable in the audit UI alongside the wrap.ts audit hook (ai-safety.md
+   * item 5). Same action string the wrap boundary emits.
+   */
+  private async auditInjectionBlocked(
+    userId: string,
+    jobUrl: string,
+    err: InjectionBlockedError,
+  ): Promise<void> {
+    await this.prisma.auditEvent
+      .create({
+        data: {
+          userId,
+          actor: 'system',
+          action: 'security.audit.injection_blocked',
+          resourceType: 'market_brief_sample',
+          resourceId: jobUrl,
+          payload: { jobUrl, source: 'job-description', kinds: err.hits },
+        },
+      })
+      .catch(() => {
+        /* audit must not throw */
+      });
   }
 
   /** Same shape as CorpusService / JobsService `tryLoadProvider`. */
