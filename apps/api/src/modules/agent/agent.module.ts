@@ -4,6 +4,7 @@ import { AuthModule } from '../auth/auth.module';
 import { AgentController } from './agent.controller';
 import { AgentService } from './agent.service';
 import { AgentJwtGuard } from './agent.jwt-strategy';
+import { AgentGateway } from './agent.gateway';
 
 /**
  * D.2 (Wave D / P3.5): registers the desktop-agent module. `JwtModule` is
@@ -30,7 +31,7 @@ import { AgentJwtGuard } from './agent.jwt-strategy';
     }),
   ],
   controllers: [AgentController],
-  providers: [AgentService, AgentJwtGuard],
-  exports: [AgentService, AgentJwtGuard, JwtModule],
+  providers: [AgentService, AgentJwtGuard, AgentGateway],
+  exports: [AgentService, AgentJwtGuard, AgentGateway, JwtModule],
 })
 export class AgentModule {}

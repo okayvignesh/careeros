@@ -185,6 +185,34 @@ export class AgentController {
     await this.agents.revokeDevice(id, userId);
     await audit(this.prisma, userId, req, 'agent.device.revoked', { deviceId: id, by: 'user' });
   }
+
+  /**
+   * Agent posts the result of a task assigned to it. `status` in
+   * ('completed' | 'failed' | 'timeout'); the row transitions from
+   * queued/in_progress to terminal and stores `resultJson`. Only the
+   * device that owns the task can post its result.
+   */
+  @Post('tasks/:id/result')
+  @HttpCode(204)
+  @UseGuards(AgentJwtGuard)
+  async postTaskResult(
+    @Req() req: Request,
+    @Param('id') taskId: string,
+    @Body() body: { status?: string; resultJson?: unknown },
+  ) {
+    const deviceId = req.agent!.deviceId;
+    const status = body?.status;
+    if (status !== 'completed' && status !== 'failed' && status !== 'timeout') {
+      throw new ForbiddenException('status must be completed|failed|timeout');
+    }
+    await this.agents.recordTaskResult(taskId, deviceId, status, body?.resultJson ?? null);
+    await this.agents.touchDevice(deviceId);
+    await audit(this.prisma, req.agent!.userId, req, 'agent.task.result.received', {
+      taskId,
+      deviceId,
+      status,
+    });
+  }
 }
 
 function requestIp(req: Request): string {
