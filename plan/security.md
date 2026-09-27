@@ -61,6 +61,7 @@ Cross-cutting security requirements for an open-source, self-hostable developer 
 - [ ] Postgres connection must use TLS in production (`sslmode=require` or higher) → else exit 1.
 - [ ] Default admin credentials do not exist. First user is created only via the setup wizard, never seeded.
 - [ ] `startup-check.ts` runs before Nest bootstrap, tested in unit tests with negative cases.
+- [x] Web middleware fails CLOSED to `/service-unavailable?next=<path>` when the API is unreachable (network error, 5s timeout, non-2xx); public routes still render. See `apps/web/src/middleware.ts:24-53` + `apps/web/src/middleware.test.ts` (A-M8).
 
 **Phase:** P0
 

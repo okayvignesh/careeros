@@ -1,18 +1,41 @@
-import { Eyebrow } from '@careeros/ui';
+'use client';
 
+import { useSearchParams } from 'next/navigation';
+import { Button, Eyebrow } from '@careeros/ui';
+
+/**
+ * Shown when the web middleware cannot reach the API. Retry bounces back to
+ * the URL the user originally requested (?next=), or / if none was preserved.
+ */
 export default function ServiceUnavailablePage() {
+  const params = useSearchParams();
+  const rawNext = params.get('next');
+  // Only accept same-origin relative paths, avoid open-redirect via ?next=//evil.
+  const next = rawNext && rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/';
+
   return (
     <main className="relative z-10 mx-auto flex min-h-screen w-full max-w-md flex-col items-start justify-center gap-6 px-6 py-16">
-      <Eyebrow>503 · Service unavailable</Eyebrow>
+      <Eyebrow>
+        <span className="inline-flex items-center gap-2">
+          <span
+            aria-hidden
+            className="inline-block h-1.5 w-1.5 rounded-full bg-amber-400 motion-safe:animate-pulse"
+          />
+          careeros · api unreachable
+        </span>
+      </Eyebrow>
       <h1 className="text-[72px] font-semibold leading-none tabular-nums tracking-[-0.03em] text-fg-faint">
         503
       </h1>
       <p className="text-[15px] text-fg-muted">
-        One or more services are down. Try again shortly, or check container logs.
+        The API is not responding. Try again in a moment, or check that the api container is up.
       </p>
-      <code className="rounded-[var(--radius)] border border-[hsl(var(--border))] bg-[hsl(var(--bg-elev-1))] px-3 py-2 font-mono text-[12.5px] text-fg-muted">
-        docker compose logs api
-      </code>
+      <div className="flex items-center gap-3">
+        <Button variant="primary" size="sm" onClick={() => (window.location.href = next)}>
+          Retry
+        </Button>
+        <code className="font-mono text-[12px] text-fg-faint">docker compose logs api</code>
+      </div>
     </main>
   );
 }
