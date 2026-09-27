@@ -1,3 +1,4 @@
+// TODO(C-P2.4): consume this from apps/api/src/modules/assessments/assessment-runner when the code-review + debugging assessment types ship.
 import { runDockerContainer, isDockerAvailable, buildDockerArgs, generateContainerName } from './docker';
 import { withPool } from './pool';
 import { isSandboxPaused } from './kill-switch';
