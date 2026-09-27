@@ -17,8 +17,8 @@ import {
   type ResumeConfirmInput,
   type ExtractedFacts,
 } from '@careeros/shared';
+import { randomUUID } from 'node:crypto';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
-import { StorageService } from '../../common/storage.service';
 import { SessionService } from '../auth/session.service';
 import { SetupService } from '../setup/setup.service';
 import { ResumeService } from './resume.service';
@@ -30,7 +30,6 @@ export class ResumeController {
   constructor(
     private readonly resume: ResumeService,
     private readonly session: SessionService,
-    private readonly storage: StorageService,
     private readonly setup: SetupService,
     @InjectPinoLogger(ResumeController.name) private readonly logger: PinoLogger,
   ) {}
@@ -55,9 +54,12 @@ export class ResumeController {
     }
     const facts = await this.resume.parse(userId, text);
     await this.setup.advance(userId, 'resume_uploaded');
-    // Persist the raw file after parse succeeds. Fire-and-forget: don't block the response.
-    void this.storage
-      .putResume(userId, file.originalname, file.buffer, file.mimetype)
+    // A-M5: archive is fire-and-forget; magic-byte gate inside archiveUpload rejects
+    // (audit + throw) before storage.putResume is ever called. Object key scopes to
+    // resumes/{userId}/{resumeId}/... so downloads can be presigned per-user.
+    const resumeId = randomUUID();
+    void this.resume
+      .archiveUpload(userId, resumeId, file)
       .then((key) => this.logger.info({ userId, key, bytes: file.size }, 'resume archived'))
       .catch((err) =>
         this.logger.warn(

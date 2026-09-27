@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import { DeepSeekProvider, renderPrompt, wrapUntrusted } from '@careeros/ai';
 import { decrypt, encryptField, loadMasterKey } from '@careeros/secrets';
@@ -10,6 +10,12 @@ import { makeLlmAuditor } from '../../common/llm-audit';
 import { makeHallucinationLogger } from '../../common/hallucination-log';
 import { SensitivityGateService } from '../../common/sensitivity-gate.service';
 import { QueueService } from '../../common/queue.service';
+import {
+  ForbiddenObjectAccessError,
+  InvalidFileTypeError,
+  StorageService,
+  verifyMagicBytes,
+} from '../../common/storage.service';
 import { UsageService } from '../usage/usage.service';
 import { UsageCache } from '../usage/usage.cache';
 import { findHallucinations } from '@careeros/ai';
@@ -37,8 +43,61 @@ export class ResumeService {
     private readonly sensitivity: SensitivityGateService,
     private readonly queue: QueueService,
     private readonly usageCache: UsageCache,
+    private readonly storage: StorageService,
     @InjectPinoLogger(ResumeService.name) private readonly logger: PinoLogger,
   ) {}
+
+  /**
+   * A-M5: pre-verify magic bytes, then archive. Reject → 400 + audit_log
+   * `resume.upload.rejected` with {reason, claimedMime, magicMatch}. Callers
+   * pass a stable `resumeId` so the object key scopes to `resumes/{userId}/{resumeId}/...`.
+   */
+  async archiveUpload(userId: string, resumeId: string, file: Express.Multer.File): Promise<string> {
+    try {
+      verifyMagicBytes(file.buffer, file.mimetype, file.originalname);
+    } catch (err) {
+      if (err instanceof InvalidFileTypeError) {
+        await this.auditReject(userId, err);
+        throw new BadRequestException('Unsupported or malformed file. Upload a valid PDF or DOCX.');
+      }
+      throw err;
+    }
+    return this.storage.putResume(userId, resumeId, file.originalname, file.buffer, file.mimetype);
+  }
+
+  /** A-M5: presign download; cross-user attempts audit `resume.download.forbidden`. */
+  async presignDownload(userId: string, key: string): Promise<string> {
+    try {
+      return await this.storage.presignResumeDownload(userId, key);
+    } catch (err) {
+      if (err instanceof ForbiddenObjectAccessError) {
+        await this.prisma.auditEvent.create({
+          data: {
+            userId,
+            actor: 'user',
+            action: 'resume.download.forbidden',
+            resourceType: 'resume_object',
+            resourceId: key,
+            payload: { key },
+          },
+        }).catch(() => {});
+        throw new ForbiddenException('Not authorised for that resume.');
+      }
+      throw err;
+    }
+  }
+
+  private async auditReject(userId: string, err: InvalidFileTypeError): Promise<void> {
+    await this.prisma.auditEvent.create({
+      data: {
+        userId,
+        actor: 'user',
+        action: 'resume.upload.rejected',
+        resourceType: 'resume_upload',
+        payload: { reason: err.reason, claimedMime: err.claimedMime, magicMatch: err.magicMatch },
+      },
+    }).catch(() => {});
+  }
 
   async extractText(file: Express.Multer.File): Promise<string> {
     const name = file.originalname.toLowerCase();
@@ -117,9 +176,17 @@ export class ResumeService {
 
     // Post-hoc hallucination check against the raw resume text. Suspect fragments
     // land in llm_hallucination_log for the eval loop; parse itself doesn't fail.
+    // A-M4: raw resume text is personal PII, do not persist. `sourceText` is used
+    // only to compute snippetHash + snippetOffset so an eval reviewer can locate
+    // the suspect fragment without the log itself carrying it. Flip
+    // `includeRawSnippet: true` only when a UI actually needs to show the excerpt
+    // (snippet column is ENCRYPTED_FIELDS-encrypted at rest either way).
     const hallucinations = findHallucinations(result, [text]);
     if (hallucinations.suspects.length > 0) {
-      void makeHallucinationLogger(this.prisma, userId, this.logger)(hallucinations, {
+      void makeHallucinationLogger(this.prisma, userId, this.logger, {
+        sourceText: text,
+        includeRawSnippet: false,
+      })(hallucinations, {
         promptId: rendered.id,
         promptVersion: rendered.version,
         promptHash: rendered.hash,
