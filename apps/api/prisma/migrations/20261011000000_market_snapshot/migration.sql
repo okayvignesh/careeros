@@ -22,13 +22,18 @@ CREATE INDEX "market_snapshots_user_snapshotAt_idx"
 CREATE INDEX "market_snapshots_filterHash_snapshotAt_idx"
     ON "market_snapshots" ("filterHash", "snapshotAt" DESC);
 
--- Unique on (snapshotAt truncated to day, filterHash, userId-or-null-sentinel).
+-- Unique on (snapshotAt as UTC date, filterHash, userId-or-null-sentinel).
 -- Postgres treats NULL as distinct in unique constraints, so coalesce the
 -- userId to a sentinel UUID so the shared-default rows dedupe too. Prisma
 -- can't express this in the DSL - lives here in the migration.
+--
+-- backlog:#80 fix: `date_trunc('day', <timestamptz>)` is STABLE, not
+-- IMMUTABLE (return depends on the session TZ), so pg 15+ rejects it in a
+-- unique index. Cast to date at UTC instead - that's IMMUTABLE and it's the
+-- semantic we actually want ("one snapshot per UTC calendar day").
 CREATE UNIQUE INDEX "market_snapshots_day_filter_user_key"
     ON "market_snapshots" (
-        (date_trunc('day', "snapshotAt")),
+        (("snapshotAt" AT TIME ZONE 'UTC')::date),
         "filterHash",
         COALESCE("userId", '00000000-0000-0000-0000-000000000000'::uuid)
     );
