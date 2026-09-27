@@ -29,6 +29,7 @@ import { MarketBriefModule } from './modules/market-brief/market-brief.module';
 import { ResumeVariantsModule } from './modules/resume-variants/resume-variants.module';
 import { CoverLettersModule } from './modules/cover-letters/cover-letters.module';
 import { ApplicationsModule } from './modules/applications/applications.module';
+import { MatcherModule } from './modules/matcher/matcher.module';
 
 const loggerParams: Params = {
   pinoHttp: {
@@ -113,6 +114,7 @@ const loggerParams: Params = {
     ResumeVariantsModule,
     CoverLettersModule,
     ApplicationsModule,
+    MatcherModule,
     HealthModule,
     SetupModule,
   ],
