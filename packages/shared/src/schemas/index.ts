@@ -1,4 +1,21 @@
 import { z } from 'zod';
+import { assertPublicUrlShape, SsrfBlockedError } from '../net/assert-public-url';
+
+// Sync gate reused by every user-supplied baseUrl. Returns true if the URL is
+// well-formed, on the allowlist, and not a literal private IP. DNS-resolution
+// SSRF checks still run in the fetch path (assertPublicUrl).
+function isPublicUrlShape(v: string): boolean {
+  try {
+    assertPublicUrlShape(v);
+    return true;
+  } catch (err) {
+    return !(err instanceof SsrfBlockedError) ? false : false;
+  }
+}
+
+const PublicUrlSchema = z.string().url().refine(isPublicUrlShape, {
+  message: 'URL host is not on the SSRF allowlist or resolves to a private address',
+});
 
 export const EmailSchema = z.string().email().max(320);
 export const PasswordSchema = z.string().min(12).max(200);
@@ -13,7 +30,7 @@ export type CreateAccountInput = z.infer<typeof CreateAccountSchema>;
 export const ProviderConfigSchema = z.object({
   provider: z.enum(['deepseek', 'openai', 'anthropic', 'ollama', 'azure', 'openrouter', 'custom']),
   apiKey: z.string().min(1).max(500),
-  baseUrl: z.string().url().optional(),
+  baseUrl: PublicUrlSchema.optional(),
   chatModel: z.string().min(1).max(120),
   reasoningModel: z.string().min(1).max(120).optional(),
 });
@@ -25,7 +42,7 @@ export type EmbeddingMode = z.infer<typeof EmbeddingModeSchema>;
 export const EmbeddingConfigSchema = z.object({
   mode: EmbeddingModeSchema,
   model: z.string().min(1).max(120).default('bge-small-en'),
-  externalBaseUrl: z.string().url().optional(),
+  externalBaseUrl: PublicUrlSchema.optional(),
   externalApiKey: z.string().min(1).max(500).optional(),
 });
 export type EmbeddingConfigInput = z.infer<typeof EmbeddingConfigSchema>;

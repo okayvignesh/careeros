@@ -8,7 +8,8 @@
     "verbatimModuleSyntax": false,
     "isolatedModules": false,
     "noUncheckedIndexedAccess": false,
-    "incremental": false
+    "incremental": false,
+    "types": ["node"]
   },
   "include": ["src/**/*"],
   "exclude": ["src/**/*.demo.ts", "src/**/*.property.test.ts", "src/**/*.test.ts"]

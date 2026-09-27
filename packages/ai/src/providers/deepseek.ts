@@ -1,5 +1,6 @@
 import type { AIProvider, ChatMessage, ProviderCapabilities } from '../provider';
 import type { z } from 'zod';
+import { assertPublicUrl, assertPublicUrlShape } from '@careeros/shared';
 
 export interface LlmCallRecord {
   provider: string;
@@ -20,6 +21,8 @@ interface DeepSeekConfig {
   baseUrl?: string | undefined;
   chatModel: string;
   onCall?: LlmCallHook | undefined;
+  /** Extra hostnames to allow (self-hosted GitLab, ollama alt hostname, etc). */
+  allowlist?: string[] | undefined;
 }
 
 interface OpenAIChoice {
@@ -42,9 +45,27 @@ interface OpenAIResponse {
 export class DeepSeekProvider implements AIProvider {
   readonly name = 'deepseek';
   private readonly base: string;
+  private readonly allowlist: string[];
+  // Cached DNS validation. Runs on first request so construction stays sync
+  // (matches every existing new DeepSeekProvider(...) call site).
+  private baseUrlValidated: Promise<void> | null = null;
 
   constructor(private readonly cfg: DeepSeekConfig) {
     this.base = (cfg.baseUrl ?? 'https://api.deepseek.com/v1').replace(/\/$/, '');
+    this.allowlist = cfg.allowlist ?? [];
+    // A-C2: sync shape check at construction so an obviously-bad baseUrl fails
+    // fast (before any prompt tokens spend). Full DNS check runs before first
+    // fetch in ensureBaseUrlSafe().
+    assertPublicUrlShape(this.base, { allowlist: this.allowlist });
+  }
+
+  private async ensureBaseUrlSafe(): Promise<void> {
+    if (!this.baseUrlValidated) {
+      this.baseUrlValidated = assertPublicUrl(this.base, {
+        allowlist: this.allowlist,
+      }).then(() => undefined);
+    }
+    return this.baseUrlValidated;
   }
 
   async chat({
@@ -215,6 +236,7 @@ export class DeepSeekProvider implements AIProvider {
     callKind: string,
     signal?: AbortSignal,
   ): Promise<OpenAIResponse> {
+    await this.ensureBaseUrlSafe();
     const t0 = Date.now();
     const init: RequestInit = {
       method: 'POST',
@@ -223,10 +245,21 @@ export class DeepSeekProvider implements AIProvider {
         authorization: `Bearer ${this.cfg.apiKey}`,
       },
       body: JSON.stringify(body),
+      // A-C2: manual so a 3xx to 169.254.169.254 does not silently follow.
+      redirect: 'manual',
     };
     if (signal) init.signal = signal;
     try {
-      const res = await fetch(`${this.base}${path}`, init);
+      let url = `${this.base}${path}`;
+      let res = await fetch(url, init);
+      // Re-validate Location on every hop; cap at 3 hops.
+      for (let hop = 0; hop < 3 && res.status >= 300 && res.status < 400; hop++) {
+        const loc = res.headers.get('location');
+        if (!loc) break;
+        url = new URL(loc, url).toString();
+        await assertPublicUrl(url, { allowlist: this.allowlist });
+        res = await fetch(url, init);
+      }
       const json = (await res.json()) as OpenAIResponse;
       if (!res.ok) throw new Error(json.error?.message ?? `HTTP ${res.status}`);
       this.emit({
