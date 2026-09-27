@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ServiceUnavailableException } from '@nestjs/common';
+import { ForbiddenException, ServiceUnavailableException } from '@nestjs/common';
 import { UsageService } from './usage.service';
 
 // Minimal Prisma fake. Only the surface the service touches is stubbed. If a
@@ -95,3 +95,54 @@ describe('UsageService.assertCallAllowed', () => {
     await expect(svc.assertCallAllowed('u1')).resolves.toBeUndefined();
   });
 });
+
+// --- A-M6 multi-tenant guard on global AppConfig mutations ---
+
+describe('UsageService.assertSingleUserForGlobalConfig (A-M6)', () => {
+  it('passes when exactly one user exists', async () => {
+    const prisma = {
+      user: { count: async () => 1 },
+      auditEvent: { create: async () => ({}) },
+    };
+    const svc = new UsageService(prisma as never, fakeCache);
+    await expect(svc.assertSingleUserForGlobalConfig()).resolves.toBeUndefined();
+  });
+
+  it('throws 403 and writes an audit_log entry when a second user exists', async () => {
+    const audits: Array<{ action: string; payload: unknown }> = [];
+    const prisma = {
+      user: { count: async () => 2 },
+      auditEvent: {
+        create: async ({ data }: { data: { action: string; payload: unknown } }) => {
+          audits.push({ action: data.action, payload: data.payload });
+          return {};
+        },
+      },
+    };
+    const svc = new UsageService(prisma as never, fakeCache);
+    await expect(svc.assertSingleUserForGlobalConfig()).rejects.toBeInstanceOf(ForbiddenException);
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({
+      action: 'config.multi_user_guard_hit',
+      payload: { userCount: 2 },
+    });
+    // MUTATION-SMOKE: delete the `if (count === 1) return;` early-return in
+    // assertSingleUserForGlobalConfig and the userCount:1 test above will
+    // still throw ForbiddenException → the "passes" test above fails.
+    // Delete the throw and this test's `rejects` assertion fails.
+  });
+
+  it('throws even if audit-log write fails', async () => {
+    const prisma = {
+      user: { count: async () => 2 },
+      auditEvent: {
+        create: async () => {
+          throw new Error('audit table missing');
+        },
+      },
+    };
+    const svc = new UsageService(prisma as never, fakeCache);
+    await expect(svc.assertSingleUserForGlobalConfig()).rejects.toBeInstanceOf(ForbiddenException);
+  });
+});
+

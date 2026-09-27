@@ -91,6 +91,8 @@ export class UsageController {
   @HttpCode(200)
   async setBudget(@Body() body: { monthlyLimitUsd: number | null }, @Req() req: Request) {
     this.session.requireUserId(req);
+    // A-M6: TODO(multitenant): scope AppConfig by userId once multi-user lands.
+    await this.usage.assertSingleUserForGlobalConfig();
     if (body.monthlyLimitUsd !== null && (typeof body.monthlyLimitUsd !== 'number' || body.monthlyLimitUsd < 0)) {
       throw new BadRequestException('monthlyLimitUsd must be a non-negative number or null.');
     }
@@ -108,6 +110,8 @@ export class UsageController {
   @HttpCode(200)
   async setPause(@Body() body: { paused: boolean }, @Req() req: Request) {
     this.session.requireUserId(req);
+    // A-M6: TODO(multitenant): scope AppConfig by userId once multi-user lands.
+    await this.usage.assertSingleUserForGlobalConfig();
     if (typeof body.paused !== 'boolean') throw new BadRequestException('paused must be boolean.');
     await this.usage.setPaused(body.paused);
     return { paused: body.paused };
@@ -126,6 +130,8 @@ export class UsageController {
     @Req() req: Request,
   ) {
     this.session.requireUserId(req);
+    // A-M6: TODO(multitenant): scope AppConfig by userId once multi-user lands.
+    await this.usage.assertSingleUserForGlobalConfig();
     if (typeof body.providerName !== 'string' || !body.providerName) {
       throw new BadRequestException('providerName is required.');
     }

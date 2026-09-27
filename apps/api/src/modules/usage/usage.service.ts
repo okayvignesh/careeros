@@ -1,4 +1,4 @@
-import { Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { ForbiddenException, Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UsageCache } from './usage.cache';
 
@@ -67,6 +67,34 @@ export class UsageService {
     private readonly prisma: PrismaService,
     private readonly cache: UsageCache,
   ) {}
+
+  // ---------- A-M6 multi-tenant guard ----------
+
+  /**
+   * A-M6: single-user MVP guard for mutating `/me/*` config endpoints. These
+   * write to global `AppConfig` keys (`llm.paused`, `llm.budget`, sensitivity
+   * policy) that are NOT yet scoped by userId. If a second user ever exists in
+   * the DB, mutating that config from one user's session would silently affect
+   * the other → refuse.
+   *
+   * TODO(multitenant): scope AppConfig by userId; drop this guard.
+   */
+  async assertSingleUserForGlobalConfig(): Promise<void> {
+    const count = await this.prisma.user.count();
+    if (count === 1) return;
+    // Fire-and-forget audit; the throw is what actually gates the request.
+    await this.prisma.auditEvent
+      .create({
+        data: {
+          actor: 'system',
+          action: 'config.multi_user_guard_hit',
+          resourceType: 'app_config',
+          payload: { userCount: count },
+        },
+      })
+      .catch(() => undefined);
+    throw new ForbiddenException('Multi-user config mutation not yet supported');
+  }
 
   // ---------- pause + budget ----------
 
