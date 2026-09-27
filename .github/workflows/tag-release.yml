@@ -1,0 +1,149 @@
+# C-P0.5d: tag-driven release. Build, sign (cosign keyless OIDC),
+# attach CycloneDX SBOM (syft), publish to GitHub Releases with
+# SHA256SUMS.
+# Owning specs: release-process.md (Signing, SBOM, Release checklist).
+#
+# TODO(H): full keyless OIDC verification identity + Rekor policy pin.
+# TODO(H): final registry owner/org (ghcr.io/<org>) is currently derived
+# from ${{ github.repository_owner }}; Wave H may override.
+# TODO(H): matrix of images once apps/worker + apps/agent land Dockerfiles
+# beyond apps/api + apps/web.
+
+name: Tag Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write   # create GitHub Release + upload assets
+  packages: write   # push to ghcr.io
+  id-token: write   # cosign keyless OIDC (Sigstore)
+
+jobs:
+  release:
+    name: build + sign + publish
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - name: api
+            dockerfile: infra/docker/Dockerfile.api
+          - name: web
+            dockerfile: infra/docker/Dockerfile.web
+          - name: worker
+            dockerfile: infra/docker/Dockerfile.worker
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve tag + image ref
+        id: meta
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          registry="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
+          image="${registry}/careeros-${{ matrix.image.name }}"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          echo "ref=${image}:${tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.image.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.ref }}
+          provenance: true
+          sbom: false   # syft below emits CycloneDX for the release asset
+
+      # Pin cosign + syft by SHA per rules #3 (security-critical).
+      - name: Install cosign
+        uses: sigstore/cosign-installer@d7d6bc7722e3daa8354c50bcb52f4837da5e9b6a  # v3.8.1
+        with:
+          cosign-release: v2.4.1
+
+      - name: Install syft
+        uses: anchore/sbom-action/download-syft@f325610c9f50a54015d37c8d16cb3b0e2c8f4de0  # v0.18.0
+        with:
+          syft-version: v1.18.1
+
+      - name: Cosign sign (keyless OIDC)
+        env:
+          COSIGN_EXPERIMENTAL: '1'
+        # TODO(H): pin --certificate-identity-regexp once org path is final.
+        run: |
+          cosign sign --yes \
+            "${{ steps.meta.outputs.image }}@${{ steps.build.outputs.digest }}"
+
+      - name: Generate SBOM (CycloneDX JSON)
+        run: |
+          mkdir -p dist
+          sbom_path="dist/sbom-${{ matrix.image.name }}-${{ steps.meta.outputs.tag }}.cdx.json"
+          syft "${{ steps.meta.outputs.image }}@${{ steps.build.outputs.digest }}" \
+            -o cyclonedx-json > "$sbom_path"
+          echo "SBOM_PATH=${sbom_path}" >> "$GITHUB_ENV"
+
+      - name: Attest SBOM
+        env:
+          COSIGN_EXPERIMENTAL: '1'
+        run: |
+          cosign attest --yes \
+            --predicate "$SBOM_PATH" \
+            --type cyclonedx \
+            "${{ steps.meta.outputs.image }}@${{ steps.build.outputs.digest }}"
+
+      - name: Compute checksums
+        run: |
+          cd dist
+          sha256sum "$(basename "$SBOM_PATH")" > "SHA256SUMS-${{ matrix.image.name }}.txt"
+
+      - name: Upload per-image artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.image.name }}
+          path: dist/
+          retention-days: 90
+
+  publish-release:
+    name: publish GitHub Release
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all image artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist/
+          merge-multiple: true
+
+      - name: Aggregate SHA256SUMS
+        run: |
+          cd dist
+          cat SHA256SUMS-*.txt > SHA256SUMS
+          rm -f SHA256SUMS-*.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          # ponytail: body pulled from CHANGELOG once release-process.md
+          # step ships an extractor; for now GitHub auto-generates notes.
+          generate_release_notes: true
+          files: |
+            dist/*
