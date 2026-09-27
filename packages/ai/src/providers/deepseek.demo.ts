@@ -1,9 +1,9 @@
-// Assert-based self-check for DeepseekProvider hardening (A-H5).
+// Assert-based self-check for DeepseekProvider hardening (A-H5 + A-L1).
 // Run: npx tsx packages/ai/src/providers/deepseek.demo.ts
 import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { DeepSeekProvider } from './deepseek';
-import { StructuredOutputError } from '../errors';
+import { LLMProviderError, StructuredOutputError } from '../errors';
 
 interface FetchCall {
   url: string;
@@ -147,6 +147,36 @@ async function main(): Promise<void> {
         threw = err;
       }
       assert(threw instanceof StructuredOutputError, 'expected StructuredOutputError');
+    } finally {
+      restore();
+    }
+  });
+
+  await label('non-2xx upstream throws LLMProviderError with hidden .upstream (A-L1)', async () => {
+    // Mutation smoke: if upstream string is re-added to message, .message === "LLM provider error" fails.
+    const { restore } = stubFetch([
+      () =>
+        new Response(
+          JSON.stringify({ error: { message: 'model tenant xyz over quota' } }),
+          { status: 429 },
+        ),
+    ]);
+    try {
+      const p = new DeepSeekProvider({ apiKey: 'x', chatModel: 'test' });
+      let threw: unknown = null;
+      try {
+        await p.chat({ messages: [{ role: 'user', content: 'x' }] });
+      } catch (err) {
+        threw = err;
+      }
+      assert(threw instanceof LLMProviderError);
+      // Client-facing message MUST NOT contain upstream text.
+      assert.equal(threw.message, 'LLM provider error');
+      assert(!threw.message.includes('tenant'));
+      // Server-side hook can still read the raw upstream.
+      assert.equal(threw.upstream, 'model tenant xyz over quota');
+      // Non-enumerable: JSON.stringify does not leak it.
+      assert(!JSON.stringify(threw).includes('tenant'));
     } finally {
       restore();
     }

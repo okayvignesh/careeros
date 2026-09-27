@@ -1,7 +1,7 @@
 import type { AIProvider, ChatMessage, ProviderCapabilities } from '../provider';
 import { ZodError, type z } from 'zod';
 import { assertPublicUrl, assertPublicUrlShape } from '@careeros/shared';
-import { StructuredOutputError } from '../errors';
+import { LLMProviderError, StructuredOutputError } from '../errors';
 
 export interface LlmCallRecord {
   provider: string;
@@ -300,7 +300,12 @@ export class DeepSeekProvider implements AIProvider {
         res = await fetch(url, init);
       }
       const json = (await res.json()) as OpenAIResponse;
-      if (!res.ok) throw new Error(json.error?.message ?? `HTTP ${res.status}`);
+      if (!res.ok) {
+        // A-L1: never leak upstream messages to the caller. Client sees the
+        // fixed string; pino / audit hook reads .upstream via emit below.
+        const upstream = json.error?.message ?? `HTTP ${res.status}`;
+        throw new LLMProviderError('LLM provider error', upstream);
+      }
       this.emit({
         provider: this.name,
         model: this.cfg.chatModel,
@@ -313,6 +318,10 @@ export class DeepSeekProvider implements AIProvider {
       });
       return json;
     } catch (err) {
+      // Prefer raw upstream message for server-side audit; falls back to the
+      // sanitised message so pino always has something to log.
+      const raw =
+        err instanceof LLMProviderError ? err.upstream : (err as Error).message;
       this.emit({
         provider: this.name,
         model: this.cfg.chatModel,
@@ -322,7 +331,7 @@ export class DeepSeekProvider implements AIProvider {
         totalTokens: null,
         latencyMs: Date.now() - t0,
         ok: false,
-        error: (err as Error).message,
+        error: raw,
       });
       throw err;
     }

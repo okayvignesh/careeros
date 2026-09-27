@@ -4,6 +4,7 @@ export { probeProvider, type ProbeResult } from './probe';
 export { estimateCostUsd } from './pricing';
 export { wrapUntrusted, UNTRUSTED_SYSTEM_CLAUSE, type UntrustedSourceKind, type Wrapped } from './wrap';
 export {
+  LLMProviderError,
   StructuredOutputError,
   InjectionBlockedError,
 } from './errors';

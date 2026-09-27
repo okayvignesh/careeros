@@ -1,6 +1,31 @@
 // LLM error types the API layer maps to sanitised HTTP responses. Every class
 // keeps upstream / raw-error material on a non-enumerable field so it stays in
 // server-side logs but never gets JSON-serialised into a client response.
+//
+// A-L1 (upstream error leakage): provider-level `throw new Error(json.error?.message)`
+// used to surface DeepSeek / OpenAI internal messages verbatim to the client
+// (stack traces, tenant IDs, model-name hints). Callers now see a fixed string;
+// pino reads `.upstream` for the diagnostics.
+
+/** Thrown when the upstream LLM provider returns non-2xx or a network error. */
+export class LLMProviderError extends Error {
+  readonly code = 'llm.provider_error';
+
+  constructor(message: string, upstream: string) {
+    super(message);
+    this.name = 'LLMProviderError';
+    // Non-enumerable so JSON.stringify(err) does not accidentally expose it.
+    Object.defineProperty(this, 'upstream', {
+      value: upstream,
+      enumerable: false,
+      writable: false,
+      configurable: false,
+    });
+  }
+
+  // Declared here so TypeScript sees the property; runtime install is in the ctor.
+  readonly upstream!: string;
+}
 
 /**
  * Thrown when chatStructured cannot obtain a schema-valid JSON response after
