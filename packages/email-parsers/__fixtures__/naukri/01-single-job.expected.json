@@ -1,0 +1,16 @@
+{
+  "source": "naukri",
+  "subject": "1 new job for Senior Backend Engineer",
+  "from": "mailer@naukri.com",
+  "receivedAt": "2026-01-01T09:00:00.000Z",
+  "jobs": [
+    {
+      "title": "Senior Backend Engineer",
+      "company": "Acme Technologies",
+      "location": "Bengaluru",
+      "url": "https://www.naukri.com/job-listings-senior-backend-engineer-acme-technologies-bengaluru-3-6-years-260125000001",
+      "snippet": "Acme Technologies | Bengaluru | 3-6 Yrs",
+      "postedAt": null
+    }
+  ]
+}

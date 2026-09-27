@@ -1,0 +1,32 @@
+{
+  "source": "naukri",
+  "subject": "3 new jobs at CloudNine Systems",
+  "from": "mailer@naukri.com",
+  "receivedAt": "2026-01-01T09:00:00.000Z",
+  "jobs": [
+    {
+      "title": "DevOps Engineer",
+      "company": "CloudNine Systems",
+      "location": "Pune",
+      "url": "https://www.naukri.com/job-listings-devops-engineer-cloudnine-pune-2-5-years-260125010001",
+      "snippet": "CloudNine Systems | Pune | 2-5 Yrs | 8-14 LPA",
+      "postedAt": null
+    },
+    {
+      "title": "Site Reliability Engineer",
+      "company": "CloudNine Systems",
+      "location": "Pune",
+      "url": "https://www.naukri.com/job-listings-sre-cloudnine-pune-3-7-years-260125010002",
+      "snippet": "CloudNine Systems | Pune | 3-7 Yrs | 12-20 LPA",
+      "postedAt": null
+    },
+    {
+      "title": "Platform Engineer",
+      "company": "CloudNine Systems",
+      "location": "Pune",
+      "url": "https://www.naukri.com/job-listings-platform-engineer-cloudnine-pune-4-8-years-260125010003",
+      "snippet": "CloudNine Systems | Pune | 4-8 Yrs | 15-25 LPA",
+      "postedAt": null
+    }
+  ]
+}

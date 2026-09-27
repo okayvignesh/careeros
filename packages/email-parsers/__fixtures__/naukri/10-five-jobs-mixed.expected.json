@@ -1,0 +1,48 @@
+{
+  "source": "naukri",
+  "subject": "5 new engineering roles this week",
+  "from": "mailer@naukri.com",
+  "receivedAt": "2026-01-01T09:00:00.000Z",
+  "jobs": [
+    {
+      "title": "Backend Engineer",
+      "company": "Alpha Labs",
+      "location": "Bengaluru",
+      "url": "https://www.naukri.com/job-listings-backend-engineer-alpha-bengaluru-3-6-years-260125090001",
+      "snippet": "Alpha Labs | Bengaluru | 3-6 Yrs",
+      "postedAt": null
+    },
+    {
+      "title": "Frontend Engineer",
+      "company": "Beta Studio",
+      "location": "Mumbai",
+      "url": "https://www.naukri.com/job-listings-frontend-engineer-beta-mumbai-2-5-years-260125090002",
+      "snippet": "Beta Studio | Mumbai | 2-5 Yrs",
+      "postedAt": null
+    },
+    {
+      "title": "Mobile Engineer",
+      "company": "Gamma Apps",
+      "location": "Pune",
+      "url": "https://www.naukri.com/job-listings-mobile-engineer-gamma-pune-4-7-years-260125090003",
+      "snippet": "Gamma Apps | Pune | 4-7 Yrs",
+      "postedAt": null
+    },
+    {
+      "title": "Data Engineer",
+      "company": "Delta Analytics",
+      "location": "Hyderabad",
+      "url": "https://www.naukri.com/job-listings-data-engineer-delta-hyderabad-5-8-years-260125090004",
+      "snippet": "Delta Analytics | Hyderabad | 5-8 Yrs",
+      "postedAt": null
+    },
+    {
+      "title": "ML Engineer",
+      "company": "Epsilon AI",
+      "location": "Chennai",
+      "url": "https://www.naukri.com/job-listings-ml-engineer-epsilon-chennai-3-6-years-260125090005",
+      "snippet": "Epsilon AI | Chennai | 3-6 Yrs",
+      "postedAt": null
+    }
+  ]
+}
