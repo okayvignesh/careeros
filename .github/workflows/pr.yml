@@ -83,6 +83,40 @@ jobs:
       - name: Audit prod deps (fail on high/critical)
         run: pnpm audit --prod --audit-level=high
 
+  # C-P0.4d: integration suite behind Testcontainers. Opt-in — the job
+  # runs on GitHub-hosted runners (Docker preinstalled) so we always exercise
+  # it in CI; laptops without Docker skip cleanly via TESTCONTAINERS_E2E=1
+  # + isDockerAvailable() guards inside each *.integration.test.ts.
+  test-integration:
+    name: vitest (integration, Testcontainers)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Cache Docker images pulled by Testcontainers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/testcontainers
+          key: testcontainers-${{ runner.os }}-v1
+
+      - name: Run integration tests
+        env:
+          TESTCONTAINERS_E2E: '1'
+        run: pnpm test:integration
+
   # A-M7: every image in every compose file must be digest-pinned.
   image-pins:
     name: verify docker image pins (@sha256:...)

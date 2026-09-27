@@ -13,7 +13,7 @@
     "lint": "turbo run lint",
     "test": "vitest run",
     "test:unit": "vitest run --exclude '**/*.integration.test.ts' --exclude '**/*.e2e.test.ts'",
-    "test:integration": "vitest run '**/*.integration.test.ts'",
+    "test:integration": "vitest run integration.test",
     "test:e2e": "pnpm --filter @careeros/web test:e2e",
     "test:a11y": "A11Y=1 pnpm --filter @careeros/web test:e2e",
     "test:evals": "pnpm --filter @careeros/ai test:evals",
