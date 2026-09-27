@@ -133,6 +133,9 @@ importers:
         specifier: ^3.23.8
         version: 3.25.76
     devDependencies:
+      '@careeros/testing':
+        specifier: workspace:*
+        version: link:../../packages/testing
       '@nestjs/cli':
         specifier: ^10.4.5
         version: 10.4.9(esbuild@0.28.2)
