@@ -10,6 +10,7 @@
 // Delivers A-H6b. Every reject is written to audit_log so an operator can
 // tell rejected connects from silent failures.
 import { Injectable, BadRequestException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { encrypt, loadMasterKey } from '@careeros/secrets';
 import { safeFetch, SsrfBlockedError, type AssertPublicUrlOptions } from '@careeros/shared/net';
 import { PrismaService } from '../../../prisma/prisma.service';
@@ -428,7 +429,9 @@ export class GitlabService {
           action,
           resourceType: 'integration',
           resourceId: 'gitlab',
-          payload,
+          // Prisma 6 tightened InputJsonValue to reject `Record<string, unknown>`
+          // implicitly. `payload` is always a plain JSON object here.
+          payload: payload as Prisma.InputJsonValue,
         },
       });
     } catch {
