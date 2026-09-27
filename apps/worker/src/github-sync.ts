@@ -17,6 +17,7 @@ import type { Logger } from 'pino';
 import { decrypt, loadMasterKey } from '@careeros/secrets';
 import {
   analyzeRepoCommits,
+  retry,
   type CommitWithFiles,
   type EvidenceRow,
   type GithubSyncPayload,
@@ -84,10 +85,24 @@ export async function handleGithubSync(
   // even if the language scan later hits a rate limit and bails.
   const metadata = (integration.metadata as Record<string, unknown> | null) ?? {};
   const login = typeof metadata.login === 'string' ? metadata.login : null;
+  // backlog:#39 - wrap flaky octokit calls in @careeros/shared retry (3
+  // attempts, exponential backoff, retries on 429/5xx/network) so a transient
+  // GitHub blip doesn't force BullMQ to restart the whole sync from scratch.
+  const withRetry = <T>(op: string, fn: () => Promise<T>): Promise<T> =>
+    retry(fn, {
+      onRetry: (err, attempt, delayMs) =>
+        child.warn(
+          { op, attempt, delayMs, err: (err as Error).message },
+          'github op retrying',
+        ),
+    });
+
   let contributions = 0;
   if (login) {
     try {
-      const calendar = await fetchContributions(octokit, login);
+      const calendar = await withRetry('contributions', () =>
+        fetchContributions(octokit, login),
+      );
       contributions = calendar.totalContributions;
       await prisma.integration.update({
         where: { userId_kind: { userId, kind: 'github' } },
@@ -104,17 +119,21 @@ export async function handleGithubSync(
     }
   }
 
-  const repos = await octokit.rest.repos.listForAuthenticatedUser({
-    per_page: MAX_REPOS,
-    sort: 'pushed',
-    affiliation: 'owner,collaborator',
-  });
+  const repos = await withRetry('listRepos', () =>
+    octokit.rest.repos.listForAuthenticatedUser({
+      per_page: MAX_REPOS,
+      sort: 'pushed',
+      affiliation: 'owner,collaborator',
+    }),
+  );
   child.info({ count: repos.data.length }, 'fetched repos');
 
   // Known-emails set for the contributor filter. Fetched ONCE per sync; if the
   // /user/emails call fails (token lacks user:email scope) we fall back to
   // login-noreply only. Never guess.
-  const knownEmails = await fetchKnownEmails(octokit, login).catch((err) => {
+  const knownEmails = await withRetry('listEmails', () =>
+    fetchKnownEmails(octokit, login),
+  ).catch((err) => {
     child.warn({ err: (err as Error).message }, 'emails fetch failed; falling back to login noreply');
     return login ? { emails: [], githubLogin: login } : { emails: [] };
   });
@@ -140,7 +159,9 @@ export async function handleGithubSync(
     }
 
     try {
-      const langs = await octokit.rest.repos.listLanguages({ owner, repo: repo.name });
+      const langs = await withRetry('listLanguages', () =>
+        octokit.rest.repos.listLanguages({ owner, repo: repo.name }),
+      );
       const bytes = langs.data as Record<string, number>;
 
       // Collapse GitHub language names to distinct skill IDs so SCSS + Sass + CSS don't
@@ -203,7 +224,9 @@ export async function handleGithubSync(
     // the analyzers, and emit per-file / per-framework / per-authorship rows.
     // Any failure here is per-repo isolated: log + continue to the next repo.
     try {
-      const commits = await fetchCommitsWithFiles(octokit, owner, repo.name);
+      const commits = await withRetry('fetchCommits', () =>
+        fetchCommitsWithFiles(octokit, owner, repo.name),
+      );
       const analyzed = analyzeRepoCommits({
         repoRef: repo.full_name,
         commits,
