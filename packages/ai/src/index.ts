@@ -23,7 +23,17 @@ export {
   LLMProviderError,
   StructuredOutputError,
   InjectionBlockedError,
+  SensitivityBlockedError,
 } from './errors';
+export {
+  SensitivityGate,
+  SENSITIVITY_LEVELS as SENSITIVITY_GATE_LEVELS,
+  setSensitivityAuditHook,
+  type SensitivityLevel,
+  type SensitivityContext,
+  type SensitivityAuditEvent,
+  type ClassifyMeta,
+} from './sensitivity-gate';
 export {
   scanForInjection,
   auditScan,
