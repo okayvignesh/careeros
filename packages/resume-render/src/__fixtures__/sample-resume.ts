@@ -1,4 +1,4 @@
-import type { ResumePdfProps } from '../src/templates/ats-first';
+import type { ResumePdfProps } from '../templates/ats-first';
 
 /**
  * Fixed model used by the render + ATS-lint tests. Any change to this fixture

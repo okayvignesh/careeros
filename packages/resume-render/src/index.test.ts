@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { extractText, getDocumentProxy } from 'unpdf';
 import { renderResumePdf } from './index';
-import { SAMPLE_RESUME, allBullets, allHeadings } from '../__fixtures__/sample-resume';
+import { SAMPLE_RESUME, allBullets, allHeadings } from './__fixtures__/sample-resume';
 import type { ResumePdfProps } from './templates/ats-first';
 
 /**
