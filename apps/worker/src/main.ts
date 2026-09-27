@@ -17,12 +17,23 @@ import {
 } from '@careeros/shared';
 import { seedSkills } from './skills-seed.js';
 import { handleGithubSync } from './github-sync.js';
+import { handleGitlabSync, type GitlabSyncPayload } from './gitlab-sync.js';
 import { handleEmbeddingGenerate } from './embedding-job.js';
+
+// C-P1.6: gitlab queue name pinned in-app until packages/shared adopts a
+// CodeHost split (parallel-session refactor per COMPLETION_PLAN §6).
+const QUEUE_GITLAB = 'gitlab';
 import {
   handleHallucinationLogRetention,
   JOB_HALLUCINATION_LOG_RETENTION,
   QUEUE_RETENTION,
 } from './hallucination-log-retention.worker.js';
+import {
+  CORPUS_REFRESH_CRON,
+  handleCorpusRefresh,
+  JOB_CORPUS_REFRESH,
+  QUEUE_CORPUS_REFRESH,
+} from './corpus/refresh.worker.js';
 
 const logger = pino({
   name: 'careeros-worker',
@@ -85,6 +96,24 @@ async function bootstrap() {
     logger.error({ id: job?.id, err: err.message }, 'job failed'),
   );
 
+  const gitlabWorker = new Worker<GitlabSyncPayload>(
+    QUEUE_GITLAB,
+    async (job) => {
+      if (job.name !== 'sync') {
+        logger.warn({ name: job.name }, 'unknown gitlab job name');
+        return { skipped: true };
+      }
+      return handleGitlabSync(prisma, logger, job.data);
+    },
+    { connection, concurrency: 2 },
+  );
+  gitlabWorker.on('completed', (job) =>
+    logger.info({ id: job.id, name: job.name, data: job.data }, 'gitlab job completed'),
+  );
+  gitlabWorker.on('failed', (job, err) =>
+    logger.error({ id: job?.id, err: err.message }, 'gitlab job failed'),
+  );
+
   const embeddingWorker = new Worker<EmbeddingGeneratePayload>(
     QUEUE_EMBEDDING,
     async (job) => {
@@ -133,8 +162,38 @@ async function bootstrap() {
     logger.error({ id: job?.id, err: err.message }, 'retention job failed'),
   );
 
+  // C-P2.7d: weekly corpus refresh. Cron 04:00 UTC Sunday. Static jobId keeps
+  // the schedule idempotent across restarts. The handler fetches every
+  // registered adapter, dedupes by promptHash + embedding cosine, and inserts
+  // survivors into `question_bank`.
+  const corpusQueue = new Queue(QUEUE_CORPUS_REFRESH, { connection });
+  await corpusQueue.add(
+    JOB_CORPUS_REFRESH,
+    {},
+    {
+      jobId: `repeat:${JOB_CORPUS_REFRESH}`,
+      repeat: { pattern: CORPUS_REFRESH_CRON },
+      removeOnComplete: { count: 30 },
+      removeOnFail: { count: 30 },
+    },
+  );
+  const corpusWorker = new Worker(
+    QUEUE_CORPUS_REFRESH,
+    async (job) => {
+      if (job.name !== JOB_CORPUS_REFRESH) {
+        logger.warn({ name: job.name }, 'unknown corpus job name');
+        return { skipped: true };
+      }
+      return handleCorpusRefresh(prisma, qdrant, logger);
+    },
+    { connection, concurrency: 1 },
+  );
+  corpusWorker.on('failed', (job, err) =>
+    logger.error({ id: job?.id, err: err.message }, 'corpus refresh job failed'),
+  );
+
   logger.info(
-    `worker up, listening on queues '${QUEUE_GITHUB}', '${QUEUE_EMBEDDING}', '${QUEUE_RETENTION}'`,
+    `worker up, listening on queues '${QUEUE_GITHUB}', '${QUEUE_GITLAB}', '${QUEUE_EMBEDDING}', '${QUEUE_RETENTION}', '${QUEUE_CORPUS_REFRESH}'`,
   );
 }
 
