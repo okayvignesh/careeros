@@ -93,6 +93,8 @@ export {
 export {
   AgentRegistry,
   agentRegistry,
+  runAgent,
+  setAgentAuditHook,
   type AgentDef,
   type AgentInfo,
   type AgentRun,
@@ -101,6 +103,7 @@ export {
   type AgentInput,
   type AgentOutput,
   type InferAgentOutput,
+  type AgentAuditEvent,
+  type AgentAuditHook,
+  type AgentRunContext,
 } from './agents';
-// runAgent / setAgentAuditHook / runAgentEvals are exported in later C-P2.8
-// commits alongside orchestrator.ts + eval-set.ts.

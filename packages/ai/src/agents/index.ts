@@ -12,3 +12,10 @@ export type {
   PromptRef,
   ToolSpec,
 } from './types';
+export {
+  runAgent,
+  setAgentAuditHook,
+  type AgentAuditEvent,
+  type AgentAuditHook,
+  type AgentRunContext,
+} from './orchestrator';
