@@ -40,8 +40,71 @@ model User {
   resumeVariants   ResumeVariant[]
   coverLetters     CoverLetter[]
   applications     Application[]
+  passkeyCredentials PasskeyCredential[]
+  recoveryCodes    RecoveryCode[]
+  passkeyChallenges PasskeyChallenge[]
 
   @@map("users")
+}
+
+/// C-P0.7: registered WebAuthn credentials. One row per passkey per user.
+/// `credentialId` is the base64url-decoded raw id bytes from the authenticator;
+/// `publicKey` is the COSE key returned by @simplewebauthn/server. `counter`
+/// starts at whatever the authenticator reports and monotonically increases;
+/// a counter that fails to advance on login is a cloned-credential signal.
+model PasskeyCredential {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @db.Uuid
+  credentialId Bytes    @unique /// raw credential id bytes
+  publicKey    Bytes    /// COSE-encoded public key
+  counter      BigInt   @default(0)
+  transports   String[] @default([]) /// AuthenticatorTransportFuture[] as strings
+  name         String?  /// user-supplied nickname ("Laptop", "iPhone")
+  createdAt    DateTime @default(now()) @db.Timestamptz(6)
+  lastUsedAt   DateTime? @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("passkey_credentials")
+}
+
+/// C-P0.7: recovery codes for account access when passkeys are lost. Generated
+/// as a set (typically 8); shown once to the user, then only sha256 hashes are
+/// persisted. Redemption is atomic (compare-and-set on `usedAt`). Codes are
+/// case-insensitive: input is uppercased + de-hyphenated before hashing.
+model RecoveryCode {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  codeHash  String    @unique /// sha256 hex of the normalized plaintext code
+  usedAt    DateTime? @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("recovery_codes")
+}
+
+/// C-P0.7: outstanding WebAuthn challenges. One row per in-flight
+/// registration/authentication ceremony. Challenges expire after 5 min;
+/// worker/cron can sweep, but the verify path also refuses expired rows.
+/// `userId` nullable so usernameless auth flows work — the challenge is bound
+/// to the browser via a short-lived server-side row keyed by the challenge
+/// value itself. The plan says do not hand-roll CBOR/COSE — @simplewebauthn
+/// owns that. This table just parks the challenge string until the browser
+/// answers.
+model PasskeyChallenge {
+  challenge String   @id /// base64url string returned by @simplewebauthn
+  userId    String?  @db.Uuid
+  kind      String   /// "register" | "authenticate"
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  expiresAt DateTime @db.Timestamptz(6)
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@map("passkey_challenges")
 }
 
 model Session {
@@ -146,9 +209,13 @@ model ProviderConfig {
 model Integration {
   id           String   @id @default(uuid()) @db.Uuid
   userId       String   @db.Uuid
-  kind         String   /// "github" | "slack" | "gmail"
+  kind         String   /// "github" | "gitlab" | "slack" | "gmail"
   status       String   @default("connected") /// "connected" | "revoked"
   tokenSecretId String? @db.Uuid
+  /// Self-hosted host URL for kinds that support it (gitlab enterprise today).
+  /// Always null for gitlab.com + github.com. Validated via `assertPublicUrl`
+  /// + per-user host allowlist opt-in before persist (Wave A A-C2 / A-H6b).
+  baseUrl      String?
   metadata     Json?
   connectedAt  DateTime @default(now()) @db.Timestamptz(6)
   updatedAt    DateTime @updatedAt @db.Timestamptz(6)

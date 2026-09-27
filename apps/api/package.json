@@ -27,6 +27,8 @@
     "@nestjs/platform-express": "^10.4.22",
     "@nestjs/throttler": "^6.4.0",
     "@prisma/client": "^5.20.0",
+    "@simplewebauthn/server": "^11",
+    "@simplewebauthn/types": "^11",
     "bullmq": "^5.13.0",
     "helmet": "^8.0.0",
     "ioredis": "^5.4.1",
