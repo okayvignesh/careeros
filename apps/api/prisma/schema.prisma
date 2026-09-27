@@ -992,3 +992,56 @@ model GmailProcessedMessage {
   @@index([userId, processedAt(sort: Desc)])
   @@map("gmail_processed_messages")
 }
+
+/// F.1 (P6 controlled execution): every outbound action an agent wants to take
+/// lands here first. The user approves + only then does the consumer submit.
+/// State machine lives in `apps/api/src/modules/approvals/state-machine.ts`
+/// (plain object of legal transitions - no XState, spec limits XState to the
+/// job-application pipeline).
+///
+/// `kind` picks the downstream consumer; `payload` is the full tool invocation
+/// the agent proposed; `diffJson` is what the UI shows to the user (a summary
+/// of what will change - email body preview, target ATS + fields, Slack DM
+/// text, etc.). `state` transitions:
+///   pending -> approved -> (sent | failed)
+///   pending -> cancelled
+/// `failedReason` is set alongside the `failed` transition; `decidedAt` is
+/// stamped on approve / cancel; `sentAt` on markSent.
+model ApprovalItem {
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String    @db.Uuid
+  kind         String    /// 'ats_submit' | 'agent_form_fill' | 'outreach_email' | 'slack_dm' | 'delete_account'
+  payload      Json      /// full tool invocation payload + agent reasoning
+  diffJson     Json      /// user-facing preview of what will happen
+  state        String    @default("pending") /// 'pending' | 'approved' | 'sent' | 'failed' | 'cancelled'
+  createdAt    DateTime  @default(now()) @db.Timestamptz(6)
+  decidedAt    DateTime? @db.Timestamptz(6)
+  sentAt       DateTime? @db.Timestamptz(6)
+  failedReason String?
+
+  user   User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  events ApprovalEvent[]
+
+  @@index([userId, state, createdAt])
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("approval_items")
+}
+
+/// F.1: audit trail per approval item. One row per transition or notable
+/// side-event (enqueued, approved, cancelled, sent, failed, bulk_reauth_required).
+/// `actor` is `user` for user decisions, `system` for consumer-worker markSent /
+/// markFailed. `meta` carries the request-scoped extras (reason for cancel,
+/// consumer id for markSent, error snippet for markFailed).
+model ApprovalEvent {
+  id             String   @id @default(uuid()) @db.Uuid
+  approvalItemId String   @db.Uuid
+  event          String
+  actor          String   @default("user") /// 'user' | 'system' | 'agent'
+  meta           Json?
+  at             DateTime @default(now()) @db.Timestamptz(6)
+
+  item ApprovalItem @relation(fields: [approvalItemId], references: [id], onDelete: Cascade)
+
+  @@index([approvalItemId, at])
+  @@map("approval_events")
+}
