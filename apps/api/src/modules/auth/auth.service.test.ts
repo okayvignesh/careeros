@@ -207,8 +207,18 @@ describe('AuthService.changePassword (A-H3)', () => {
     expect(updates).toHaveLength(1);
     expect(deleted).toHaveLength(1);
     expect(audits).toHaveLength(1);
+    // A-H3: assert the audit shape, not just presence; a mutation that swaps
+    // the action string ('auth.password.changed' → anything) must be caught.
+    expect(audits[0]).toMatchObject({
+      userId: 'user-1',
+      actor: 'user',
+      action: 'auth.password.changed',
+      resourceType: 'user',
+      resourceId: 'user-1',
+    });
     // MUTATION-SMOKE: remove the `activeSession.deleteMany` line from
-    // changePassword and this test's `deleted` assertion fails immediately.
+    // changePassword and this test's `deleted` assertion fails; change the
+    // action string and the toMatchObject fails.
   });
 
   it('refuses when the current password is wrong', async () => {
