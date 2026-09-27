@@ -100,7 +100,7 @@ function KpiCard({
   label: string;
   value: string | null;
   detail: string | null;
-  progress?: number;
+  progress?: number | undefined;
   help: string;
   error: string | null;
   loading: boolean;

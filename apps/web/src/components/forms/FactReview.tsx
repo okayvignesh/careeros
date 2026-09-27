@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowRight, Briefcase, Check, GraduationCap, Sparkles, Wrench, X } from 'lucide-react';
+import { ArrowRight, Briefcase, Check, GraduationCap, Sparkles, Wrench, X, type LucideIcon } from 'lucide-react';
 import { ThinkingOrb } from 'thinking-orbs';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button, Eyebrow, cn } from '@careeros/ui';
@@ -218,7 +218,7 @@ function Group({
   label,
   children,
 }: {
-  icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
+  icon: LucideIcon;
   label: string;
   children: React.ReactNode;
 }) {

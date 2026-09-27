@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowRight, KeyRound, Mail, User } from 'lucide-react';
+import { ArrowRight, KeyRound, Mail, User, type LucideIcon } from 'lucide-react';
 import { ThinkingOrb } from 'thinking-orbs';
 import { Button, Input } from '@careeros/ui';
 import { apiPost } from '@/lib/api-client';
@@ -93,7 +93,7 @@ export function Field({
   optional,
   children,
 }: {
-  icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
+  icon: LucideIcon;
   label: string;
   hint?: string;
   optional?: boolean;

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ArrowRight, CheckCircle2, Database, HardDrive, RefreshCw, Sparkles, XCircle, Zap } from 'lucide-react';
+import { ArrowRight, CheckCircle2, Database, HardDrive, RefreshCw, Sparkles, XCircle, Zap, type LucideIcon } from 'lucide-react';
 import { ThinkingOrb } from 'thinking-orbs';
 import { motion } from 'framer-motion';
 import { Button } from '@careeros/ui';
@@ -20,7 +20,7 @@ interface HealthResponse {
   checks: Record<string, Check>;
 }
 
-const ICONS: Record<string, React.ComponentType<{ className?: string; strokeWidth?: number }>> = {
+const ICONS: Record<string, LucideIcon> = {
   postgres: Database,
   redis: Zap,
   qdrant: HardDrive,
