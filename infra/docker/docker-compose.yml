@@ -1,18 +1,19 @@
 name: careeros
 
+# ─── Wave A-infra security hardening ────────────────────────────────────────
+# A-H8: two networks. `internal` holds datastores (postgres/redis/qdrant/minio)
+#       with zero outbound reach. `egress` holds api+worker+squid so app code
+#       can only reach the outside world through the Squid allowlist proxy.
+# A-H9: no default passwords. `${VAR:?…}` forces compose to abort on missing
+#       env, and startup-check.ts refuses to boot on weak/short values.
 # A-M7: every image pinned by sha256 digest so a rebuild pulls the exact same
-# bits. Human-readable tag stays as a comment above each digest for upgrade
-# traceability. Digests captured via `docker buildx imagetools inspect <ref>`
-# on 2026-09-27 (see scripts/verify-image-pins.sh which fails CI on any
-# floating tag reintroduced later).
-#
-# A-H9: no default passwords anywhere. `${VAR:?…}` interpolation makes compose
-# abort with a clear error if the operator forgets to set the env, and
-# startup-check.ts refuses to boot the api on weak/short/known-default values.
+#       bits. Human-readable tag stays as a comment above each digest for
+#       upgrade traceability. Digests captured via `docker buildx imagetools
+#       inspect <ref>` on 2026-09-27 (see scripts/verify-image-pins.sh).
 
 services:
   postgres:
-    # postgres:16-alpine
+    # postgres:16-alpine (digest via `docker buildx imagetools inspect`, 2026-09-27)
     image: postgres@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     restart: unless-stopped
     environment:
@@ -31,7 +32,7 @@ services:
       - internal
 
   redis:
-    # redis:7-alpine
+    # redis:7-alpine (digest via `docker buildx imagetools inspect`, 2026-09-27)
     image: redis@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
     restart: unless-stopped
     volumes:
@@ -45,7 +46,7 @@ services:
       - internal
 
   qdrant:
-    # qdrant/qdrant:v1.12.4
+    # qdrant/qdrant:v1.12.4 (digest via `docker buildx imagetools inspect`, 2026-09-27)
     image: qdrant/qdrant@sha256:241edb9d7778327516ef218f8c74e1bd61b5ea42cd4f193cb8d0896199705636
     restart: unless-stopped
     volumes:
@@ -59,12 +60,12 @@ services:
       - internal
 
   minio:
-    # bitnamilegacy/minio:2024.10.29-debian-12-r1 — switched off
-    # quay.io/minio/minio because that repo now requires authentication for
-    # anonymous pulls, which made CI-side digest verification impossible.
-    # Bitnami bundles the same MinIO server binary and honors MINIO_ROOT_*
-    # env vars. ponytail: swap back to upstream quay if anonymous read
-    # returns.
+    # bitnamilegacy/minio:2024.10.29-debian-12-r1 (digest via `docker buildx
+    # imagetools inspect`, 2026-09-27). Switched off `quay.io/minio/minio`
+    # because that repo now requires authentication for anonymous pulls, which
+    # made digest verification impossible from CI. Bitnami's image bundles the
+    # same MinIO server binary and honors the same MINIO_ROOT_* env vars.
+    # ponytail: swap back to upstream quay if MinIO restores anonymous read.
     image: bitnamilegacy/minio@sha256:d07cf144fe42fd6d49bc4757e5562baa92407157626e4ffebbeb02e03c716268
     restart: unless-stopped
     environment:
@@ -76,12 +77,32 @@ services:
     volumes:
       - miniodata:/bitnami/minio/data
     healthcheck:
+      # /minio/health/live is MinIO's documented liveness probe and works on
+      # any distribution of the server binary (no `mc` dependency).
       test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:9000/minio/health/live || exit 1']
       interval: 10s
       timeout: 5s
       retries: 10
     networks:
       - internal
+
+  # A-H8: Squid egress proxy. Api + worker route ALL outbound HTTP(S) through
+  # this container. squid.conf enforces a deny-by-default allowlist so a
+  # compromised worker cannot reach 169.254.169.254 or arbitrary hosts.
+  squid:
+    # ubuntu/squid:6.10-24.10_edge (digest via `docker buildx imagetools
+    # inspect`, 2026-09-27)
+    image: ubuntu/squid@sha256:c9f5212b147a766529c7b026e2bebed37b998d33d0066b658596af5eba7cc65c
+    restart: unless-stopped
+    volumes:
+      - ./squid/squid.conf:/etc/squid/squid.conf:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'squid -k check || exit 1']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks:
+      - egress
 
   api:
     build:
@@ -101,8 +122,6 @@ services:
       MINIO_BUCKET: ${MINIO_BUCKET:-careeros}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       SESSION_SECRET: ${SESSION_SECRET}
-      # A-H9: propagate datastore creds into the api container so startup-check
-      # can re-assert their strength before Nest boots.
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
       API_PORT: 3001
@@ -110,6 +129,12 @@ services:
       TRUSTED_ORIGINS: ${TRUSTED_ORIGINS:-http://localhost:3000}
       SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-168}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # A-H8: force every outbound HTTP(S) through the Squid allowlist proxy.
+      # NO_PROXY exempts the private datastore names so intra-compose traffic
+      # stays on the internal net without a proxy hop.
+      HTTP_PROXY: http://squid:3128
+      HTTPS_PROXY: http://squid:3128
+      NO_PROXY: postgres,redis,minio,qdrant,localhost,127.0.0.1
     depends_on:
       postgres:
         condition: service_healthy
@@ -119,13 +144,17 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      squid:
+        condition: service_healthy
     healthcheck:
       test: ['CMD', 'wget', '-qO-', 'http://localhost:3001/health']
       interval: 10s
       timeout: 5s
       retries: 10
     networks:
+      # api needs `internal` to reach datastores AND `egress` to reach squid.
       - internal
+      - egress
 
   worker:
     build:
@@ -140,13 +169,19 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      HTTP_PROXY: http://squid:3128
+      HTTPS_PROXY: http://squid:3128
+      NO_PROXY: postgres,redis,minio,qdrant,localhost,127.0.0.1
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      squid:
+        condition: service_healthy
     networks:
       - internal
+      - egress
 
   web:
     build:
@@ -162,10 +197,17 @@ services:
       api:
         condition: service_healthy
     networks:
-      - internal
+      # web talks only to api; keep on egress side. If future web-side outbound
+      # is required (e.g. server-side fetch to a CDN) it also routes via squid.
+      - egress
 
 networks:
+  # `internal`: no ingress/egress from the outside. Datastores only.
   internal:
+    driver: bridge
+    internal: true
+  # `egress`: reachable by app tier; squid gates all outbound.
+  egress:
     driver: bridge
 
 volumes:

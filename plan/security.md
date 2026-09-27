@@ -63,7 +63,7 @@ Cross-cutting security requirements for an open-source, self-hostable developer 
 - [ ] `startup-check.ts` runs before Nest bootstrap, tested in unit tests with negative cases.
 - [x] Web middleware fails CLOSED to `/service-unavailable?next=<path>` when the API is unreachable (network error, 5s timeout, non-2xx); public routes still render. See `apps/web/src/middleware.ts:24-53` + `apps/web/src/middleware.test.ts` (A-M8).
 - [x] MinIO credentials never fall back to a default: `StorageService` reads `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` via `requireEnv()` at construction and throws if missing (`apps/api/src/common/storage.service.ts:82-90,100-107`); regression in `apps/api/src/common/storage.service.test.ts` asserts the throw on both missing keys (A-M5).
-- [x] Datastore credentials refuse defaults + weak values at BOTH layers. Compose interpolates `${POSTGRES_PASSWORD:?…}` and `${MINIO_ROOT_PASSWORD:?…}` so a missing env aborts the stack before boot (`infra/docker/docker-compose.yml:20,72`); startup-check.ts adds an `A-infra` block that refuses boot on missing, known-weak (careeros, careerosminio, changeme, admin, minioadmin, root, …) or <24-byte values via `assertStrongDatastoreCred` (`apps/api/src/startup-check.ts:23-34,76-97` + `apps/api/src/startup-check.test.ts`, A-H9).
+- [x] Datastore credentials refuse defaults + weak values at BOTH layers. Compose interpolates `${POSTGRES_PASSWORD:?…}` and `${MINIO_ROOT_PASSWORD:?…}` so a missing env aborts the stack before boot (`infra/docker/docker-compose.yml:21,73`); startup-check.ts adds an `A-infra` block that refuses boot on missing, known-weak (careeros, careerosminio, changeme, admin, minioadmin, root, …) or <24-byte values via `assertStrongDatastoreCred` (`apps/api/src/startup-check.ts:23-34,76-97` + `apps/api/src/startup-check.test.ts`, A-H9).
 
 **Phase:** P0
 
@@ -156,7 +156,7 @@ Cross-cutting security requirements for an open-source, self-hostable developer 
 - [ ] No analytics SDK in `apps/web` (no Google Analytics, no PostHog cloud, no Sentry cloud).
 - [ ] Self-hosted error tracking only (GlitchTip in compose).
 - [ ] `NEXT_TELEMETRY_DISABLED=1` set in web Dockerfile.
-- [ ] Worker container's Docker network policy: outbound only to configured provider domains (DeepSeek, GitHub, Ashby, Greenhouse, Adzuna, Remotive, Arbeitnow, JSearch, Serpapi, MinIO, Postgres, Redis, Qdrant) — everything else blocked at network level.
+- [x] Worker container's Docker network policy: outbound only to configured provider domains. Compose splits into `internal` (datastores; `internal: true` = zero outbound) and `egress` (api + worker + web + squid) networks; the Squid container gates every outbound HTTP(S) call against a deny-by-default allowlist (deepseek, openai, anthropic, openrouter, github/githubusercontent, gitlab, npmjs). See `infra/docker/docker-compose.yml:92-105` (squid service), `:135-137,172-174` (api/worker `HTTP(S)_PROXY=http://squid:3128` + `NO_PROXY` exemption for private datastore hostnames), `:154-157,182-184,204-209` (network membership + `internal: true` gate) and `infra/docker/squid/squid.conf` (ACLs + request logging). Operator smoke `scripts/smoke/egress.sh` asserts `example.com` and `169.254.169.254` are blocked and `api.deepseek.com` / `api.github.com` reach the proxy (A-H8).
 - [ ] Allowlist rebuilt on config change; documented in `docs/egress.md`.
 - [ ] Optional `USAGE_STATS=on` env var — sends `{version, install_id_hashed, feature_flags}` weekly to configurable endpoint. Off by default. Documented exactly what fields.
 - [ ] `docs/security.md` lists every outbound network path with purpose.
@@ -236,7 +236,7 @@ Cross-cutting security requirements for an open-source, self-hostable developer 
 - [ ] All containers use read-only rootfs, tmpfs for writable dirs.
 - [ ] All containers drop `ALL` Linux capabilities, add back only what's needed.
 - [ ] Seccomp default profile applied.
-- [x] `docker-compose.yml` uses image digests, not tags. Every `image:` line in `infra/docker/docker-compose.yml` is `<repo>@sha256:<64-hex>` (postgres:16-alpine :12; redis:7-alpine :31; qdrant/qdrant:v1.12.4 :45; bitnamilegacy/minio:2024.10.29-debian-12-r1 :64 — swapped off `quay.io/minio/minio` because that repo now requires auth for anonymous pulls, `ponytail:` note in-line; plus ubuntu/squid pinned when A-H8 adds it). CI job `image-pins` in `.github/workflows/pr.yml` runs `scripts/verify-image-pins.sh` to fail any PR that reintroduces a floating tag (A-M7).
+- [x] `docker-compose.yml` uses image digests, not tags. Every `image:` line in `infra/docker/docker-compose.yml` is `<repo>@sha256:<64-hex>` (postgres:16-alpine :17; redis:7-alpine :36; qdrant/qdrant:v1.12.4 :50; bitnamilegacy/minio:2024.10.29-debian-12-r1 :69 — swapped off `quay.io/minio/minio` because that repo now requires auth for anonymous pulls, `ponytail:` note in-line; ubuntu/squid:6.10-24.10_edge :95). CI job `image-pins` in `.github/workflows/pr.yml` runs `scripts/verify-image-pins.sh` to fail any PR that reintroduces a floating tag (A-M7).
 - [ ] `gitleaks` pre-commit hook + CI job — no secrets in commits.
 
 **Phase:** P0
