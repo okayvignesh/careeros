@@ -8,16 +8,44 @@ export function apiBrowserUrl(path: string): string {
   return `${BROWSER_API_URL}${path}`;
 }
 
+/**
+ * A-H1 (client-side): the server sets a non-HttpOnly `__Host-careeros_csrf`
+ * (prod) / `careeros_csrf` (dev) cookie alongside the session. Non-GET
+ * requests from the SPA must echo that value in the `x-csrf-token` header
+ * (double-submit). ponytail: dev+prod names checked; no env branch needed.
+ * Exported so tests can drive it directly.
+ * ponytail: RSC / Server Actions issue their own fetch server-side and don't
+ * hit this wrapper; they'll need cookie forwarding wired separately once
+ * added. No Server Actions in the app today.
+ */
+export function readCsrfTokenFromCookie(cookieHeader: string): string | null {
+  for (const part of cookieHeader.split(';')) {
+    const [rawName, ...rest] = part.trim().split('=');
+    if (rawName === '__Host-careeros_csrf' || rawName === 'careeros_csrf') {
+      return rest.join('=') || null;
+    }
+  }
+  return null;
+}
+
 async function request<T>(
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   path: string,
   body?: unknown,
   init?: RequestInit,
 ): Promise<T> {
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+    ...((init?.headers as Record<string, string> | undefined) ?? {}),
+  };
+  if (method !== 'GET' && typeof document !== 'undefined') {
+    const token = readCsrfTokenFromCookie(document.cookie ?? '');
+    if (token) headers['x-csrf-token'] = token;
+  }
   const res = await fetch(`${baseUrl()}${path}`, {
     ...init,
     method,
-    headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) },
+    headers,
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     cache: 'no-store',
     credentials: 'include',
