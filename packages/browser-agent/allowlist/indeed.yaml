@@ -1,0 +1,14 @@
+domain: indeed.com
+allowed_paths:
+  - /jobs
+  - /viewjob
+  - /q-
+  - /myjobs
+  - /account/login
+forbidden_selectors:
+  - "input[type=password]"
+  - "form#loginform"
+  - "button[data-tn-element=applyResumeSelectionBtn]"
+required_headers:
+  - user-agent
+  - accept-language

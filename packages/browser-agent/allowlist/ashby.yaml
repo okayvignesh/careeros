@@ -1,0 +1,11 @@
+domain: ashbyhq.com
+allowed_paths:
+  - /
+  - /application
+  - /application/*
+forbidden_selectors:
+  - "input[type=password]"
+  - "input[name*=ssn]"
+  - "input[name*=social_security]"
+required_headers:
+  - user-agent

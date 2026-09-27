@@ -1,0 +1,13 @@
+domain: greenhouse.io
+allowed_paths:
+  - /
+  - /jobs/
+  - /embed/job_app
+forbidden_selectors:
+  - "input[type=password]"
+  - "input[name*=ssn]"
+  - "input[name*=social_security]"
+  - "input[name*=race]"
+  - "input[name*=ethnicity]"
+required_headers:
+  - user-agent

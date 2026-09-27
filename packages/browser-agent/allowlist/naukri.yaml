@@ -1,0 +1,14 @@
+domain: naukri.com
+allowed_paths:
+  - /
+  - /jobs-in-*
+  - /job-listings-*
+  - /mnjuser/homepage
+  - /mnjuser/recruiterprofiles
+forbidden_selectors:
+  - "input[type=password]"
+  - "form[action*=login]"
+  - "button[id*=chatBtn]"
+required_headers:
+  - user-agent
+  - accept-language

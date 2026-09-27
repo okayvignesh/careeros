@@ -1,0 +1,16 @@
+domain: linkedin.com
+allowed_paths:
+  - /jobs/
+  - /jobs/view/
+  - /jobs/search/
+  - /my-items/saved-jobs/
+  - /jobs/collections/recommended/
+  - /jobs/collections/applied/
+forbidden_selectors:
+  - "input[type=password]"
+  - "form[action*=login]"
+  - "button[data-tracking-control-name*=connect]"
+  - "button[data-tracking-control-name*=message]"
+required_headers:
+  - user-agent
+  - accept-language
