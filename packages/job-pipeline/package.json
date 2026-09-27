@@ -10,10 +10,12 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@careeros/shared": "workspace:*",
     "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/node": "^22.7.5",
+    "msw": "^2.6.0",
     "typescript": "^5.6.3"
   }
 }

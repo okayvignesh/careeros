@@ -1,5 +1,33 @@
 export * from './types';
-export { remotiveAdapter, mapRemotive } from './adapters/remotive';
+export {
+  adapters,
+  remotiveAdapter,
+  ashbyAdapter,
+  greenhouseAdapter,
+  adzunaAdapter,
+  arbeitnowAdapter,
+  createAshbyAdapter,
+  createGreenhouseAdapter,
+  createAdzunaAdapter,
+  createArbeitnowAdapter,
+  mapRemotive,
+  mapAshby,
+  mapGreenhouse,
+  mapAdzuna,
+  mapArbeitnow,
+  AdapterError,
+  MalformedResponseError,
+  MissingCredentialError,
+  type AshbyAdapterOpts,
+  type GreenhouseAdapterOpts,
+  type AdzunaAdapterOpts,
+  type ArbeitnowAdapterOpts,
+  type AshbyJob,
+  type GreenhouseJob,
+  type AdzunaJob,
+  type ArbeitnowJob,
+  type RemotiveJob,
+} from './adapters';
 export { normalize, type NormalizedJob } from './stages/normalize';
 export { dedupe, type DedupeResult } from './stages/dedupe';
 export {

@@ -4,7 +4,7 @@ import { matchScoreForJob, type JobSkillExtraction, type MatchResult } from '@ca
 import { DeepSeekProvider, renderPrompt, wrapUntrusted } from '@careeros/ai';
 import { decrypt, loadMasterKey } from '@careeros/secrets';
 import {
-  remotiveAdapter,
+  adapters as allAdapters,
   normalize,
   freshness,
   type JobSourceAdapter,
@@ -72,9 +72,9 @@ const AGING_DAYS = 14;
 @Injectable()
 export class JobsService {
   private readonly logger = new Logger(JobsService.name);
-  private readonly adapters: Record<string, JobSourceAdapter> = {
-    [remotiveAdapter.id]: remotiveAdapter,
-  };
+  private readonly adapters: Record<string, JobSourceAdapter> = Object.fromEntries(
+    allAdapters.map((a) => [a.id, a]),
+  );
 
   constructor(
     private readonly prisma: PrismaService,
