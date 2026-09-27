@@ -83,9 +83,9 @@ services:
     volumes:
       - miniodata:/bitnami/minio/data
     healthcheck:
-      # /minio/health/live is MinIO's documented liveness probe and works on
-      # any distribution of the server binary (no `mc` dependency).
-      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:9000/minio/health/live || exit 1']
+      # /minio/health/live is MinIO's documented liveness probe. bitnamilegacy
+      # ships curl but not wget, so use curl.
+      test: ['CMD-SHELL', 'curl -sf http://127.0.0.1:9000/minio/health/live || exit 1']
       interval: 10s
       timeout: 5s
       retries: 10
