@@ -34,6 +34,12 @@ import {
   JOB_CORPUS_REFRESH,
   QUEUE_CORPUS_REFRESH,
 } from './corpus/refresh.worker.js';
+import {
+  handleMarketSnapshot,
+  JOB_MARKET_SNAPSHOT,
+  MARKET_SNAPSHOT_CRON,
+  QUEUE_MARKET_SNAPSHOT,
+} from './market-snapshot.worker.js';
 
 const logger = pino({
   name: 'careeros-worker',
@@ -192,8 +198,37 @@ async function bootstrap() {
     logger.error({ id: job?.id, err: err.message }, 'corpus refresh job failed'),
   );
 
+  // C-P3.4d: weekly market snapshot. Monday 06:00 UTC. Static jobId keeps the
+  // schedule idempotent across restarts. Writes one shared-default row plus
+  // one row per user with saved job preferences.
+  const snapshotQueue = new Queue(QUEUE_MARKET_SNAPSHOT, { connection });
+  await snapshotQueue.add(
+    JOB_MARKET_SNAPSHOT,
+    {},
+    {
+      jobId: `repeat:${JOB_MARKET_SNAPSHOT}`,
+      repeat: { pattern: MARKET_SNAPSHOT_CRON },
+      removeOnComplete: { count: 30 },
+      removeOnFail: { count: 30 },
+    },
+  );
+  const snapshotWorker = new Worker(
+    QUEUE_MARKET_SNAPSHOT,
+    async (job) => {
+      if (job.name !== JOB_MARKET_SNAPSHOT) {
+        logger.warn({ name: job.name }, 'unknown market-snapshot job name');
+        return { skipped: true };
+      }
+      return handleMarketSnapshot(prisma, logger);
+    },
+    { connection, concurrency: 1 },
+  );
+  snapshotWorker.on('failed', (job, err) =>
+    logger.error({ id: job?.id, err: err.message }, 'market-snapshot job failed'),
+  );
+
   logger.info(
-    `worker up, listening on queues '${QUEUE_GITHUB}', '${QUEUE_GITLAB}', '${QUEUE_EMBEDDING}', '${QUEUE_RETENTION}', '${QUEUE_CORPUS_REFRESH}'`,
+    `worker up, listening on queues '${QUEUE_GITHUB}', '${QUEUE_GITLAB}', '${QUEUE_EMBEDDING}', '${QUEUE_RETENTION}', '${QUEUE_CORPUS_REFRESH}', '${QUEUE_MARKET_SNAPSHOT}'`,
   );
 }
 
