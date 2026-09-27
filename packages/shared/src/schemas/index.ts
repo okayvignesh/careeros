@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { assertPublicUrlShape, SsrfBlockedError } from '../net/assert-public-url';
+import { assertPublicUrlShape, SsrfBlockedError } from '../net/shape';
 
 // Sync gate reused by every user-supplied baseUrl. Returns true if the URL is
 // well-formed, on the allowlist, and not a literal private IP. DNS-resolution

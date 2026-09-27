@@ -4,24 +4,11 @@ const nextConfig = {
   poweredByHeader: false,
   transpilePackages: ['@careeros/ui', '@careeros/shared'],
   typedRoutes: false,
-  // Defensive: with `next dev --webpack` we can't statically prove no code
-  // path pulls in node:dns/net/tls on the browser side (transpilePackages +
-  // deep transitive imports through unpdf/pdfjs-dist, etc.). Replace those
-  // specifiers with empty modules on the client bundle. Server bundle keeps
-  // the real modules. Turbopack (no --webpack flag) doesn't need this.
-  webpack: (config, { isServer, webpack }) => {
-    if (!isServer) {
-      config.plugins.push(
-        new webpack.NormalModuleReplacementPlugin(
-          /^node:(dns|net|tls)$/,
-          (resource) => {
-            resource.request = 'data:text/javascript,module.exports={}';
-          },
-        ),
-      );
-    }
-    return config;
-  },
+  // No webpack shim needed. `@careeros/shared/schemas` used to transitively
+  // pull `node:dns/net` via ./net/assert-public-url; that import was split
+  // into ./net/shape (browser-safe, pure JS) + ./net/assert-public-url
+  // (server-only, imports node:dns). Schemas now import only from ./net/shape.
+  // Works with both `next dev --webpack` and Turbopack.
 };
 
 export default nextConfig;
