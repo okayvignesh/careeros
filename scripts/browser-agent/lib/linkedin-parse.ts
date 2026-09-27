@@ -60,7 +60,7 @@ function parsePostedAt(raw: string | null, now: Date): Date | null {
     return Number.isNaN(d.getTime()) ? null : d;
   }
   const rel = raw.toLowerCase().match(/(\d+)\s*(minute|hour|day|week|month)s?\s*ago/);
-  if (!rel) return null;
+  if (!rel || !rel[1] || !rel[2]) return null;
   const n = Number(rel[1]);
   const unit = rel[2];
   const ms: Record<string, number> = {
@@ -92,14 +92,26 @@ export function parseJobCard(html: string, now: Date = new Date()): RawJob | nul
     return null;
   }
 
-  // Anchor: the parser accepts either a bare card fragment or a full page,
-  // so we scope to the first jobCard we find. When the fragment IS the card
-  // (root element matches), cheerio still resolves this correctly.
-  const card = $(SELECTORS.jobCard).first();
-  const $scope = card.length > 0 ? card : $.root();
+  // Anchor: scope to the first jobCard we find; when the fragment IS the
+  // card (root element matches jobCard), we re-load its outerHTML so the
+  // scope is a Document root — keeps the types simple + selectors work.
+  let $scoped = $;
+  const cardMatch = $(SELECTORS.jobCard).first();
+  if (cardMatch.length > 0) {
+    // If the fragment already has a matching card element inside it, re-load
+    // that element's outerHTML so we can operate on a fresh document root.
+    const outer = $.html(cardMatch);
+    if (outer && outer.length > 0) {
+      try {
+        $scoped = load(outer);
+      } catch {
+        // fall through, use original doc
+      }
+    }
+  }
 
   // Canonical URL — required. Href may be relative; resolve against linkedin.com.
-  const hrefRaw = $scope.find(SELECTORS.jobLink).first().attr('href') ?? null;
+  const hrefRaw = $scoped(SELECTORS.jobLink).first().attr('href') ?? null;
   if (!hrefRaw) return null;
   const canonicalUrl = hrefRaw.startsWith('http')
     ? hrefRaw
@@ -108,28 +120,28 @@ export function parseJobCard(html: string, now: Date = new Date()): RawJob | nul
   const jobId = extractJobId(canonicalUrl);
   if (!jobId) return null;
 
-  const title = pickWithin($scope, $, SELECTORS.jobTitle);
-  const company = pickWithin($scope, $, SELECTORS.company);
+  const title = pick($scoped, SELECTORS.jobTitle);
+  const company = pick($scoped, SELECTORS.company);
   if (!title || !company) return null;
 
-  const locationRaw = pickWithin($scope, $, SELECTORS.location);
+  const locationRaw = pick($scoped, SELECTORS.location);
   const remote = locationRaw ? /remote/i.test(locationRaw) : false;
 
   // postedAt: prefer datetime attribute on <time>, fall back to visible text.
-  const timeEl = $scope.find(SELECTORS.postedAt).first();
+  const timeEl = $scoped(SELECTORS.postedAt).first();
   const datetimeAttr = timeEl.attr('datetime');
   const postedRaw = datetimeAttr ?? timeEl.text() ?? null;
   const sourcePostedAt = parsePostedAt(postedRaw, now);
 
-  const easyApply = $scope.find(SELECTORS.easyApplyBadge).length > 0;
-  const promoted = $scope.find(SELECTORS.promotedBadge).length > 0;
-  const expired = $scope.find(SELECTORS.expiredBadge).length > 0;
+  const easyApply = $scoped(SELECTORS.easyApplyBadge).length > 0;
+  const promoted = $scoped(SELECTORS.promotedBadge).length > 0;
+  const expired = $scoped(SELECTORS.expiredBadge).length > 0;
 
   // description: cards don't carry the full JD, just the snippet the search
   // page shows. Full description lives on the /jobs/view page (fetched by a
   // separate script). Populate with whatever the card has so pipeline
   // dedupe still gets non-empty text.
-  const description = $scope.text().replace(/\s+/g, ' ').trim().slice(0, 5000) || title;
+  const description = $scoped.root().text().replace(/\s+/g, ' ').trim().slice(0, 5000) || title;
 
   return {
     sourceId: `linkedin:${jobId}`,
@@ -146,17 +158,3 @@ export function parseJobCard(html: string, now: Date = new Date()): RawJob | nul
   };
 }
 
-/**
- * cheerio scoping helper — searches within the card first, falls back to
- * the whole document (fixtures sometimes hand us the card as root).
- */
-function pickWithin(
-  scope: ReturnType<CheerioAPI>,
-  $: CheerioAPI,
-  selector: string,
-): string | null {
-  const scoped = scope.find(selector).first().text();
-  const local = scoped.replace(/\s+/g, ' ').trim();
-  if (local.length > 0) return local;
-  return pick($, selector);
-}
