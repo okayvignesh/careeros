@@ -97,6 +97,7 @@ One workstream per service. All parallel; each is a single-file addition.
 | B-8 | `apps/api/src/modules/embeddings/embeddings.service.ts` | 87 | Encode → upsert → search round-trip against a stub embedder |
 | B-9 | `packages/resume-render/src/index.ts` (`renderResumePdf`) | — | PDF byte snapshot + `pdf-parse` round-trip: text matches source model (also delivers on ATS-lint test) |
 | B-10 | `packages/job-pipeline/src/index.ts` framing (currently 2 lines) | 2 | Move pipeline stage funcs from `jobs.service.ts` into the package; tests per stage (normalize / dedupe / freshness / verify) |
+| B-11 | `apps/web/package.json` (Next.js + postcss chain) | — | **Elevated from Wave A follow-up per user directive.** Bump `next@14.2.15` to latest stable that clears `pnpm audit --prod --audit-level=high` (12 high + 3 critical CVEs in Next chain today block A-H7's CI gate and Wave H release). Keep App Router, resolve `postcss@8.4.31` chain. Fix latent `exactOptionalPropertyTypes` errors in `KpiRow.tsx:39`, `ProviderForm.tsx:66`, `SignInForm.tsx:35,44` that block `apps/web` typecheck. Regression: `pnpm --filter @careeros/web build` + `pnpm --filter @careeros/web typecheck` + `pnpm audit --prod --audit-level=high` all clean. |
 
 ### Wave C — Finish in-progress phases (P0–P4 unchecked)
 
