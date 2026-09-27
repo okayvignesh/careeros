@@ -1,6 +1,7 @@
-import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Optional, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { decryptField, encryptField, isEncryptedField, loadMasterKey } from '@careeros/secrets';
+import { MetricsService } from '../common/metrics/metrics.service';
 
 const KEY = loadMasterKey();
 
@@ -29,7 +30,38 @@ const ENCRYPTED_FIELDS: Record<string, { column: string; kind: 'string' | 'json'
 
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
+  // C-P4.8: metrics service is optional so this class still constructs in
+  // tests that don't wire the MetricsModule. In app boot it's always
+  // injected because MetricsModule is @Global().
+  constructor(@Optional() @Inject(MetricsService) private readonly metrics?: MetricsService) {
+    super();
+  }
+
   async onModuleInit(): Promise<void> {
+    // C-P4.8: Prisma query metrics. Runs BEFORE the encryption middleware
+    // (registration order = execution order for `$use`) so the timing
+    // captures the whole DB round-trip.
+    if (this.metrics) {
+      const m = this.metrics;
+      this.$use(async (params, next) => {
+        const start = process.hrtime.bigint();
+        let ok = true;
+        try {
+          const result = await next(params);
+          return result;
+        } catch (err) {
+          ok = false;
+          throw err;
+        } finally {
+          const durationSec = Number(process.hrtime.bigint() - start) / 1e9;
+          const model = params.model ?? 'raw';
+          const op = params.action;
+          m.prismaQueriesTotal.inc({ model, op, ok: String(ok) });
+          m.prismaQueryDurationSeconds.observe({ model, op }, durationSec);
+        }
+      });
+    }
+
     // Prisma middleware. Wraps every request; encrypts on create/update, decrypts on read.
     // Idempotent: values already carrying our marker are passed through unchanged.
     this.$use(async (params, next) => {
