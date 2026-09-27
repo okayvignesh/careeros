@@ -19,13 +19,19 @@
     "tailwind-merge": "^2.5.4"
   },
   "peerDependencies": {
+    "@monaco-editor/react": "^4.6.0",
     "next": "^14.0.0 || ^15.0.0",
     "react": "^18.3.0"
   },
   "devDependencies": {
+    "@monaco-editor/react": "^4.6.0",
+    "@testing-library/react": "^16.1.0",
     "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.1",
+    "jsdom": "^25.0.1",
     "next": "^14.2.15",
     "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "typescript": "^5.6.3"
   }
 }

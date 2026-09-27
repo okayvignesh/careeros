@@ -7,6 +7,8 @@ import { Sparkline } from './Sparkline';
 import { GapBadge } from './GapBadge';
 
 /**
+ * Screen 33: Skill demand table.
+ *
  * TODO(api): implement GET /api/market/skill-demand?window=<days>
  * Expected shape matches SkillDemandRow[]. Until the endpoint lands, the
  * component renders a fixture so screen 33 is visibly complete.
