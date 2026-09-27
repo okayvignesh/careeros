@@ -37,6 +37,7 @@ model User {
   bossBattles      BossBattle[]
   jobPreferences   UserJobPreferences?
   marketBriefs     MarketBrief[]
+  marketSnapshots  MarketSnapshot[]
   resumeVariants   ResumeVariant[]
   coverLetters     CoverLetter[]
   applications     Application[]
@@ -608,6 +609,28 @@ model MarketBrief {
 
   @@index([userId, generatedAt(sort: Desc)])
   @@map("market_briefs")
+}
+
+/// C-P3.4: weekly persisted stats snapshot per (user × filterHash). One row per
+/// (day, filterHash) - the unique index below is on the truncated snapshot day
+/// (see migration SQL) + filterHash so a manual retry on the same day doesn't
+/// double-write. `filterHash` is a stable SHA-256 of the pref set (see
+/// `snapshot.service.ts::hashFilter`) so per-user prefs get their own timeline
+/// while a shared preset (all-jobs-fresh-45d) shares one across users.
+/// `statsJson` is the same shape as MarketBrief.statsJson - reuses computeStatsFn.
+model MarketSnapshot {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String?  @db.Uuid /// null when snapshot is the shared default filter (cron only)
+  snapshotAt  DateTime @default(now()) @db.Timestamptz(6)
+  filterHash  String   /// sha-256 hex of the pref set that produced statsJson
+  statsJson   Json     /// {topSkills, topCompanies, newCount, totalCount, remoteShare, ...}
+  createdBy   String   @default("cron") /// 'cron' | 'manual'
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, snapshotAt(sort: Desc)])
+  @@index([filterHash, snapshotAt(sort: Desc)])
+  @@map("market_snapshots")
 }
 
 /// Per-user job-search preferences. Drives Stage 7 (relevance filter) of the
