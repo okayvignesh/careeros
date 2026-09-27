@@ -3,7 +3,12 @@ import { Prisma } from '@prisma/client';
 import { matchScoreForJob, type JobSkillExtraction, type MatchResult } from '@careeros/shared';
 import { DeepSeekProvider, renderPrompt, wrapUntrusted } from '@careeros/ai';
 import { decrypt, loadMasterKey } from '@careeros/secrets';
-import { remotiveAdapter, type JobSourceAdapter, type RawJob } from '@careeros/job-pipeline';
+import {
+  remotiveAdapter,
+  normalize,
+  freshness,
+  type JobSourceAdapter,
+} from '@careeros/job-pipeline';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UsageService } from '../usage/usage.service';
 import { UsageCache } from '../usage/usage.cache';
@@ -63,7 +68,6 @@ export interface RejectStats {
  */
 const FRESHNESS_DAYS = 45;
 const AGING_DAYS = 14;
-const DAY_MS = 86_400_000;
 
 @Injectable()
 export class JobsService {
@@ -128,37 +132,37 @@ export class JobsService {
       });
       stats.rawInserted++;
 
+      const n = normalize(r);
       const existing = await this.prisma.normalizedJob.findUnique({
-        where: { canonicalUrl: r.canonicalUrl },
+        where: { canonicalUrl: n.canonicalUrl },
       });
-      const sourceTag = `${r.sourceName}:${r.sourceId}`;
       if (existing) {
         await this.prisma.normalizedJob.update({
-          where: { canonicalUrl: r.canonicalUrl },
+          where: { canonicalUrl: n.canonicalUrl },
           data: {
-            title: r.title,
-            company: r.company,
-            location: r.location,
-            remote: r.remote,
-            description: r.description,
-            sourcePostedAt: r.sourcePostedAt,
+            title: n.title,
+            company: n.company,
+            location: n.location,
+            remote: n.remote,
+            description: n.description,
+            sourcePostedAt: n.sourcePostedAt,
             lastVerifiedAt: new Date(),
-            sourceIds: uniq([...existing.sourceIds, sourceTag]),
+            sourceIds: uniq([...existing.sourceIds, n.sourceTag]),
           },
         });
         stats.normalizedUpdated++;
       } else {
         await this.prisma.normalizedJob.create({
           data: {
-            canonicalUrl: r.canonicalUrl,
-            title: r.title,
-            company: r.company,
-            location: r.location,
-            remote: r.remote,
-            description: r.description,
-            sourcePostedAt: r.sourcePostedAt,
-            primarySource: r.sourceName,
-            sourceIds: [sourceTag],
+            canonicalUrl: n.canonicalUrl,
+            title: n.title,
+            company: n.company,
+            location: n.location,
+            remote: n.remote,
+            description: n.description,
+            sourcePostedAt: n.sourcePostedAt,
+            primarySource: n.primarySource,
+            sourceIds: [n.sourceTag],
           },
         });
         stats.normalizedInserted++;
@@ -215,10 +219,12 @@ export class JobsService {
     const mustHave = new Set(prefs.mustHaveSkills);
     const dealbreakers = new Set(prefs.dealbreakerSkills);
     const nowMs = Date.now();
-    const staleCutoff = nowMs - FRESHNESS_DAYS * DAY_MS;
     const filtered = rows.filter((r) => {
-      const postedMs = (r.sourcePostedAt ?? r.firstSeenAt).getTime();
-      if (postedMs < staleCutoff) {
+      const f = freshness(
+        { sourcePostedAt: r.sourcePostedAt, firstSeenAt: r.firstSeenAt },
+        { maxAgeDays: FRESHNESS_DAYS, now: nowMs },
+      );
+      if (!f.fresh) {
         rejected.stale++;
         return false;
       }
@@ -265,8 +271,11 @@ export class JobsService {
       total,
       rejected,
       jobs: paged.map(({ row: r, match }) => {
-        const postedMs = (r.sourcePostedAt ?? r.firstSeenAt).getTime();
-        const aging = nowMs - postedMs > AGING_DAYS * DAY_MS;
+        const f = freshness(
+          { sourcePostedAt: r.sourcePostedAt, firstSeenAt: r.firstSeenAt },
+          { maxAgeDays: FRESHNESS_DAYS, agingDays: AGING_DAYS, now: nowMs },
+        );
+        const aging = f.reason === 'aging';
         return {
           id: r.id,
           canonicalUrl: r.canonicalUrl,
