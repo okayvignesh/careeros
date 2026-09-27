@@ -30,6 +30,7 @@ import { ResumeVariantsModule } from './modules/resume-variants/resume-variants.
 import { CoverLettersModule } from './modules/cover-letters/cover-letters.module';
 import { ApplicationsModule } from './modules/applications/applications.module';
 import { MatcherModule } from './modules/matcher/matcher.module';
+import { DossierModule } from './modules/dossier/dossier.module';
 
 const loggerParams: Params = {
   pinoHttp: {
@@ -115,6 +116,7 @@ const loggerParams: Params = {
     CoverLettersModule,
     ApplicationsModule,
     MatcherModule,
+    DossierModule,
     HealthModule,
     SetupModule,
   ],
