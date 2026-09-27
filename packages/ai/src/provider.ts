@@ -5,27 +5,60 @@ export interface ChatMessage {
   content: string;
 }
 
+/**
+ * Static per-adapter description of what a provider can do. Reported to the
+ * setup wizard + the health page; used by higher layers to pick the right
+ * provider for a call (embed vs. chat vs. tools). Values are real (contextWindow
+ * is model-specific), not aspirational.
+ */
 export interface ProviderCapabilities {
-  chat: boolean;
+  /** JSON-mode / response_format supported end to end. */
   structuredOutput: boolean;
-  tools: boolean;
+  /** SSE streaming chat completions supported. */
   streaming: boolean;
+  /** OpenAI-style function/tool calls supported. */
+  toolUse: boolean;
+  /** Max input tokens for the selected chat model. */
+  contextWindow: number;
+  /** Native embedding endpoint supported. */
+  embeddings: boolean;
 }
 
 /**
- * Provider-agnostic contract. Adapters implement this per provider.
- * Real DeepSeek/OpenAI/Ollama adapters land in iteration 2.
+ * Lightweight reachability probe. Distinct from the deeper capability-suite
+ * `ProbeResult` in `./probe.ts` (which runs 4 real chat/tool/stream calls);
+ * this one hits a single low-cost endpoint (GET /models or equivalent) so the
+ * wizard can tell "provider is reachable" from "creds work end to end".
+ */
+export interface ProviderProbeResult {
+  reachable: boolean;
+  latencyMs: number;
+  error?: string;
+}
+
+/**
+ * Provider-agnostic contract. Every adapter (DeepSeek today; OpenAI, Ollama,
+ * Anthropic later) implements this. Kept minimal — no method the concrete
+ * doesn't need. `chatStructured` accepts `maxTokens` per Wave A A-H5.
  */
 export interface AIProvider {
   readonly name: string;
+  readonly capabilities: ProviderCapabilities;
+  /** Optional default; per-call `maxTokens` on chat / chatStructured overrides. */
+  readonly maxTokens?: number;
 
-  chat(input: { messages: ChatMessage[]; temperature?: number }): Promise<string>;
+  chat(input: {
+    messages: ChatMessage[];
+    temperature?: number;
+    maxTokens?: number;
+  }): Promise<string>;
 
   chatStructured<S extends z.ZodTypeAny>(input: {
     messages: ChatMessage[];
     schema: S;
     temperature?: number;
+    maxTokens?: number;
   }): Promise<z.output<S>>;
 
-  probeCapabilities(): Promise<ProviderCapabilities>;
+  probe(): Promise<ProviderProbeResult>;
 }

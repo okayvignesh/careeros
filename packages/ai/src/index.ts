@@ -1,4 +1,9 @@
-export type { AIProvider, ProviderCapabilities, ChatMessage } from './provider';
+export type {
+  AIProvider,
+  ProviderCapabilities,
+  ProviderProbeResult,
+  ChatMessage,
+} from './provider';
 export { DeepSeekProvider, type LlmCallRecord, type LlmCallHook } from './providers/deepseek';
 export { probeProvider, type ProbeResult } from './probe';
 export { estimateCostUsd } from './pricing';

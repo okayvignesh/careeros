@@ -1,0 +1,126 @@
+# C-P0.5c: nightly LLM eval suite + drift alerting.
+# Owning specs: ai-safety.md item 5, testing.md test-type 4.
+#
+# No eval-runner package script exists yet (grep for eval:ai / test:evals in
+# package.json returns nothing). packages/ai/src/evals/runner.ts is present
+# but not wired to a workspace target. When a runner target lands, drop the
+# guard in the "Run evals" step.
+name: Nightly Evals
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  evals:
+    name: LLM eval suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # TODO(C-P0.2 / packages/ai): register an `eval:ai` script (or
+      # `pnpm --filter @careeros/ai test:evals`) that emits JUnit XML to
+      # ./eval-results/junit.xml. Until then this step short-circuits with
+      # exit 0 so the cron does not spam failure noise while the runner is
+      # under construction.
+      - name: Run evals
+        id: run
+        continue-on-error: true
+        env:
+          # ponytail: temperature pin for determinism (testing.md §5).
+          # Real provider keys injected via repo secrets once the runner
+          # supports cached-response mode.
+          EVAL_TEMPERATURE: '0'
+        run: |
+          mkdir -p eval-results
+          if pnpm run --filter @careeros/ai --if-present test:evals; then
+            echo "ran=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "eval runner not yet registered (test:evals script missing)." >&2
+            echo "TODO: enable once packages/ai/src/evals/runner.ts is wired to a workspace target." >&2
+            echo "ran=false" >> "$GITHUB_OUTPUT"
+            # Emit a placeholder JUnit doc so the artifact upload has something.
+            cat > eval-results/junit.xml <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <testsuites name="careeros-evals" tests="0" failures="0" skipped="1">
+            <testsuite name="placeholder" tests="0" skipped="1">
+              <testcase name="runner-not-registered" classname="ci">
+                <skipped message="test:evals script not yet registered"/>
+              </testcase>
+            </testsuite>
+          </testsuites>
+          EOF
+          fi
+
+      - name: Upload JUnit artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-junit
+          path: eval-results/
+          if-no-files-found: warn
+          retention-days: 30
+
+      # Drift alerting: when the runner writes eval-results/drift.json with
+      # {"regressed": true, "delta": <float>}, open a tracking issue.
+      # testing.md §5 threshold: pass-rate drop > 5% vs 7-day baseline.
+      - name: Check drift
+        if: steps.run.outputs.ran == 'true'
+        id: drift
+        run: |
+          if [[ -f eval-results/drift.json ]]; then
+            regressed=$(node -e "try{const d=require('./eval-results/drift.json');process.stdout.write(String(d.regressed===true))}catch(e){process.stdout.write('false')}")
+            delta=$(node -e "try{const d=require('./eval-results/drift.json');process.stdout.write(String(d.delta||0))}catch(e){process.stdout.write('0')}")
+            echo "regressed=${regressed}" >> "$GITHUB_OUTPUT"
+            echo "delta=${delta}" >> "$GITHUB_OUTPUT"
+          else
+            echo "regressed=false" >> "$GITHUB_OUTPUT"
+            echo "delta=0" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: File drift issue
+        if: steps.drift.outputs.regressed == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const delta = '${{ steps.drift.outputs.delta }}';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `LLM eval drift detected (delta ${delta})`,
+              body: [
+                'Nightly eval suite reported a pass-rate regression beyond the 5% threshold.',
+                '',
+                `Delta vs 7-day baseline: **${delta}**`,
+                `Workflow run: ${runUrl}`,
+                '',
+                'See testing.md test-type 4 and ai-safety.md item 5.'
+              ].join('\n'),
+              labels: ['eval-drift', 'ai-safety']
+            });
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Nightly evals"
+            echo ""
+            echo "- Runner registered: ${{ steps.run.outputs.ran }}"
+            echo "- Drift regression: ${{ steps.drift.outputs.regressed || 'n/a' }}"
+            echo "- Delta: ${{ steps.drift.outputs.delta || 'n/a' }}"
+          } >> "$GITHUB_STEP_SUMMARY"

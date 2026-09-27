@@ -1,6 +1,11 @@
-import type { AIProvider, ChatMessage, ProviderCapabilities } from '../provider';
+import type {
+  AIProvider,
+  ChatMessage,
+  ProviderCapabilities,
+  ProviderProbeResult,
+} from '../provider';
 import { ZodError, type z } from 'zod';
-import { assertPublicUrl, assertPublicUrlShape } from '@careeros/shared';
+import { assertPublicUrl, assertPublicUrlShape, safeFetch } from '@careeros/shared';
 import { LLMProviderError, StructuredOutputError } from '../errors';
 
 export interface LlmCallRecord {
@@ -47,6 +52,18 @@ interface OpenAIResponse {
 
 export class DeepSeekProvider implements AIProvider {
   readonly name = 'deepseek';
+  // Real values, not aspirational. DeepSeek chat models expose JSON mode + tool
+  // use; SSE streaming is available on their chat/completions endpoint but the
+  // provider does not surface a streaming method through the AIProvider surface
+  // yet (probe.ts has testStreaming for the wizard). Embeddings live on a
+  // separate adapter, not this one. contextWindow = deepseek-chat (v3) 65,536 tokens.
+  readonly capabilities: ProviderCapabilities = {
+    structuredOutput: true,
+    streaming: false,
+    toolUse: false,
+    contextWindow: 65_536,
+    embeddings: false,
+  };
   private readonly base: string;
   private readonly allowlist: string[];
   private readonly defaultMaxTokens: number;
@@ -145,8 +162,45 @@ export class DeepSeekProvider implements AIProvider {
     }
   }
 
-  async probeCapabilities(): Promise<ProviderCapabilities> {
-    return { chat: true, structuredOutput: true, tools: true, streaming: true };
+  get maxTokens(): number {
+    return this.defaultMaxTokens;
+  }
+
+  /**
+   * Lightweight reachability probe: GET /models (OpenAI-compatible endpoint
+   * DeepSeek implements). Uses safeFetch so the SSRF guard runs; 3s timeout so
+   * a wedged provider does not stall the wizard. Never throws — the wizard
+   * renders `error` if reachable=false.
+   */
+  async probe(): Promise<ProviderProbeResult> {
+    const t0 = Date.now();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort('probe_timeout'), 3_000);
+    try {
+      const res = await safeFetch(
+        `${this.base}/models`,
+        {
+          method: 'GET',
+          headers: { authorization: `Bearer ${this.cfg.apiKey}` },
+          signal: controller.signal,
+        },
+        { allowlist: this.allowlist },
+      );
+      const latencyMs = Date.now() - t0;
+      if (!res.ok) {
+        return { reachable: false, latencyMs, error: `HTTP ${res.status}` };
+      }
+      return { reachable: true, latencyMs };
+    } catch (err) {
+      const msg = (err as Error).message || 'probe_failed';
+      return {
+        reachable: false,
+        latencyMs: Date.now() - t0,
+        error: msg === 'probe_timeout' ? 'timeout' : msg,
+      };
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   async testChat(signal?: AbortSignal): Promise<string> {
