@@ -1,7 +1,14 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { MarketBriefContent } from '@careeros/shared';
-import { DeepSeekProvider, InjectionBlockedError, renderPrompt, wrapUntrusted } from '@careeros/ai';
+import {
+  DeepSeekProvider,
+  InjectionBlockedError,
+  renderPrompt,
+  runFactCheck,
+  wrapUntrusted,
+  type FactCheckClaim,
+} from '@careeros/ai';
 import { decrypt, loadMasterKey } from '@careeros/secrets';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UsageService } from '../usage/usage.service';
@@ -160,13 +167,25 @@ export class MarketBriefService {
 
     // Drop cited URLs that aren't in our sources list (hallucination guard).
     const sourceSet = new Set(sources.map((s) => s.url));
-    const cleaned: MarketBriefContent = {
+    const urlCleaned: MarketBriefContent = {
       sections: result.sections.map((sec) => ({
         heading: sec.heading,
         body: sec.body,
         sourceUrls: sec.sourceUrls.filter((u) => sourceSet.has(u)),
       })),
     };
+
+    // C-P4.7c: per-sentence fact-check. The brief prose can hallucinate a
+    // claim ("X company is hiring 40 SREs") whose section still has a valid
+    // sourceUrl; URL-post-filter alone doesn't catch that. Split each body
+    // into sentences, treat each as a claim cited against the section's
+    // sourceUrls (already URL-filtered). Sentences the auditor marks
+    // unsupported get dropped from the body; sections whose body ends empty
+    // are dropped entirely. Per drop → audit `factcheck.claim.dropped`.
+    //
+    // Ponytail: naive sentence split on `.!?`. A markdown-aware splitter
+    // matters when the writer prompt starts emitting lists; upgrade then.
+    const cleaned = await this.factCheckSections(userId, provider, urlCleaned, sample);
 
     const row = await this.prisma.marketBrief.create({
       data: {
@@ -179,6 +198,136 @@ export class MarketBriefService {
       },
     });
     return this.toDto(row);
+  }
+
+  /**
+   * Per-sentence fact-check across every section body. Cited "facts" for a
+   * sentence are the section's already-URL-filtered `sourceUrls` mapped to
+   * the sample jobs (title/company/url) that were provided to the writer.
+   * Any sentence the auditor marks unsupported is stripped from the body;
+   * empty sections are dropped. Never throws — auditor failure marks the
+   * whole content untouched (fail-open with warn, same contract as slice 20).
+   */
+  private async factCheckSections(
+    userId: string,
+    provider: DeepSeekProvider,
+    content: MarketBriefContent,
+    sample: Array<{ title: string; company: string; canonicalUrl: string }>,
+  ): Promise<MarketBriefContent> {
+    // Sample-by-url lookup so a sourceUrl becomes a real Fact for the gate.
+    const sampleByUrl = new Map(sample.map((s) => [s.canonicalUrl, s]));
+
+    // Flatten sentences across every section into indexed claims; keep a
+    // parallel breadcrumb array so we can rebuild the sections in order.
+    interface Trail { section: number; sentence: number; sourceUrls: string[] }
+    const trails: Trail[] = [];
+    const claims: FactCheckClaim[] = [];
+    let idx = 0;
+    for (let si = 0; si < content.sections.length; si++) {
+      const sec = content.sections[si];
+      const sentences = splitSentences(sec.body);
+      for (let ti = 0; ti < sentences.length; ti++) {
+        const text = sentences[ti];
+        const cited = sec.sourceUrls.map((u) => {
+          const s = sampleByUrl.get(u);
+          return {
+            id: u,
+            kind: 'job',
+            summary: s ? `${s.title} @ ${s.company}` : '(url only)',
+          };
+        });
+        trails.push({ section: si, sentence: ti, sourceUrls: sec.sourceUrls });
+        claims.push({ index: idx++, text, cited });
+      }
+    }
+
+    if (claims.length === 0) return content;
+
+    const outcome = await runFactCheck({
+      provider,
+      claims,
+      runWithUserLimit: (fn) => this.usage.runWithUserLimit(userId, fn),
+    });
+    if (!outcome.ok) {
+      // Fail-open: keep the whole content, log for observability. Matches
+      // resume-variant/cover-letter "unchecked" default (draft > no-draft).
+      this.logger.warn(`market-brief fact-check failed, keeping unchecked: ${outcome.reason}`);
+      return content;
+    }
+
+    // Rebuild each section body from the kept sentences.
+    const droppedByService: Array<{ claim: string; reason: string; sourceRef: string | null }> = [];
+    const keptSentencesBySection = new Map<number, string[]>();
+    for (let ci = 0; ci < claims.length; ci++) {
+      const c = claims[ci];
+      const t = trails[ci];
+      const v = outcome.verdicts.get(c.index);
+      // Missing verdict OR unsupported = DROP (same trust-critical default).
+      const drop = !v || !v.supported;
+      if (drop) {
+        droppedByService.push({
+          claim: c.text,
+          reason: v?.reason ?? 'no verdict returned by fact-check',
+          sourceRef: t.sourceUrls[0] ?? null,
+        });
+        continue;
+      }
+      const list = keptSentencesBySection.get(t.section) ?? [];
+      list.push(c.text);
+      keptSentencesBySection.set(t.section, list);
+    }
+
+    for (const d of droppedByService) {
+      await this.auditDropped(userId, d.claim, d.reason, d.sourceRef);
+    }
+
+    const rebuiltSections = content.sections
+      .map((sec, si) => {
+        const kept = keptSentencesBySection.get(si) ?? [];
+        return {
+          heading: sec.heading,
+          // Rejoin with a single space — sentence-terminator preserved by
+          // splitSentences.
+          body: kept.join(' '),
+          sourceUrls: sec.sourceUrls,
+        };
+      })
+      .filter((sec) => sec.body.length > 0);
+
+    // MarketBriefContentSchema requires >= 1 section. If every sentence was
+    // dropped, fall back to the URL-cleaned content with a single "unchecked"
+    // section rather than 400ing the whole request (matches the fail-open
+    // stance above). Persist behaviour is honest via the audit rows.
+    if (rebuiltSections.length === 0) return content;
+    return { sections: rebuiltSections };
+  }
+
+  /** Cross-service audit row on every dropped claim. Never throws. */
+  private async auditDropped(
+    userId: string,
+    claim: string,
+    reason: string,
+    sourceRef: string | null,
+  ): Promise<void> {
+    try {
+      await this.prisma.auditEvent.create({
+        data: {
+          userId,
+          actor: 'system',
+          action: 'factcheck.claim.dropped',
+          resourceType: 'market_brief',
+          resourceId: sourceRef ?? userId,
+          payload: {
+            service: 'market-brief',
+            claim,
+            reason,
+            ...(sourceRef ? { sourceRef } : {}),
+          },
+        },
+      });
+    } catch {
+      /* audit must not throw (also silent when the test fake omits auditEvent) */
+    }
   }
 
   private async loadFilteredPool(userId: string) {
@@ -306,4 +455,26 @@ export class MarketBriefService {
       return null;
     }
   }
+}
+
+/**
+ * Split a body into sentences. Terminators (.!?) are kept on the preceding
+ * sentence so the rebuilt body reads naturally. Ponytail: a real tokenizer
+ * (e.g. Intl.Segmenter word-break) matters when the writer prompt starts
+ * emitting lists or code fences; for prose paragraphs this splits cleanly.
+ */
+export function splitSentences(body: string): string[] {
+  const trimmed = body.trim();
+  if (!trimmed) return [];
+  // Match sequences of non-terminator chars followed by one or more
+  // terminators, then trailing whitespace. Falls back to the whole string
+  // when no terminator is present (single-sentence body).
+  const re = /[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g;
+  const out: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(trimmed)) !== null) {
+    const s = m[0].trim();
+    if (s) out.push(s);
+  }
+  return out.length ? out : [trimmed];
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BadRequestException } from '@nestjs/common';
-import type { MarketBriefContent } from '@careeros/shared';
-import { MarketBriefService } from './market-brief.service';
+import type { FactCheckResult, MarketBriefContent } from '@careeros/shared';
+import { MarketBriefService, splitSentences } from './market-brief.service';
 
 // -----------------------------------------------------------------------------
 // Test doubles
@@ -603,5 +603,187 @@ describe('MarketBriefService.generate injection defence (C-P3.7b)', () => {
     await expect(svc.generate('u1')).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.calls.created).toHaveLength(0);
     expect(prisma.calls.audits.filter((a) => a.action === 'security.audit.injection_blocked')).toHaveLength(2);
+  });
+});
+
+// -----------------------------------------------------------------------------
+// C-P4.7c: per-sentence fact-check on synthesis output.
+// The URL post-filter alone doesn't stop a hallucinated claim ("X is hiring 40
+// SREs") that sits under a valid sourceUrl. Sentence-level fact-check drops
+// unsupported sentences + audits `factcheck.claim.dropped`.
+// -----------------------------------------------------------------------------
+
+// Multi-call script provider so a single generate() can service both the
+// writer AND the fact-check call. Existing tests use a single-script fake
+// which fail-opens the fact-check (deliberate: keeps their behaviour stable);
+// this test explicitly walks the fact-check code path.
+class MultiScriptService extends MarketBriefService {
+  constructor(deps: ConstructorParameters<typeof MarketBriefService>, scripts: unknown[]) {
+    super(...deps);
+    let i = 0;
+    (this as unknown as { tryLoadProvider: () => Promise<unknown> }).tryLoadProvider =
+      async () => ({
+        chatStructured: async () => {
+          const out = scripts[i++];
+          if (out === undefined) throw new Error(`no scripted response for call ${i}`);
+          return out;
+        },
+      });
+  }
+}
+
+describe('MarketBriefService.generate per-sentence fact-check (C-P4.7c)', () => {
+  it('drops unsupported sentences + audits factcheck.claim.dropped + rebuilds body from kept sentences', async () => {
+    const writer: MarketBriefContent = {
+      sections: [
+        {
+          heading: 'Trend',
+          body: 'Backend hiring is up. Acme is hiring forty SREs. TypeScript demand grew.',
+          sourceUrls: ['https://acme.example/j1'],
+        },
+      ],
+    };
+    // 3 sentences → indexes 0, 1, 2. Auditor drops #1 (fabricated headcount).
+    const audit: FactCheckResult = {
+      results: [
+        { bulletIndex: 0, supported: true, reason: 'stats support this' },
+        { bulletIndex: 1, supported: false, reason: 'no fact backs the "forty SREs" claim' },
+        { bulletIndex: 2, supported: true, reason: 'typescript is top skill' },
+      ],
+    };
+    const jobs = pool();
+    const prisma = fakePrisma(jobs);
+    const svc = new MultiScriptService(
+      [prisma as never, fakeUsage() as never, {} as never, {} as never, fakePrefs() as never],
+      [writer, audit],
+    );
+
+    const dto = await svc.generate('u1');
+    expect(dto.content.sections).toHaveLength(1);
+    // Kept sentences rejoined; dropped sentence gone.
+    expect(dto.content.sections[0].body).toContain('Backend hiring is up.');
+    expect(dto.content.sections[0].body).toContain('TypeScript demand grew.');
+    expect(dto.content.sections[0].body).not.toContain('forty SREs');
+
+    // Audit row per drop.
+    const drops = prisma.calls.audits.filter((a) => a.action === 'factcheck.claim.dropped');
+    expect(drops).toHaveLength(1);
+    expect(drops[0].payload).toMatchObject({
+      service: 'market-brief',
+      claim: 'Acme is hiring forty SREs.',
+      reason: 'no fact backs the "forty SREs" claim',
+      sourceRef: 'https://acme.example/j1',
+    });
+    // MUTATION-SMOKE: flip the "no verdict OR unsupported = drop" default to
+    // "keep on unsupported" and the dropped sentence survives → the
+    // .not.toContain assertion above fails.
+  });
+
+  it('missing-verdict sentences drop with reason "no verdict returned by fact-check"', async () => {
+    const writer: MarketBriefContent = {
+      sections: [
+        {
+          heading: 'Overview',
+          body: 'Sentence one. Sentence two. Sentence three.',
+          sourceUrls: ['https://acme.example/j1'],
+        },
+      ],
+    };
+    // Auditor only scored index 0 + 2; index 1 missing.
+    const audit: FactCheckResult = {
+      results: [
+        { bulletIndex: 0, supported: true, reason: 'ok' },
+        { bulletIndex: 2, supported: true, reason: 'ok' },
+      ],
+    };
+    const jobs = pool();
+    const prisma = fakePrisma(jobs);
+    const svc = new MultiScriptService(
+      [prisma as never, fakeUsage() as never, {} as never, {} as never, fakePrefs() as never],
+      [writer, audit],
+    );
+
+    const dto = await svc.generate('u1');
+    expect(dto.content.sections[0].body).toContain('Sentence one');
+    expect(dto.content.sections[0].body).toContain('Sentence three');
+    expect(dto.content.sections[0].body).not.toContain('Sentence two');
+    const drops = prisma.calls.audits.filter((a) => a.action === 'factcheck.claim.dropped');
+    expect(drops).toHaveLength(1);
+    expect(drops[0].payload).toMatchObject({
+      claim: 'Sentence two.',
+      reason: 'no verdict returned by fact-check',
+    });
+  });
+
+  it('auditor-throws → fail-open (content untouched) + zero drop audits + warn logged', async () => {
+    const writer: MarketBriefContent = {
+      sections: [
+        { heading: 'H', body: 'One sentence body.', sourceUrls: ['https://acme.example/j1'] },
+      ],
+    };
+    const jobs = pool();
+    const prisma = fakePrisma(jobs);
+    const svc = new MultiScriptService(
+      [prisma as never, fakeUsage() as never, {} as never, {} as never, fakePrefs() as never],
+      [writer, new Error('deepseek 500')],
+    );
+
+    const dto = await svc.generate('u1');
+    // Fail-open: original body survives verbatim.
+    expect(dto.content.sections[0].body).toBe('One sentence body.');
+    const drops = prisma.calls.audits.filter((a) => a.action === 'factcheck.claim.dropped');
+    expect(drops).toHaveLength(0);
+    // MUTATION-SMOKE: rethrow instead of fail-open and generate() rejects
+    // instead of returning a dto.
+  });
+
+  it('every sentence dropped → falls back to URL-cleaned content (schema requires >=1 section)', async () => {
+    const writer: MarketBriefContent = {
+      sections: [
+        { heading: 'H', body: 'Fabricated one. Fabricated two.', sourceUrls: ['https://acme.example/j1'] },
+      ],
+    };
+    const audit: FactCheckResult = {
+      results: [
+        { bulletIndex: 0, supported: false, reason: 'nope' },
+        { bulletIndex: 1, supported: false, reason: 'nope' },
+      ],
+    };
+    const jobs = pool();
+    const prisma = fakePrisma(jobs);
+    const svc = new MultiScriptService(
+      [prisma as never, fakeUsage() as never, {} as never, {} as never, fakePrefs() as never],
+      [writer, audit],
+    );
+
+    const dto = await svc.generate('u1');
+    // Fallback: entire URL-cleaned content preserved rather than 400.
+    expect(dto.content.sections).toHaveLength(1);
+    // Both drops audited.
+    const drops = prisma.calls.audits.filter((a) => a.action === 'factcheck.claim.dropped');
+    expect(drops).toHaveLength(2);
+  });
+});
+
+// -----------------------------------------------------------------------------
+// splitSentences unit
+// -----------------------------------------------------------------------------
+
+describe('splitSentences', () => {
+  it('splits on . ! ?, keeps terminator, trims whitespace', () => {
+    expect(splitSentences('One. Two! Three?')).toEqual(['One.', 'Two!', 'Three?']);
+  });
+
+  it('a single-sentence body without terminator survives as one element', () => {
+    expect(splitSentences('no terminator here')).toEqual(['no terminator here']);
+  });
+
+  it('empty body → empty array (no ghost sentence)', () => {
+    expect(splitSentences('')).toEqual([]);
+    expect(splitSentences('   ')).toEqual([]);
+  });
+
+  it('multi-terminator collapses (e.g. "!!") into one sentence', () => {
+    expect(splitSentences('Wow!! Really? Yes.')).toEqual(['Wow!!', 'Really?', 'Yes.']);
   });
 });
