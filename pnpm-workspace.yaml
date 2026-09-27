@@ -2,9 +2,6 @@ packages:
   - 'apps/*'
   - 'packages/*'
 
-# A-H7: force multer >=2.4.0 to close CVE-2022-24434, CVE-2024-4067,
-# GHSA-wc9g-mqfw-jrwm, GHSA-535w-7cp7-47q4. Nest 10.4.22 platform-express still
-# pins multer@2.0.2 transitively; Nest 11+ ships 2.4.0. Drop this override on
-# Nest 11 bump.
-overrides:
-  multer: '^2.4.0'
+# Overrides live in root package.json under `pnpm.overrides` (the yaml
+# `overrides:` block does not apply on this pnpm 9.12). See there for the
+# multer (A-H7) and postcss (B-11) pins and their advisory references.
