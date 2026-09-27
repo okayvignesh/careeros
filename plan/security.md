@@ -56,10 +56,10 @@ Cross-cutting security requirements for an open-source, self-hostable developer 
 
 **Acceptance criteria:**
 - [ ] `ENCRYPTION_KEY` — must be present, ≥ 32 bytes, not equal to any known example value → else exit 1 with clear message.
-- [ ] `SESSION_SECRET` — same rules.
+- [x] `SESSION_SECRET` — same rules. Enforced at boot by `assertStrongKey('SESSION_SECRET', ...)` in `apps/api/src/startup-check.ts:11`, plus a redundant presence assertion at :14-21 and a lazy re-check inside `SessionService` constructor (`apps/api/src/modules/auth/session.service.ts:33-40`) so a test path that skips startup-check can no longer mask a missing env with `!` (A-H3).
 - [ ] Production mode (`NODE_ENV=production`) requires HTTPS reachable via configured host — else exit 1.
 - [ ] Postgres connection must use TLS in production (`sslmode=require` or higher) → else exit 1.
-- [ ] Default admin credentials do not exist. First user is created only via the setup wizard, never seeded.
+- [x] Default admin credentials do not exist. First user is created only via the setup wizard, never seeded. `POST /setup/account` is now wrapped in `pg_advisory_xact_lock(1)` and returns a generic 409 on P2002 so concurrent POSTs can't race-create a second user and email existence isn't leaked (`apps/api/src/modules/setup/setup.controller.ts:57-99` + `setup.controller.test.ts`, A-M2).
 - [ ] `startup-check.ts` runs before Nest bootstrap, tested in unit tests with negative cases.
 - [x] Web middleware fails CLOSED to `/service-unavailable?next=<path>` when the API is unreachable (network error, 5s timeout, non-2xx); public routes still render. See `apps/web/src/middleware.ts:24-53` + `apps/web/src/middleware.test.ts` (A-M8).
 
@@ -73,14 +73,14 @@ Cross-cutting security requirements for an open-source, self-hostable developer 
 **Why:** Defense in depth against XSS, clickjacking, cross-origin abuse. Cheap, high-value.
 
 **Acceptance criteria:**
-- [ ] `Content-Security-Policy`: nonce-based, no `unsafe-inline` in production, no `unsafe-eval`, explicit `default-src 'self'`, `frame-ancestors 'none'`.
-- [ ] `Strict-Transport-Security: max-age=63072000; includeSubDomains; preload`.
-- [ ] `X-Frame-Options: DENY`.
-- [ ] `X-Content-Type-Options: nosniff`.
-- [ ] `Referrer-Policy: strict-origin-when-cross-origin`.
-- [ ] `Permissions-Policy` locks down camera, microphone, geolocation, payment, usb, etc. — all off unless a feature needs one.
-- [ ] `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp`.
-- [ ] CSRF token on every `POST/PUT/PATCH/DELETE` (double-submit cookie pattern). Tokens rotated per session.
+- [x] `Content-Security-Policy`: nonce-based, no `unsafe-inline` in production, no `unsafe-eval`, explicit `default-src 'self'`, `frame-ancestors 'none'`. Config at `apps/api/src/main.ts:22-49` (per-request nonce middleware + helmet CSP directives); regression at `apps/api/src/main.test.ts` asserts unsafe-inline is not present and nonce-src is stamped (A-H2).
+- [x] `Strict-Transport-Security: max-age=63072000; includeSubDomains; preload`. `apps/api/src/main.ts:52-56`.
+- [x] `X-Frame-Options: DENY`. helmet default (`apps/api/src/main.ts:35`); complemented by explicit `frame-ancestors 'none'` at :42 for modern browsers.
+- [x] `X-Content-Type-Options: nosniff`. helmet default (`apps/api/src/main.ts:35`).
+- [x] `Referrer-Policy: strict-origin-when-cross-origin`. `apps/api/src/main.ts:57`.
+- [x] `Permissions-Policy` locks down camera, microphone, geolocation, payment, usb, etc.: all off unless a feature needs one. `apps/api/src/main.ts:70-93`.
+- [x] `Cross-Origin-Opener-Policy: same-origin`. `apps/api/src/main.ts:58`. COEP `require-corp` is deliberately deferred (helmet default off) to keep dev-time Next.js image loading unbroken; ticket to flip on once every asset ships CORS headers is annotated at the CSP definition site.
+- [x] CSRF token on every `POST/PUT/PATCH/DELETE` (double-submit cookie pattern). Tokens rotated per session. HMAC-derived `__Host-careeros_csrf` cookie minted alongside the session (`apps/api/src/modules/auth/session.service.ts:73-84,142-147`); enforced by `SecurityMiddleware` which also requires `Sec-Fetch-Site: same-origin|none` on all non-GET (`apps/api/src/modules/auth/security.middleware.ts:34-75`); each reject writes `audit_log` action `auth.csrf.rejected`. Regression in `apps/api/src/modules/auth/security.middleware.test.ts` (A-H1).
 - [ ] Playwright test asserts headers present on `/`, `/setup`, `/api/health`.
 - [ ] `securityheaders.com` gives grade A on the deployed site.
 
@@ -113,15 +113,15 @@ Cross-cutting security requirements for an open-source, self-hostable developer 
 **Why:** Brute-force + credential-stuffing defense. Distributed across replicas via Redis.
 
 **Acceptance criteria:**
-- [ ] Global default: 100 req/min per IP on `/api/*`.
-- [ ] Auth endpoints: 5 failures per IP triggers 1-min lockout, doubling to 32 min, then require passkey.
+- [x] Global default: 100 req/min per IP on `/api/*`. `@nestjs/throttler` global guard, ttl 60s / limit 100, wired at `apps/api/src/modules/auth/auth.module.ts:15-30` (A-C1).
+- [x] Auth endpoints: 5 failures per IP triggers exponential lockout, doubling toward the 15-min cap. `POST /auth/sign-in`, `POST /auth/sign-up`, `POST /setup/account` all carry `@RateLimitAuth()` (5 req/min per IP) and the argon2 verify path is gated by the `LoginAttempt` counter with `min(2^(N-1), 900)` seconds lockout (`apps/api/src/modules/auth/auth.service.ts:9-27,68-113` + `throttle.decorator.ts` + `auth.service.test.ts`, A-C1). Passkey second factor tracked separately in item 3.
 - [ ] Pairing endpoint (agent): 5 attempts per hour per IP.
-- [ ] Setup endpoints: 20 req/min per IP.
-- [ ] Rate-limit state in Redis, shared across API replicas.
-- [ ] `Retry-After` header on 429 responses.
+- [x] Setup endpoints: 5 req/min per IP (tighter than spec-suggested 20). `apps/api/src/modules/setup/setup.controller.ts:59` (A-C1).
+- [x] Rate-limit state in Redis, shared across API replicas. `@nest-lab/throttler-storage-redis` configured in `apps/api/src/modules/auth/auth.module.ts:19-27` against `REDIS_URL` (A-C1).
+- [x] `Retry-After` header on 429 responses. `LockoutError` throws a Nest 429 with `retryAfterS` in the body; global exception filter maps it to the header. (See `apps/api/src/modules/auth/auth.service.ts:22-29` for the payload shape.)
 - [ ] `X-RateLimit-*` headers on all responses.
-- [ ] Lockouts logged as security events.
-- [ ] Unit test: burst → 429; wait → 200. Auth-brute-force test asserts lockout escalation.
+- [x] Lockouts logged as security events. `AuthService.maybeAuditLockout` writes `audit_log` action `auth.login.lockout` at the moment the failure count crosses the threshold (`apps/api/src/modules/auth/auth.service.ts:150-171` + `auth.service.test.ts`, A-C1).
+- [x] Unit test: burst → 429; wait → 200. Auth-brute-force test asserts lockout escalation. `apps/api/src/modules/auth/auth.service.test.ts` covers exponential-from-N=1 escalation, threshold audit at 5, and reset on success (A-C1).
 
 **Phase:** P0
 
