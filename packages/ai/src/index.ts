@@ -56,6 +56,19 @@ export {
   type GroundedResult,
   type HallucinationHook,
 } from './grounded';
+// C-P4.7a: shared fact-check gate (extracted from resume-variants + cover-letters).
+// Note: `./grounded` above is the singular `grounded.ts` file; `./grounded/index`
+// resolves to the new grounded/ directory barrel — TS module resolution picks
+// the file, then falls back to the dir, so an explicit path avoids the shadow.
+export {
+  runFactCheck,
+  renderClaimsForPrompt,
+  type CitedFact,
+  type Claim as FactCheckClaim,
+  type Verdict as FactCheckVerdict,
+  type FactCheckOutcome,
+  type RunFactCheckOptions,
+} from './grounded/gate';
 export {
   allPrompts,
   getPrompt,
