@@ -77,3 +77,17 @@ export {
   type EvalScore,
   type EvalReport,
 } from './evals';
+export {
+  AgentRegistry,
+  agentRegistry,
+  type AgentDef,
+  type AgentInfo,
+  type AgentRun,
+  type ToolSpec,
+  type PromptRef,
+  type AgentInput,
+  type AgentOutput,
+  type InferAgentOutput,
+} from './agents';
+// runAgent / setAgentAuditHook / runAgentEvals are exported in later C-P2.8
+// commits alongside orchestrator.ts + eval-set.ts.
