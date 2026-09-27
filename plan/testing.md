@@ -114,11 +114,11 @@ See §5 for the full pattern.
 **What:** each `JobSourceAdapter`, LLM provider adapter, ATS adapter, Slack/Gmail integration verified against recorded fixtures. Fixtures re-recorded periodically to catch upstream API drift.
 
 **Acceptance:**
-- [ ] Fixtures under `packages/<name>/adapters/<adapter>/fixtures/`
-- [ ] Recorded via `pnpm fixtures:record` (hits real API with test creds)
-- [ ] Contract test loads fixture → runs adapter → asserts output shape (Zod)
-- [ ] Weekly cron re-records fixtures against real APIs; PR opened if drift
-- [ ] `pnpm test:contract`
+- [x] Fixtures live at `packages/job-pipeline/__contracts__/<adapter>.snapshot.json` (ashby / greenhouse / arbeitnow / remotive). Adzuna is fully mocked via MSW (no fixture) because upstream requires paid creds; see `packages/job-pipeline/src/adapters/adzuna.contract.test.ts` (C-P3.6a commit 5d19b79).
+- [x] Contract test loads fixture → runs adapter → asserts output shape (Zod at `packages/job-pipeline/src/adapters/schemas.ts`). One `*.contract.test.ts` per adapter (C-P3.6a).
+- [x] Weekly cron `.github/workflows/adapter-contract.yml` hits live upstreams and revalidates against the schemas (C-P3.6b commit 03a5ebb).
+- [ ] Recorded via `pnpm fixtures:record` (hits real API with test creds) — snapshot capture is currently one-off in the contract-test authoring flow; a `fixtures:record` script is deferred.
+- [ ] `pnpm test:contract` script — contract tests currently run via the shared `pnpm test` root; a dedicated script is deferred.
 
 ### 6. Migration forward-safety tests
 **What:** every migration is forward-safe. Given a DB seeded to version N and code from version N+1, migrations apply cleanly and data survives.
@@ -136,7 +136,7 @@ See §5 for the full pattern.
 **What:** weekly job restores latest backup into fresh volumes and boots the stack, verifies parity.
 
 **Acceptance:**
-- [ ] `.github/workflows/restore-test.yml` — weekly cron
+- [x] `.github/workflows/restore-test.yml` — weekly cron (Mondays 03:00 UTC, C-P0.5b). Round-trip body is still gated on the seed-test/manifest wiring; see the TODO block at lines 46-57 for the concrete steps.
 - [ ] Fresh Docker volumes → `scripts/restore.sh` with test backup → `docker compose up -d`
 - [ ] Assert `setup_state = complete`
 - [ ] Assert row counts match snapshot manifest
@@ -147,14 +147,14 @@ See §5 for the full pattern.
 **What:** P2 code sandbox limits enforced. Memory bomb killed. Network blocked. Fork bomb killed. Timeout respected.
 
 **Acceptance:**
-- [ ] `packages/sandbox/test/` — Vitest + Docker
-- [ ] Test cases (each must be killed or blocked):
+- [x] `packages/sandbox/src/security.test.ts` — Vitest + Docker (C-P2.2a commit 12cf32f; suite colocated in `src/` rather than `test/` per the repo colocation rule). Companion operator smoke: `packages/sandbox/security-smoke.sh`.
+- [x] Test cases (each must be killed or blocked):
   - Memory: `let a = []; while(true) a.push(0)` → OOM-killed within limit
   - Network: `fetch('https://google.com')` → DNS blocked
   - Fork bomb: `:(){ :|:& };:` (bash-equivalent per language) → pids-limit kills
   - Wall clock: `while(true){}` → SIGKILL at 30s
   - Filesystem escape: `require('fs').readFile('/etc/passwd')` → EACCES
-- [ ] Each test runs in real Docker; not simulated
+- [x] Each test runs in real Docker; not simulated (`packages/sandbox/src/docker.test.ts`, `security.test.ts`).
 
 ### 9. Visual regression
 **What:** Playwright screenshot compare on every phase's key screens. Design consistency across releases.
