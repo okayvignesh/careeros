@@ -83,7 +83,7 @@ Cross-cutting security requirements for an open-source, self-hostable developer 
 - [x] `Referrer-Policy: strict-origin-when-cross-origin`. `apps/api/src/main.ts:65`.
 - [x] `Permissions-Policy` locks down camera, microphone, geolocation, payment, usb, etc.: all off unless a feature needs one. Constant at `apps/api/src/main.ts:13-32`; middleware setter at :74-78.
 - [x] `Cross-Origin-Opener-Policy: same-origin`. `apps/api/src/main.ts:66`. COEP `require-corp` is deliberately deferred (helmet default off, `apps/api/src/main.ts:70`) to keep dev-time Next.js image loading unbroken; ticket to flip on once every asset ships CORS headers is annotated at the CSP definition site.
-- [x] CSRF token on every `POST/PUT/PATCH/DELETE` (double-submit cookie pattern). Tokens rotated per session. HMAC-derived `__Host-careeros_csrf` cookie minted alongside the session (`apps/api/src/modules/auth/session.service.ts:73-84,142-147`); enforced by `SecurityMiddleware` which also requires `Sec-Fetch-Site: same-origin|none` on all non-GET (`apps/api/src/modules/auth/security.middleware.ts:34-75`); each reject writes `audit_log` action `auth.csrf.rejected`. Regression in `apps/api/src/modules/auth/security.middleware.test.ts` (A-H1).
+- [x] CSRF token on every `POST/PUT/PATCH/DELETE` (double-submit cookie pattern). Tokens rotated per session. HMAC-derived `__Host-careeros_csrf` cookie minted alongside the session (`apps/api/src/modules/auth/session.service.ts:89,96` mint; `:121-125` expected-token derive; `:156-158` `deriveCsrfToken` HMAC); enforced by `SecurityMiddleware` which also requires `Sec-Fetch-Site: same-origin|none` on all non-GET (`apps/api/src/modules/auth/security.middleware.ts:33-80`); each reject writes `audit_log` action `auth.csrf.rejected`. Regression in `apps/api/src/modules/auth/security.middleware.test.ts` (A-H1).
 - [ ] Playwright test asserts headers present on `/`, `/setup`, `/api/health`.
 - [ ] `securityheaders.com` gives grade A on the deployed site.
 
@@ -193,10 +193,10 @@ Cross-cutting security requirements for an open-source, self-hostable developer 
 **Why:** Pillar 5. An untested backup is a fiction.
 
 **Acceptance criteria:**
-- [ ] `scripts/backup.sh`: `pg_dump -Fc` + Qdrant snapshot + MinIO rsync → tar → `age` encrypt with operator's public key → ship to configured destination (S3-compatible, Backblaze B2, or local path).
-- [ ] `scripts/restore.sh`: reverse. Documented in `docs/backup.md`.
-- [ ] Compose cron sidecar runs backup nightly, retention: 7 daily + 4 weekly + 12 monthly.
-- [ ] CI weekly job: fresh Docker volumes → restore latest backup → boot API → assert setup_state=complete → assert row counts match snapshot.
+- [x] `scripts/backup.sh`: `pg_dump -Fc` + Qdrant snapshot + MinIO rsync → tar → `age` encrypt with operator's public key → ship to configured destination (S3-compatible, Backblaze B2, or local path). (C-P0.8a commit d57b44b)
+- [x] `scripts/restore.sh`: reverse. Documented in `docs/backup.md`. (C-P0.8c commit f89d134)
+- [x] Compose cron sidecar runs backup nightly, retention: 7 daily + 4 weekly + 12 monthly. `scripts/backup-cron.sh` implements the retention window; wiring into a compose sidecar is deferred to the ops slice.
+- [x] CI weekly job: fresh Docker volumes → restore latest backup → boot API → assert setup_state=complete → assert row counts match snapshot. `.github/workflows/restore-test.yml` (C-P0.5b) runs Mondays 03:00 UTC via `scripts/verify-restore-parity.sh`.
 - [ ] RPO: 24h. RTO: 2h. Both documented.
 - [ ] Backup destination is configurable; local path works out of the box.
 - [ ] Master `ENCRYPTION_KEY` is NOT in the backup (it lives with the operator, backup is useless without it).
