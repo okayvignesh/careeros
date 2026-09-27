@@ -98,7 +98,7 @@ function fakePrisma(opts: {
       findUnique: async ({ where }: { where: { id: string } }) =>
         where.id === opts.question.id ? opts.question : null,
       findMany: async () => [opts.question],
-      upsert: async ({ create }: { create: FakeQuestion }) => ({ id: 'q-seed', ...create }),
+      upsert: async ({ create }: { create: FakeQuestion }) => ({ ...create, id: 'q-seed' }),
     },
     providerConfig: {
       findFirst: async () =>
@@ -139,7 +139,7 @@ function fakePrisma(opts: {
     },
     xpEvent: {
       create: async ({ data }: { data: { reason: string; xp: number; attemptId?: string | null } }) => {
-        xpEvents.push({ reason: data.reason, xp: data.xp, attemptId: data.attemptId });
+        xpEvents.push({ reason: data.reason, xp: data.xp, ...(data.attemptId !== undefined && { attemptId: data.attemptId }) });
         return {};
       },
       aggregate: async () => ({ _sum: { xp: xpEvents.reduce((a, e) => a + e.xp, 0) } }),
