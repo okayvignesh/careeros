@@ -74,13 +74,13 @@ Cross-cutting security requirements for an open-source, self-hostable developer 
 **Why:** Defense in depth against XSS, clickjacking, cross-origin abuse. Cheap, high-value.
 
 **Acceptance criteria:**
-- [x] `Content-Security-Policy`: nonce-based, no `unsafe-inline` in production, no `unsafe-eval`, explicit `default-src 'self'`, `frame-ancestors 'none'`. Config at `apps/api/src/main.ts:22-49` (per-request nonce middleware + helmet CSP directives); regression at `apps/api/src/main.test.ts` asserts unsafe-inline is not present and nonce-src is stamped (A-H2).
-- [x] `Strict-Transport-Security: max-age=63072000; includeSubDomains; preload`. `apps/api/src/main.ts:52-56`.
-- [x] `X-Frame-Options: DENY`. helmet default (`apps/api/src/main.ts:35`); complemented by explicit `frame-ancestors 'none'` at :42 for modern browsers.
-- [x] `X-Content-Type-Options: nosniff`. helmet default (`apps/api/src/main.ts:35`).
-- [x] `Referrer-Policy: strict-origin-when-cross-origin`. `apps/api/src/main.ts:57`.
-- [x] `Permissions-Policy` locks down camera, microphone, geolocation, payment, usb, etc.: all off unless a feature needs one. `apps/api/src/main.ts:70-93`.
-- [x] `Cross-Origin-Opener-Policy: same-origin`. `apps/api/src/main.ts:58`. COEP `require-corp` is deliberately deferred (helmet default off) to keep dev-time Next.js image loading unbroken; ticket to flip on once every asset ships CORS headers is annotated at the CSP definition site.
+- [x] `Content-Security-Policy`: nonce-based, no `unsafe-inline` in production, no `unsafe-eval`, explicit `default-src 'self'`, `frame-ancestors 'none'`. Config lives in exported `buildSecurityMiddleware()` at `apps/api/src/main.ts:34-80` (per-request nonce middleware + helmet CSP directives at :40-56); regression at `apps/api/src/main.test.ts` imports that same factory and asserts unsafe-inline is absent and the nonce is stamped (A-H2).
+- [x] `Strict-Transport-Security: max-age=63072000; includeSubDomains; preload`. `apps/api/src/main.ts:60-64`.
+- [x] `X-Frame-Options: DENY`. helmet default (helmet imported at `apps/api/src/main.ts:5`, invoked at :39); complemented by explicit `frame-ancestors 'none'` at :52 for modern browsers.
+- [x] `X-Content-Type-Options: nosniff`. helmet default (helmet import at `apps/api/src/main.ts:5`, call at :39).
+- [x] `Referrer-Policy: strict-origin-when-cross-origin`. `apps/api/src/main.ts:65`.
+- [x] `Permissions-Policy` locks down camera, microphone, geolocation, payment, usb, etc.: all off unless a feature needs one. Constant at `apps/api/src/main.ts:13-32`; middleware setter at :74-78.
+- [x] `Cross-Origin-Opener-Policy: same-origin`. `apps/api/src/main.ts:66`. COEP `require-corp` is deliberately deferred (helmet default off, `apps/api/src/main.ts:70`) to keep dev-time Next.js image loading unbroken; ticket to flip on once every asset ships CORS headers is annotated at the CSP definition site.
 - [x] CSRF token on every `POST/PUT/PATCH/DELETE` (double-submit cookie pattern). Tokens rotated per session. HMAC-derived `__Host-careeros_csrf` cookie minted alongside the session (`apps/api/src/modules/auth/session.service.ts:73-84,142-147`); enforced by `SecurityMiddleware` which also requires `Sec-Fetch-Site: same-origin|none` on all non-GET (`apps/api/src/modules/auth/security.middleware.ts:34-75`); each reject writes `audit_log` action `auth.csrf.rejected`. Regression in `apps/api/src/modules/auth/security.middleware.test.ts` (A-H1).
 - [ ] Playwright test asserts headers present on `/`, `/setup`, `/api/health`.
 - [ ] `securityheaders.com` gives grade A on the deployed site.
@@ -119,7 +119,7 @@ Cross-cutting security requirements for an open-source, self-hostable developer 
 - [ ] Pairing endpoint (agent): 5 attempts per hour per IP.
 - [x] Setup endpoints: 5 req/min per IP (tighter than spec-suggested 20). `apps/api/src/modules/setup/setup.controller.ts:59` (A-C1).
 - [x] Rate-limit state in Redis, shared across API replicas. `@nest-lab/throttler-storage-redis` configured in `apps/api/src/modules/auth/auth.module.ts:19-27` against `REDIS_URL` (A-C1).
-- [x] `Retry-After` header on 429 responses. `LockoutError` throws a Nest 429 with `retryAfterS` in the body; global exception filter maps it to the header. (See `apps/api/src/modules/auth/auth.service.ts:22-29` for the payload shape.)
+- [x] `Retry-After` header on 429 responses. `LockoutError` (payload at `apps/api/src/modules/auth/auth.service.ts:19-26`) is caught by `LockoutExceptionFilter` at `apps/api/src/common/filters/lockout.filter.ts`, which sets `Retry-After: <seconds>` before emitting the 429 JSON body; filter is registered globally in `apps/api/src/main.ts:91`. Regression: `apps/api/src/common/filters/lockout.filter.test.ts`.
 - [ ] `X-RateLimit-*` headers on all responses.
 - [x] Lockouts logged as security events. `AuthService.maybeAuditLockout` writes `audit_log` action `auth.login.lockout` at the moment the failure count crosses the threshold (`apps/api/src/modules/auth/auth.service.ts:150-171` + `auth.service.test.ts`, A-C1).
 - [x] Unit test: burst → 429; wait → 200. Auth-brute-force test asserts lockout escalation. `apps/api/src/modules/auth/auth.service.test.ts` covers exponential-from-N=1 escalation, threshold audit at 5, and reset on success (A-C1).
