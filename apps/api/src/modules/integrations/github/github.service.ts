@@ -1,5 +1,5 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
-import { encrypt, decrypt, loadMasterKey } from '@careeros/secrets';
+import { encrypt, loadMasterKey } from '@careeros/secrets';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { QueueService } from '../../../common/queue.service';
 
@@ -7,12 +7,42 @@ const KEY = loadMasterKey();
 const PURPOSE = 'integration:github:token';
 const GITHUB_API = 'https://api.github.com';
 
+// Classic-PAT scope policy for A-H6. Anything outside `ALLOWED` (or in `BLOCKED`)
+// is rejected before we ever persist the token. `BLOCKED` lists the specific
+// high-blast-radius scopes we want a hard-fail message for; anything else that
+// isn't in `ALLOWED` gets the same reject with a generic message.
+const ALLOWED_SCOPES = new Set(['repo', 'public_repo', 'read:user', 'user:email']);
+const BLOCKED_SCOPES = new Set([
+  'admin:org',
+  'admin:repo_hook',
+  'admin:public_key',
+  'admin:enterprise',
+  'admin:gpg_key',
+  'delete_repo',
+  'workflow',
+  'write:packages',
+  'delete:packages',
+  'write:discussion',
+]);
+
 export interface GithubProfile {
   login: string;
   name: string | null;
   avatarUrl: string;
   publicRepos: number;
   followers: number;
+}
+
+// Thrown when the PAT the user pasted carries scopes we refuse to persist. Kept
+// as its own type so callers (controllers, tests) can distinguish "bad scope"
+// from "token dead" or "GitHub down".
+export class InvalidTokenScopeError extends BadRequestException {
+  constructor(
+    public readonly reason: string,
+    public readonly offendingScopes: string[] = [],
+  ) {
+    super({ message: reason, offendingScopes });
+  }
 }
 
 @Injectable()
@@ -23,8 +53,10 @@ export class GithubService {
   ) {}
 
   async saveToken(userId: string, token: string): Promise<GithubProfile> {
-    // Verify token by fetching user
-    const profile = await this.fetchUser(token);
+    // Validate the token FIRST: fetchUser both proves the token is live and
+    // reads `x-oauth-scopes` so we can reject over-scoped PATs before persist.
+    // Any throw here means NO DB write, NO sync enqueue.
+    const profile = await this.fetchUser(userId, token);
 
     const ciphertext = encrypt(token, KEY, PURPOSE);
     const secret = await this.prisma.encryptedSecret.upsert({
@@ -52,6 +84,7 @@ export class GithubService {
     });
 
     // Kick off the first repo sync in the background. Wizard doesn't wait for it.
+    // Only reachable after fetchUser + scope-gate above have accepted the token.
     await this.queue.enqueueGithubSync({ userId, reason: 'setup' });
 
     return profile;
@@ -104,7 +137,7 @@ export class GithubService {
     };
   }
 
-  private async fetchUser(token: string): Promise<GithubProfile> {
+  private async fetchUser(userId: string, token: string): Promise<GithubProfile> {
     const res = await fetch(`${GITHUB_API}/user`, {
       headers: {
         authorization: `Bearer ${token}`,
@@ -113,9 +146,26 @@ export class GithubService {
       },
     });
     if (!res.ok) {
-      if (res.status === 401) throw new BadRequestException('Invalid GitHub token');
+      if (res.status === 401) {
+        await this.recordRejection(userId, 'invalid_token', []);
+        throw new BadRequestException('Invalid GitHub token');
+      }
       throw new BadRequestException(`GitHub returned ${res.status}`);
     }
+
+    // Scope gate. Classic PATs return a comma-separated `x-oauth-scopes` header
+    // (may be empty spaces). Fine-grained PATs return an EMPTY header even on
+    // 200. We reject fine-grained for the MVP because scope shape differs and
+    // we don't want to guess-approve a token whose real permissions we can't
+    // introspect from headers alone.
+    const scopeHeader = res.headers.get('x-oauth-scopes');
+    const scopes = parseScopeHeader(scopeHeader);
+    const violation = classifyScopes(scopeHeader, scopes);
+    if (violation) {
+      await this.recordRejection(userId, violation.reason, violation.offending);
+      throw new InvalidTokenScopeError(violation.message, violation.offending);
+    }
+
     const json = (await res.json()) as {
       login: string;
       name: string | null;
@@ -131,4 +181,90 @@ export class GithubService {
       followers: json.followers,
     };
   }
+
+  // Best-effort audit write. If the audit log itself is down we still want the
+  // reject to surface to the user, so any failure here is swallowed.
+  private async recordRejection(
+    userId: string,
+    reason: string,
+    offendingScopes: string[],
+  ): Promise<void> {
+    try {
+      await this.prisma.auditEvent.create({
+        data: {
+          userId,
+          actor: 'user',
+          action: 'github.token.rejected',
+          resourceType: 'integration',
+          resourceId: 'github',
+          payload: { reason, offendingScopes },
+        },
+      });
+    } catch {
+      // ponytail: audit log write is best-effort; caller error still wins.
+    }
+  }
+}
+
+// --- pure helpers (exported for tests) ---
+
+export function parseScopeHeader(header: string | null | undefined): string[] {
+  if (!header) return [];
+  return header
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+export interface ScopeViolation {
+  reason: string; // machine label for audit_log
+  message: string; // user-facing
+  offending: string[];
+}
+
+// Returns null if the scopes are acceptable, otherwise a violation record.
+// Rules:
+//  - `x-oauth-scopes` header ABSENT (null) → GitHub didn't return the header at
+//    all; treat as unknown/reject.
+//  - `x-oauth-scopes` header PRESENT but empty → fine-grained PAT. Reject for
+//    MVP; tell the user to generate a classic PAT.
+//  - Any scope in BLOCKED_SCOPES → reject, list them.
+//  - Any scope not in ALLOWED_SCOPES → reject, list them.
+export function classifyScopes(
+  header: string | null | undefined,
+  scopes: string[],
+): ScopeViolation | null {
+  if (header === null || header === undefined) {
+    return {
+      reason: 'missing_scope_header',
+      message:
+        'GitHub did not return token scopes. Generate a classic personal access token with only "repo" and "read:user".',
+      offending: [],
+    };
+  }
+  if (scopes.length === 0) {
+    return {
+      reason: 'fine_grained_not_supported',
+      message:
+        'Fine-grained personal access tokens are not supported yet. Generate a classic PAT with only "repo" and "read:user".',
+      offending: [],
+    };
+  }
+  const blocked = scopes.filter((s) => BLOCKED_SCOPES.has(s));
+  if (blocked.length > 0) {
+    return {
+      reason: 'blocked_scope',
+      message: `Token includes blocked scopes: ${blocked.join(', ')}. Regenerate with only "repo" and "read:user".`,
+      offending: blocked,
+    };
+  }
+  const disallowed = scopes.filter((s) => !ALLOWED_SCOPES.has(s));
+  if (disallowed.length > 0) {
+    return {
+      reason: 'disallowed_scope',
+      message: `Token includes scopes outside the allowlist: ${disallowed.join(', ')}. Regenerate with only "repo" and "read:user".`,
+      offending: disallowed,
+    };
+  }
+  return null;
 }

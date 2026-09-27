@@ -157,6 +157,7 @@ Cross-cutting security requirements for an open-source, self-hostable developer 
 - [ ] Allowlist rebuilt on config change; documented in `docs/egress.md`.
 - [ ] Optional `USAGE_STATS=on` env var — sends `{version, install_id_hashed, feature_flags}` weekly to configurable endpoint. Off by default. Documented exactly what fields.
 - [ ] `docs/security.md` lists every outbound network path with purpose.
+- [x] GitHub PAT scope gate: `saveToken` calls `GET /user` and inspects `x-oauth-scopes` before persist; scopes outside `{repo, public_repo, read:user, user:email}` (or any of `admin:*`, `delete_repo`, `workflow`, `write:packages`, `delete:packages`, `write:discussion`) are refused with `InvalidTokenScopeError`; fine-grained PATs rejected for MVP; sync never enqueues on reject; each reject writes `audit_log` action `github.token.rejected` (`apps/api/src/modules/integrations/github/github.service.ts:55` and helpers at :211, :233; regression `github.service.test.ts`).
 
 **Phase:** P0 (network policy scaffold) + P3 (real workers plug in)
 

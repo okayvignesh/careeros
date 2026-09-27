@@ -10,6 +10,7 @@
     "start:prod": "prisma migrate deploy && node dist/main.js",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --ext .ts",
+    "test": "cd ../.. && vitest run apps/api/src",
     "prisma": "prisma"
   },
   "dependencies": {
@@ -47,6 +48,7 @@
     "@types/multer": "^1.4.12",
     "@types/node": "^22.7.5",
     "@types/pdf-parse": "^1.1.4",
+    "msw": "^2.6.0",
     "prisma": "^5.20.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.6.3"
