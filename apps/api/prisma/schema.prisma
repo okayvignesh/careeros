@@ -443,6 +443,10 @@ model Question {
   sourceKind         String?  /// e.g. "system-design-primer" | "tech-interview-handbook"
   sourceUrl          String?
   sourceAttribution  String?  /// human-readable credit line rendered under the question
+  /// C-P2.7e: Qdrant point id for the embedding of `prompt`. Populated by the
+  /// weekly corpus refresh worker so near-duplicate lookups can skip a re-encode.
+  /// Null on LLM-generated rows (embedding is not indexed there).
+  embeddingId        String?
   createdAt          DateTime @default(now()) @db.Timestamptz(6)
 
   attempts Attempt[]
