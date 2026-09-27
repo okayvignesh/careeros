@@ -216,7 +216,7 @@ export async function handleGitlabSync(
               userId,
               skillId,
               kind: 'outcome',
-              signal: 'sustained_application',
+              signal: 'sustained-application',
               sourceRef: {
                 kind: MR_SOURCE_KIND,
                 mrId: mr.id,
