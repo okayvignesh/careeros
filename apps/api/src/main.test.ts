@@ -1,52 +1,51 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { Request, Response } from 'express';
-import helmet from 'helmet';
+import { PERMISSIONS_POLICY, buildSecurityMiddleware } from './main';
 
-// A-H2: verify helmet config produces the required headers. We don't boot the
-// whole Nest app here — that's covered by e2e. Instead we assemble the exact
-// helmet middleware chain and run it against a fake req/res so the assertion
-// pins the config surface.
+// A-H2: asserts against the SAME middleware chain that bootstrap() installs.
+// If someone silently flips `strictTransportSecurity: false` in main.ts or
+// drops the Permissions-Policy setter, the assertions here go red.
 
-describe('A-H2 helmet header set', () => {
-  it('emits HSTS 2y + preload, referrer, COOP, and drops unsafe-inline from CSP', async () => {
-    const captured: Record<string, string | string[]> = {};
-    const req = { method: 'GET', headers: {}, url: '/', originalUrl: '/' } as unknown as Request;
-    const res = {
-      locals: { cspNonce: 'abc123' },
-      setHeader: (k: string, v: string | string[]) => {
-        captured[k.toLowerCase()] = v;
-      },
-      getHeader: (k: string) => captured[k.toLowerCase()],
-      removeHeader: (k: string) => delete captured[k.toLowerCase()],
-      on: () => {},
-      end: () => {},
-      writeHead: () => {},
-    } as unknown as Response;
+async function runChain(): Promise<Record<string, string | string[]>> {
+  const captured: Record<string, string | string[]> = {};
+  const req = { method: 'GET', headers: {}, url: '/', originalUrl: '/' } as unknown as Request;
+  const res = {
+    locals: { cspNonce: 'abc123' },
+    setHeader: (k: string, v: string | string[]) => {
+      captured[k.toLowerCase()] = v;
+    },
+    getHeader: (k: string) => captured[k.toLowerCase()],
+    removeHeader: (k: string) => delete captured[k.toLowerCase()],
+    on: () => {},
+    end: () => {},
+    writeHead: () => {},
+  } as unknown as Response;
 
-    const mw = helmet({
-      contentSecurityPolicy: {
-        useDefaults: true,
-        directives: {
-          'default-src': ["'self'"],
-          'script-src': ["'self'", (_r, r) => `'nonce-${(r as Response).locals.cspNonce}'`],
-          'style-src': ["'self'", (_r, r) => `'nonce-${(r as Response).locals.cspNonce}'`],
-          'img-src': ["'self'", 'data:'],
-          'connect-src': ["'self'"],
-          'frame-ancestors': ["'none'"],
-          'base-uri': ["'self'"],
-          'form-action': ["'self'"],
-          'object-src': ["'none'"],
-        },
-      },
-      strictTransportSecurity: { maxAge: 63072000, includeSubDomains: true, preload: true },
-      referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
-      crossOriginOpenerPolicy: { policy: 'same-origin' },
-      crossOriginEmbedderPolicy: false,
+  const chain = buildSecurityMiddleware();
+  for (const mw of chain) {
+    // Overwrite the nonce so downstream helmet emits a deterministic value.
+    (res as unknown as { locals: { cspNonce: string } }).locals.cspNonce = 'abc123';
+    await new Promise<void>((resolve, reject) => {
+      try {
+        (mw as unknown as (r: Request, s: Response, n: (e?: unknown) => void) => void)(
+          req,
+          res,
+          (err?: unknown) => (err ? reject(err) : resolve()),
+        );
+      } catch (e) {
+        reject(e);
+      }
     });
-    await new Promise<void>((resolve) => mw(req, res, () => resolve()));
+  }
+  return captured;
+}
 
-    // MUTATION-SMOKE: drop `strictTransportSecurity` from the config → this
-    // assertion fails.
+describe('A-H2 buildSecurityMiddleware', () => {
+  it('emits HSTS 2y + preload, referrer, COOP, and drops unsafe-inline from CSP', async () => {
+    const captured = await runChain();
+
+    // MUTATION-SMOKE: setting `strictTransportSecurity: false` in
+    // buildSecurityMiddleware makes this assertion red.
     expect(String(captured['strict-transport-security'])).toContain('max-age=63072000');
     expect(String(captured['strict-transport-security'])).toContain('includeSubDomains');
     expect(String(captured['strict-transport-security'])).toContain('preload');
@@ -61,5 +60,14 @@ describe('A-H2 helmet header set', () => {
     expect(csp).not.toContain("'unsafe-inline'");
     expect(csp).toContain("frame-ancestors 'none'");
     expect(csp).toContain("object-src 'none'");
+  });
+
+  it('emits Permissions-Policy from the exported constant', async () => {
+    const captured = await runChain();
+    // MUTATION-SMOKE: drop the `permissions` middleware from the chain and
+    // this assertion goes red.
+    expect(captured['permissions-policy']).toBe(PERMISSIONS_POLICY);
+    expect(String(captured['permissions-policy'])).toContain('camera=()');
+    expect(String(captured['permissions-policy'])).toContain('geolocation=()');
   });
 });
