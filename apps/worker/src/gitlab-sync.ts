@@ -6,14 +6,25 @@
 // Honors GitLab response headers `RateLimit-Remaining` / `RateLimit-Reset` +
 // standard `Retry-After`. Retries via packages/shared/retry with exp backoff.
 //
-// ponytail: no MR-diff parsing, no per-commit scan, no job-log analysis yet.
-// Language names come from GitLab's `languages` endpoint (linguist-derived,
-// matches the GitHub map). Slice 2b will layer richer signals.
+// Slice 2b (C-P1.1d): also pulls the last COMMIT_LOOKBACK_MONTHS of commits
+// per project, filters to the user's own authorship, runs the ext/framework/
+// AI-assist analyzers, and emits per-file / per-framework / per-authorship
+// Evidence rows via the shared git-analysis package.
+//
+// ponytail: language DETECTION is file-extension + shebang, not tree-sitter
+// AST parsing. See packages/shared/src/git-analysis/language-detect.ts for
+// the upgrade path.
 import type { PrismaClient, Prisma } from '@prisma/client';
 import type { Logger } from 'pino';
 import { decrypt, loadMasterKey } from '@careeros/secrets';
 import { safeFetch, type AssertPublicUrlOptions } from '@careeros/shared/net';
-import { retry } from '@careeros/shared';
+import {
+  analyzeRepoCommits,
+  retry,
+  type CommitWithFiles,
+  type EvidenceRow,
+  type KnownEmails,
+} from '@careeros/shared';
 import { syncSkillState } from './aggregator.js';
 import { GH_LANGUAGE_TO_SKILL } from './skills-seed.js';
 
@@ -24,6 +35,9 @@ const DEFAULT_HOST = 'gitlab.com';
 const MAX_PROJECTS = 50; // one page; enough for personal scale
 const MAX_MRS_PER_PROJECT = 20;
 const MAX_PIPELINES_PER_PROJECT = 20;
+// Commit-scan tunables mirror github-sync. Kept module-const for now.
+const COMMIT_LOOKBACK_MONTHS = 6;
+const COMMITS_PER_PROJECT = 100;
 
 const PROJECT_SOURCE_KIND = 'gitlab_project';
 const MR_SOURCE_KIND = 'gitlab_mr';
@@ -113,8 +127,17 @@ export async function handleGitlabSync(
   );
   child.info({ count: projects.length }, 'fetched projects');
 
+  // Known emails for the contributor filter. GitLab's /user returns the
+  // primary email when `read_user` scope is present; missing scope yields
+  // null there — fall back to username-only in that case.
+  const knownEmails = await fetchKnownEmails(baseUrl, call).catch((err) => {
+    child.warn({ err: (err as Error).message }, '/user fetch failed; contributor filter empty');
+    return { emails: [] } as KnownEmails;
+  });
+
   const touchedSkillIds = new Set<string>();
   let evidenceAdded = 0;
+  let commitRowsAdded = 0;
   const now = new Date();
 
   for (const project of projects) {
@@ -292,6 +315,37 @@ export async function handleGitlabSync(
         'pipelines fetch failed',
       );
     }
+
+    // Commit ingest — mirror of github-sync C-P1.1d. Pulls the last
+    // COMMIT_LOOKBACK_MONTHS of commits touching this project, filters to the
+    // user's own authorship, runs the analyzers, and emits per-file /
+    // per-framework / per-authorship Evidence rows. Isolated per-project:
+    // failures log + continue.
+    try {
+      const commits = await fetchProjectCommits(baseUrl, project.id, call);
+      const analyzed = analyzeRepoCommits({
+        repoRef: project.path_with_namespace,
+        commits,
+        knownEmails,
+      });
+      if (analyzed.rows.length > 0) {
+        const written = await persistCommitEvidence(
+          prisma,
+          userId,
+          analyzed.rows,
+          project.id,
+          project.visibility,
+          touchedSkillIds,
+        );
+        commitRowsAdded += written;
+        evidenceAdded += written;
+      }
+    } catch (err) {
+      child.warn(
+        { project: project.path_with_namespace, err: (err as Error).message },
+        'commit ingest failed',
+      );
+    }
   }
 
   for (const skillId of touchedSkillIds) {
@@ -302,6 +356,7 @@ export async function handleGitlabSync(
     projectsScanned: projects.length,
     skillsTouched: touchedSkillIds.size,
     evidenceAdded,
+    commitRowsAdded,
   });
 
   child.info(
@@ -309,6 +364,7 @@ export async function handleGitlabSync(
       projectsScanned: projects.length,
       skillsTouched: touchedSkillIds.size,
       evidenceAdded,
+      commitRowsAdded,
     },
     'gitlab.sync complete',
   );
@@ -318,6 +374,125 @@ export async function handleGitlabSync(
     skillsTouched: touchedSkillIds.size,
     evidenceAdded,
   };
+}
+
+// --- commit ingest helpers (slice 2b) ---
+
+/**
+ * GET /user + /user/emails. Requires `read_user` scope. Any missing scope
+ * yields an empty emails list and the contributor filter emits nothing.
+ */
+async function fetchKnownEmails(
+  baseUrl: string,
+  call: <T>(url: string) => Promise<T>,
+): Promise<KnownEmails> {
+  const user = await call<GitlabUser>(`${baseUrl}/api/v4/user`);
+  const primary = user.email ?? user.public_email ?? null;
+  const list = await call<Array<{ email: string }>>(`${baseUrl}/api/v4/user/emails`).catch(
+    () => [] as Array<{ email: string }>,
+  );
+  const emails = [
+    ...(primary ? [primary] : []),
+    ...list.map((r) => r.email).filter((e) => typeof e === 'string' && e.length > 0),
+  ];
+  return { emails };
+}
+
+/**
+ * Pull the last COMMIT_LOOKBACK_MONTHS of commits from a GitLab project and
+ * hydrate each with the files-touched list from GET /commits/:sha/diff. This
+ * is N+1 by design — one diff call per commit — but bounded by
+ * COMMITS_PER_PROJECT. `persistCommitEvidence` dedupes per (sha, path).
+ */
+async function fetchProjectCommits(
+  baseUrl: string,
+  projectId: number,
+  call: <T>(url: string) => Promise<T>,
+): Promise<CommitWithFiles[]> {
+  const since = new Date();
+  since.setMonth(since.getMonth() - COMMIT_LOOKBACK_MONTHS);
+  const commits = await call<GitlabCommit[]>(
+    `${baseUrl}/api/v4/projects/${projectId}/repository/commits?since=${since.toISOString()}&per_page=${COMMITS_PER_PROJECT}`,
+  );
+  const out: CommitWithFiles[] = [];
+  for (const c of commits) {
+    let diff: GitlabCommitDiff[];
+    try {
+      diff = await call<GitlabCommitDiff[]>(
+        `${baseUrl}/api/v4/projects/${projectId}/repository/commits/${c.id}/diff`,
+      );
+    } catch {
+      continue;
+    }
+    const files = diff
+      .map((d) => d.new_path || d.old_path)
+      .filter((s): s is string => typeof s === 'string' && s.length > 0);
+    // Line stats via /commits/:sha (has stats block) would be a second call
+    // per commit; skipped for MVP. Additions/deletions default to zero which
+    // simply mutes the diff-size AI-assist signal — message markers + burst
+    // still fire.
+    out.push({
+      sha: c.id,
+      message: c.message ?? '',
+      authorEmail: c.author_email ?? null,
+      committerEmail: c.committer_email ?? null,
+      authoredAt: c.authored_date ? new Date(c.authored_date) : new Date(),
+      additions: c.stats?.additions ?? 0,
+      deletions: c.stats?.deletions ?? 0,
+      filesTouched: files.length,
+      files,
+    });
+  }
+  return out;
+}
+
+/**
+ * Persist evidence rows returned from analyzeRepoCommits. Dedupes per
+ * (userId, skillId, sourceRef.kind, sourceRef.sha, sourceRef.path). Stamps
+ * `sensitivity` on detail based on project visibility so the sensitivity
+ * gate can filter these rows out of LLM contexts.
+ */
+async function persistCommitEvidence(
+  prisma: PrismaClient,
+  userId: string,
+  rows: EvidenceRow[],
+  projectId: number,
+  visibility: GitlabProject['visibility'],
+  touchedSkillIds: Set<string>,
+): Promise<number> {
+  let written = 0;
+  const sensitivity = visibility === 'public' ? 'public' : 'employer-confidential';
+  for (const row of rows) {
+    const src = { ...row.sourceRef, projectId };
+    const existing = await prisma.$queryRaw<Array<{ id: string }>>`
+      SELECT id FROM evidence
+      WHERE "userId" = ${userId}::uuid
+        AND "skillId" = ${row.skillId}
+        AND "signal" = ${row.signal}
+        AND "sourceRef"->>'kind' = ${row.sourceRef.kind}
+        AND "sourceRef"->>'sha' = ${row.sourceRef.sha}
+        AND COALESCE("sourceRef"->>'path', '') = ${row.sourceRef.path ?? ''}
+      LIMIT 1
+    `;
+    if (existing.length > 0) {
+      touchedSkillIds.add(row.skillId);
+      continue;
+    }
+    const data: Prisma.EvidenceUncheckedCreateInput = {
+      userId,
+      skillId: row.skillId,
+      kind: row.kind,
+      signal: row.signal,
+      weightHint: row.weightHint.toFixed(3),
+      sourceRef: src as unknown as Prisma.InputJsonValue,
+      detail: { ...row.detail, sensitivity } as unknown as Prisma.InputJsonValue,
+      observedAt: row.observedAt,
+    };
+    await prisma.evidence.create({ data });
+    written += 1;
+    touchedSkillIds.add(row.skillId);
+  }
+  return written;
 }
 
 async function recordAudit(
@@ -363,4 +538,25 @@ export interface GitlabPipeline {
   id: number;
   status: string;
   updated_at: string | null;
+}
+
+export interface GitlabUser {
+  id: number;
+  username: string;
+  email: string | null;
+  public_email: string | null;
+}
+
+export interface GitlabCommit {
+  id: string;
+  message: string;
+  author_email: string | null;
+  committer_email: string | null;
+  authored_date: string | null;
+  stats?: { additions: number; deletions: number };
+}
+
+export interface GitlabCommitDiff {
+  old_path: string | null;
+  new_path: string | null;
 }
