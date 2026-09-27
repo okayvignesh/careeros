@@ -1,10 +1,12 @@
-import { Module } from '@nestjs/common';
+import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { LoggerModule, type Params } from 'nestjs-pino';
 import { randomUUID } from 'node:crypto';
 import { PrismaModule } from './prisma/prisma.module';
 import { StorageModule } from './common/storage.module';
 import { QueueModule } from './common/queue.module';
 import { SensitivityGateModule } from './common/sensitivity-gate.module';
+import { MetricsModule } from './common/metrics/metrics.module';
+import { HttpMetricsMiddleware } from './common/metrics/http-metrics.middleware';
 import { HealthModule } from './modules/health/health.module';
 import { SetupModule } from './modules/setup/setup.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -94,6 +96,7 @@ const loggerParams: Params = {
     StorageModule,
     QueueModule,
     SensitivityGateModule,
+    MetricsModule,
     AuthModule,
     ProvidersModule,
     EmbeddingsModule,
@@ -123,4 +126,11 @@ const loggerParams: Params = {
     SetupModule,
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  // C-P4.8: HTTP metrics on every route so the counter matches the pino
+  // request log 1:1. Runs after AuthModule's SecurityMiddleware (order
+  // doesn't matter for the counter, but keeps the auth path uninterrupted).
+  configure(consumer: MiddlewareConsumer): void {
+    consumer.apply(HttpMetricsMiddleware).forRoutes('*');
+  }
+}
