@@ -1,0 +1,28 @@
+{
+  "name": "@careeros/worker",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "build": "tsc",
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@careeros/embeddings": "workspace:*",
+    "@careeros/secrets": "workspace:*",
+    "@careeros/shared": "workspace:*",
+    "@octokit/rest": "^21.1.0",
+    "@prisma/client": "^5.20.0",
+    "bullmq": "^5.13.0",
+    "ioredis": "^5.4.1",
+    "pino": "^9.5.0",
+    "pino-pretty": "^11.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.5",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.3"
+  }
+}

@@ -1,0 +1,347 @@
+import { z } from 'zod';
+
+export const EmailSchema = z.string().email().max(320);
+export const PasswordSchema = z.string().min(12).max(200);
+
+export const CreateAccountSchema = z.object({
+  email: EmailSchema,
+  password: PasswordSchema,
+  displayName: z.string().min(1).max(100).optional(),
+});
+export type CreateAccountInput = z.infer<typeof CreateAccountSchema>;
+
+export const ProviderConfigSchema = z.object({
+  provider: z.enum(['deepseek', 'openai', 'anthropic', 'ollama', 'azure', 'openrouter', 'custom']),
+  apiKey: z.string().min(1).max(500),
+  baseUrl: z.string().url().optional(),
+  chatModel: z.string().min(1).max(120),
+  reasoningModel: z.string().min(1).max(120).optional(),
+});
+export type ProviderConfigInput = z.infer<typeof ProviderConfigSchema>;
+
+export const EmbeddingModeSchema = z.enum(['local', 'external']);
+export type EmbeddingMode = z.infer<typeof EmbeddingModeSchema>;
+
+export const EmbeddingConfigSchema = z.object({
+  mode: EmbeddingModeSchema,
+  model: z.string().min(1).max(120).default('bge-small-en'),
+  externalBaseUrl: z.string().url().optional(),
+  externalApiKey: z.string().min(1).max(500).optional(),
+});
+export type EmbeddingConfigInput = z.infer<typeof EmbeddingConfigSchema>;
+
+export const GithubConnectSchema = z.object({
+  token: z.string().min(20).max(500),
+});
+export type GithubConnectInput = z.infer<typeof GithubConnectSchema>;
+
+export const IntegrationSummarySchema = z.object({
+  kind: z.enum(['github', 'slack', 'gmail']),
+  status: z.enum(['connected', 'revoked']),
+  connectedAt: z.string(),
+  metadata: z.record(z.unknown()).optional(),
+});
+export type IntegrationSummary = z.infer<typeof IntegrationSummarySchema>;
+
+export const CareerGoalsSchema = z.object({
+  targetRoles: z.array(z.string().min(1).max(120)).min(1).max(10),
+  locations: z.array(z.string().min(1).max(120)).min(1).max(20),
+  remoteOnly: z.boolean(),
+  compMin: z.number().int().nonnegative().optional(),
+  compMax: z.number().int().nonnegative().optional(),
+  currency: z.string().length(3).default('USD'),
+  seniority: z
+    .array(z.enum(['intern', 'junior', 'mid', 'senior', 'staff', 'principal', 'manager']))
+    .min(1),
+  timezone: z.string().min(1).max(80),
+});
+export type CareerGoalsInput = z.infer<typeof CareerGoalsSchema>;
+
+export const SignInSchema = z.object({
+  email: EmailSchema,
+  password: z.string().min(1).max(200),
+});
+export type SignInInput = z.infer<typeof SignInSchema>;
+
+export const CapabilityResultSchema = z.object({
+  chat: z.object({ ok: z.boolean(), latencyMs: z.number(), error: z.string().optional() }),
+  structured: z.object({ ok: z.boolean(), latencyMs: z.number(), error: z.string().optional() }),
+  tools: z.object({ ok: z.boolean(), latencyMs: z.number(), error: z.string().optional() }),
+  streaming: z.object({ ok: z.boolean(), latencyMs: z.number(), error: z.string().optional() }),
+});
+export type CapabilityResult = z.infer<typeof CapabilityResultSchema>;
+
+export const EmploymentFactSchema = z.object({
+  company: z.string().min(1).max(200),
+  title: z.string().min(1).max(200),
+  start: z.string().max(40).nullable(),
+  end: z.string().max(40).nullable(),
+  bullets: z.array(z.string().min(1).max(500)).default([]),
+});
+
+export const EducationFactSchema = z.object({
+  school: z.string().min(1).max(200),
+  degree: z.string().min(1).max(200),
+  field: z.string().max(200).nullable(),
+  year: z.string().max(40).nullable(),
+});
+
+export const SkillFactSchema = z.object({
+  name: z.string().min(1).max(120),
+  evidence: z.string().max(400).nullable(),
+});
+
+export const ProjectFactSchema = z.object({
+  name: z.string().min(1).max(200),
+  description: z.string().max(600),
+});
+
+export const ExtractedFactsSchema = z.object({
+  headline: z.string().max(200).nullable(),
+  location: z.string().max(200).nullable(),
+  employment: z.array(EmploymentFactSchema).default([]),
+  education: z.array(EducationFactSchema).default([]),
+  skills: z.array(SkillFactSchema).default([]),
+  projects: z.array(ProjectFactSchema).default([]),
+});
+export type ExtractedFacts = z.infer<typeof ExtractedFactsSchema>;
+
+export const ResumeConfirmSchema = z.object({
+  facts: ExtractedFactsSchema,
+});
+export type ResumeConfirmInput = z.infer<typeof ResumeConfirmSchema>;
+
+export const KnowledgeGradeSchema = z.object({
+  score: z.number().min(0).max(1),
+  hits: z.array(z.string()).default([]),
+  misses: z.array(z.string()).default([]),
+  reasoning: z.string().min(1).max(1000),
+});
+export type KnowledgeGrade = z.infer<typeof KnowledgeGradeSchema>;
+
+// LLM-generated knowledge question. `keyPoints` must be concise (each a phrase
+// the grader can look for). 2..6 points keeps grading stable; too few produces
+// low-signal scores, too many produces false-negative misses.
+export const GeneratedQuestionSchema = z.object({
+  prompt: z.string().min(40).max(800),
+  keyPoints: z.array(z.string().min(2).max(80)).min(2).max(6),
+  answerHint: z.string().min(1).max(200).nullable(),
+  difficulty: z.enum(['easy', 'medium', 'hard']),
+});
+export type GeneratedQuestion = z.infer<typeof GeneratedQuestionSchema>;
+
+// LLM-generated system-design task. `scenario` describes what to design;
+// `constraints` list the non-negotiables (RPS, latency budgets, storage class).
+export const GeneratedSystemDesignSchema = z.object({
+  scenario: z.string().min(40).max(1200),
+  constraints: z.array(z.string().min(4).max(200)).min(1).max(8),
+  difficulty: z.enum(['easy', 'medium', 'hard']),
+});
+export type GeneratedSystemDesign = z.infer<typeof GeneratedSystemDesignSchema>;
+
+// Grader returns a per-dimension score (1..5) with cited evidence + an overall
+// score in [0..1] (mean/5). `dimensions[]` covers exactly the rubric's dims.
+export const RubricDimensionScoreSchema = z.object({
+  dimensionId: z.string().min(1).max(40),
+  score: z.number().int().min(1).max(5),
+  notes: z.string().min(1).max(400),
+});
+export const RubricGradeSchema = z.object({
+  score: z.number().min(0).max(1),
+  dimensions: z.array(RubricDimensionScoreSchema).min(1).max(10),
+  reasoning: z.string().min(1).max(1000),
+});
+export type RubricGradeResponse = z.infer<typeof RubricGradeSchema>;
+
+// Per-user job-search preferences. Every field is optional — empty means
+// "no filter on this axis". Skill ID arrays reference the ESCO-lite catalogue.
+export const JobPreferencesInputSchema = z.object({
+  targetRoles: z.array(z.string().min(1).max(120)).max(20).default([]),
+  locations: z.array(z.string().min(1).max(120)).max(20).default([]),
+  remoteOnly: z.boolean().default(false),
+  compMin: z.number().int().nonnegative().nullable().optional(),
+  compMax: z.number().int().nonnegative().nullable().optional(),
+  currency: z.string().length(3).default('USD'),
+  seniority: z
+    .array(z.enum(['intern', 'junior', 'mid', 'senior', 'staff', 'principal', 'manager']))
+    .default([]),
+  mustHaveSkills: z.array(z.string().min(1).max(60)).max(20).default([]),
+  dealbreakerSkills: z.array(z.string().min(1).max(60)).max(20).default([]),
+  companyBlacklist: z.array(z.string().min(1).max(200)).max(100).default([]),
+});
+export type JobPreferencesInput = z.infer<typeof JobPreferencesInputSchema>;
+
+// Cover letter content. Sibling of TailoredResumeContent: greeting + paragraphs
+// + closing, each paragraph carrying `factRefs` for grounded audit. Same
+// fact-check pattern applies (unsupported paragraphs dropped pre-persist).
+export const CoverLetterParagraphSchema = z.object({
+  text: z.string().min(10).max(1200),
+  factRefs: z.array(z.string()).max(6),
+});
+export const CoverLetterContentSchema = z.object({
+  greeting: z.string().min(3).max(200),
+  paragraphs: z.array(CoverLetterParagraphSchema).min(2).max(6),
+  closing: z.string().min(3).max(200),
+});
+export type CoverLetterContent = z.infer<typeof CoverLetterContentSchema>;
+
+// Per-bullet fact-check verdict. `bulletIndex` is a monotonic index across
+// all bullets in the variant (flat, section-agnostic; easier to correlate).
+// `supported=false` means the bullet's text claims more than its cited facts
+// justify; the service drops it before persist.
+export const FactCheckResultSchema = z.object({
+  results: z
+    .array(
+      z.object({
+        bulletIndex: z.number().int().nonnegative(),
+        supported: z.boolean(),
+        reason: z.string().min(1).max(400),
+      }),
+    )
+    .max(80),
+});
+export type FactCheckResult = z.infer<typeof FactCheckResultSchema>;
+
+// Tailored resume content. Structured shape rendered to markdown/PDF/DOCX by
+// downstream slices. Every bullet carries `factRefs[]` pointing at the
+// `ResumeFact.id` rows the LLM used, so generation is auditable and un-cited
+// bullets can be flagged before shipping.
+export const TailoredResumeBulletSchema = z.object({
+  text: z.string().min(4).max(400),
+  factRefs: z.array(z.string()).max(6),
+});
+export const TailoredResumeSectionSchema = z.object({
+  heading: z.string().min(1).max(120),
+  bullets: z.array(TailoredResumeBulletSchema).min(1).max(10),
+});
+export const TailoredResumeContentSchema = z.object({
+  summary: z.string().min(10).max(600),
+  sections: z.array(TailoredResumeSectionSchema).min(1).max(8),
+});
+export type TailoredResumeContent = z.infer<typeof TailoredResumeContentSchema>;
+
+// Market brief content — LLM synthesizes weekly market signals from stats.
+// Every section body may reference source URLs from the supplied list; the
+// service post-validates that cited URLs appear in the sources array.
+export const MarketBriefSectionSchema = z.object({
+  heading: z.string().min(1).max(120),
+  body: z.string().min(1).max(2000),
+  sourceUrls: z.array(z.string().url()).max(20).default([]),
+});
+export const MarketBriefContentSchema = z.object({
+  sections: z.array(MarketBriefSectionSchema).min(1).max(6),
+});
+export type MarketBriefContent = z.infer<typeof MarketBriefContentSchema>;
+
+// Job skill extraction — LLM picks skill IDs from a candidate list. The
+// prompt renders the seed catalogue inline, and the schema keeps the response
+// tight (empty allowed for no-match; upper bound 20 keeps token cost bounded).
+export const JobSkillExtractionSchema = z.object({
+  skillIds: z.array(z.string().min(1).max(60)).max(20),
+});
+export type JobSkillExtraction = z.infer<typeof JobSkillExtractionSchema>;
+
+// LLM key-points extractor. Given a raw question (from an external corpus),
+// return the 2-6 short phrases the grader will look for. Used at ingest time
+// so corpus questions can be graded by the existing keyPoints-based grader.
+export const KeyPointsExtractionSchema = z.object({
+  keyPoints: z.array(z.string().min(2).max(80)).min(2).max(6),
+});
+export type KeyPointsExtraction = z.infer<typeof KeyPointsExtractionSchema>;
+
+// LLM-generated code-review task. `diff` is a small unified-diff snippet with
+// 2..4 intentional defects; `defects[]` is the hidden answer key — a short
+// natural-language description of each defect the reviewer should catch.
+export const GeneratedCodeReviewSchema = z.object({
+  language: z.string().min(1).max(40),
+  scenario: z.string().min(20).max(400),
+  diff: z.string().min(40).max(3000),
+  defects: z.array(z.string().min(6).max(200)).min(2).max(4),
+  difficulty: z.enum(['easy', 'medium', 'hard']),
+});
+export type GeneratedCodeReview = z.infer<typeof GeneratedCodeReviewSchema>;
+
+// LLM-generated debugging task. Small broken snippet with a hidden root cause.
+// `description` tells the candidate what the function is supposed to do;
+// `rootCause` + `hint` are the answer key (never shown to the candidate).
+export const GeneratedDebuggingTaskSchema = z.object({
+  language: z.string().min(1).max(40),
+  description: z.string().min(20).max(400),
+  brokenCode: z.string().min(20).max(2000),
+  rootCause: z.string().min(10).max(400),
+  hint: z.string().min(4).max(200),
+  difficulty: z.enum(['easy', 'medium', 'hard']),
+});
+export type GeneratedDebuggingTask = z.infer<typeof GeneratedDebuggingTaskSchema>;
+
+// Debugging grader output. Correctness = did the fix address the root cause;
+// minimality = did they change only what's needed. Overall score in [0..1].
+export const DebuggingGradeSchema = z.object({
+  score: z.number().min(0).max(1),
+  correctness: z.number().min(0).max(1),
+  minimality: z.number().min(0).max(1),
+  reasoning: z.string().min(1).max(1000),
+});
+export type DebuggingGrade = z.infer<typeof DebuggingGradeSchema>;
+
+// LLM-generated mock interview: 3 questions (2 technical + 1 behavioral).
+// Each carries its own keyPoints so the grader can score per-Q. Interview
+// runs single-turn — user submits all 3 answers at once.
+export const MockInterviewQuestionSchema = z.object({
+  kind: z.enum(['technical', 'behavioral']),
+  prompt: z.string().min(20).max(500),
+  keyPoints: z.array(z.string().min(2).max(80)).min(1).max(5),
+});
+export const GeneratedMockInterviewSchema = z.object({
+  scenario: z.string().min(10).max(300),
+  questions: z.array(MockInterviewQuestionSchema).length(3),
+  difficulty: z.enum(['easy', 'medium', 'hard']),
+});
+export type GeneratedMockInterview = z.infer<typeof GeneratedMockInterviewSchema>;
+
+// Grader output. Per-question score + overall + panel-style summary.
+export const MockInterviewQuestionGradeSchema = z.object({
+  index: z.number().int().min(0).max(2),
+  score: z.number().min(0).max(1),
+  hits: z.array(z.string()).default([]),
+  misses: z.array(z.string()).default([]),
+  notes: z.string().min(1).max(400),
+});
+export const MockInterviewGradeSchema = z.object({
+  score: z.number().min(0).max(1),
+  questions: z.array(MockInterviewQuestionGradeSchema).length(3),
+  reasoning: z.string().min(1).max(1000),
+});
+export type MockInterviewGrade = z.infer<typeof MockInterviewGradeSchema>;
+
+// Grader output. `precision = correct_findings / total_findings`, `recall =
+// correct_findings / total_defects`, `score = F1`. `hits[]` are defects the
+// reviewer caught (echo the defect text); `misses[]` are defects they didn't.
+export const CodeReviewGradeSchema = z.object({
+  score: z.number().min(0).max(1),
+  precision: z.number().min(0).max(1),
+  recall: z.number().min(0).max(1),
+  hits: z.array(z.string()).default([]),
+  misses: z.array(z.string()).default([]),
+  falsePositives: z.array(z.string()).default([]),
+  reasoning: z.string().min(1).max(1000),
+});
+export type CodeReviewGrade = z.infer<typeof CodeReviewGradeSchema>;
+
+export const SetupStateSchema = z.enum([
+  'not_started',
+  'account_created',
+  'provider_configured',
+  'provider_verified',
+  'embedding_configured',
+  'embedding_verified',
+  'github_connected',
+  'integrations_reviewed',
+  'resume_uploaded',
+  'facts_reviewed',
+  'goals_set',
+  'health_verified',
+  'recovery_acknowledged',
+  'complete',
+]);
+export type SetupState = z.infer<typeof SetupStateSchema>;

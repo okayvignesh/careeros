@@ -1,0 +1,11 @@
+@import '@careeros/ui/tokens.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Body sits above ambient background layers. */
+body {
+  position: relative;
+  z-index: 1;
+}

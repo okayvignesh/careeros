@@ -1,0 +1,154 @@
+/* Career OS: material, precision, restraint.
+ * No gradients on interactive surfaces. Depth via hierarchy + hairline borders.
+ * Grain provides organic warmth. Everything else is flat and confident. */
+
+:root {
+  /* base surfaces */
+  --bg: 235 24% 4%;
+  --bg-elev-1: 235 18% 6.5%;
+  --bg-elev-2: 235 16% 9%;
+  --bg-hover: 235 16% 12%;
+
+  /* glass (used sparingly: sign-in card, landing pillars only) */
+  --glass-bg: 235 30% 96%;
+  --glass-bg-alpha: 0.035;
+  --glass-border: 235 30% 96%;
+  --glass-border-alpha: 0.08;
+
+  /* foreground */
+  --fg: 235 20% 97%;
+  --fg-muted: 235 8% 68%;
+  --fg-subtle: 235 8% 46%;
+  --fg-faint: 235 8% 30%;
+
+  /* borders */
+  --border: 235 12% 13%;
+  --border-strong: 235 12% 19%;
+  --border-active: 235 12% 26%;
+
+  /* accents: indigo only */
+  --accent: 239 84% 66%;
+  --accent-fg: 0 0% 100%;
+  --accent-muted: 239 40% 26%;
+
+  /* status */
+  --success: 155 50% 55%;
+  --warn: 42 88% 60%;
+  --danger: 358 68% 60%;
+
+  /* radii */
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  /* motion */
+  --dur-fast: 120ms;
+  --dur: 200ms;
+  --dur-slow: 400ms;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* type */
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: var(--font-mono-jb), ui-monospace, 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+
+  /* grain: very subtle */
+  --grain-url: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E");
+}
+
+html.light {
+  --bg: 240 20% 98%;
+  --bg-elev-1: 0 0% 100%;
+  --bg-elev-2: 240 15% 96%;
+  --bg-hover: 240 15% 94%;
+  --glass-bg: 235 30% 10%;
+  --glass-bg-alpha: 0.035;
+  --glass-border: 235 30% 10%;
+  --glass-border-alpha: 0.08;
+  --fg: 235 30% 8%;
+  --fg-muted: 235 12% 36%;
+  --fg-subtle: 235 12% 52%;
+  --fg-faint: 235 12% 68%;
+  --border: 235 15% 88%;
+  --border-strong: 235 15% 80%;
+  --border-active: 235 15% 70%;
+}
+
+html {
+  color-scheme: dark;
+  background: hsl(var(--bg));
+  color: hsl(var(--fg));
+  font-family: var(--font-sans);
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11', 'ss01';
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+html.light {
+  color-scheme: light;
+}
+
+body {
+  min-height: 100vh;
+  background: hsl(var(--bg));
+  position: relative;
+  isolation: isolate;
+}
+
+::selection {
+  background: hsl(var(--accent) / 0.32);
+  color: hsl(var(--fg));
+}
+
+:focus-visible {
+  outline: 2px solid hsl(var(--accent));
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* --- ambient (grain only) -------------------------------------------- */
+
+.ambient-grain {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image: var(--grain-url);
+  background-repeat: repeat;
+  background-size: 200px 200px;
+  opacity: 0.028;
+  mix-blend-mode: overlay;
+}
+
+/* --- glass (restrained) ----------------------------------------------- */
+
+.glass {
+  background: hsl(var(--glass-bg) / var(--glass-bg-alpha));
+  border: 1px solid hsl(var(--glass-border) / var(--glass-border-alpha));
+  border-radius: var(--radius-xl);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+}
+
+/* --- content panel (Notion-style) ------------------------------------ */
+
+.panel {
+  background: hsl(var(--bg-elev-1));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-lg);
+}
+
+/* --- reduced motion --------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

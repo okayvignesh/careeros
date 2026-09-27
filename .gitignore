@@ -1,0 +1,43 @@
+node_modules/
+.pnp
+.pnp.js
+.pnpm-store/
+
+# builds
+dist/
+build/
+.next/
+.turbo/
+*.tsbuildinfo
+
+# testing
+coverage/
+playwright-report/
+test-results/
+playwright/.cache/
+
+# env
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# ide
+.vscode/*
+!.vscode/launch.json
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+
+# os
+.DS_Store
+Thumbs.db
+
+# runtime
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# generated
+apps/api/prisma/generated/
+docs/schema.png

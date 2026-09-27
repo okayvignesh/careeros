@@ -1,0 +1,97 @@
+import { describe, expect, it } from 'vitest';
+import { ServiceUnavailableException } from '@nestjs/common';
+import { UsageService } from './usage.service';
+
+// Minimal Prisma fake. Only the surface the service touches is stubbed. If a
+// method is called that isn't wired, it throws so the missing coverage is loud.
+// ponytail: fake > testcontainers here; the arithmetic is what we care about,
+// not Postgres itself. When we start asserting SQL shape, swap for a container.
+type Row = { costUsd: number; ok?: boolean };
+function fakePrisma(rows: { current: Row[]; previous: Row[]; monthSum: number }) {
+  return {
+    appConfig: {
+      findUnique: async ({ where }: { where: { key: string } }) => {
+        if (where.key === 'llm.paused') return { value: { paused: false } };
+        if (where.key === 'llm.budget') return { value: { monthlyLimitUsd: 10 } };
+        return null;
+      },
+      upsert: async () => ({}),
+    },
+    llmCall: {
+      aggregate: async ({ where }: { where: { timestamp: { gte: Date; lt?: Date } } }) => {
+        const from = where.timestamp.gte;
+        const to = where.timestamp.lt;
+        if (!to) {
+          return { _count: { _all: rows.current.length }, _sum: { costUsd: rows.monthSum } };
+        }
+        // current vs previous discriminated by an epoch check: current window ends now-ish.
+        const now = Date.now();
+        const isCurrent = to.getTime() > now - 60_000;
+        const set = isCurrent ? rows.current : rows.previous;
+        void from;
+        const cost = set.reduce((a, r) => a + r.costUsd, 0);
+        return {
+          _count: { _all: set.length },
+          _sum: { promptTokens: 0, completionTokens: 0, totalTokens: 0, costUsd: cost, latencyMs: 0 },
+        };
+      },
+      count: async () => 0,
+    },
+  } as unknown;
+}
+
+const fakeCache = { remember: async (_u: string, _t: string, load: () => Promise<unknown>) => load(), bumpVersion: async () => {} } as unknown as ConstructorParameters<typeof UsageService>[1];
+
+describe('UsageService.summary', () => {
+  it('returns current-window totals plus delta-vs-previous', async () => {
+    const svc = new UsageService(
+      fakePrisma({ current: [{ costUsd: 3 }, { costUsd: 2 }], previous: [{ costUsd: 1 }], monthSum: 5 }) as never,
+      fakeCache,
+    );
+    const s = await svc.summary('u1', '7d');
+    expect(s.calls).toBe(2);
+    expect(s.costUsd).toBe(5);
+    expect(s.deltaVsPrevious.calls).toBe(1);
+    expect(s.deltaVsPrevious.costUsd).toBe(4);
+  });
+});
+
+describe('UsageService.assertCallAllowed', () => {
+  it('throws 503 when paused', async () => {
+    const prisma = {
+      appConfig: {
+        findUnique: async ({ where }: { where: { key: string } }) =>
+          where.key === 'llm.paused' ? { value: { paused: true } } : { value: {} },
+      },
+      llmCall: { aggregate: async () => ({ _sum: { costUsd: 0 }, _count: { _all: 0 } }) },
+    };
+    const svc = new UsageService(prisma as never, fakeCache);
+    await expect(svc.assertCallAllowed('u1')).rejects.toBeInstanceOf(ServiceUnavailableException);
+  });
+
+  it('throws 503 when monthly spend >= limit', async () => {
+    const prisma = {
+      appConfig: {
+        findUnique: async ({ where }: { where: { key: string } }) =>
+          where.key === 'llm.budget' ? { value: { monthlyLimitUsd: 10 } } : { value: { paused: false } },
+      },
+      llmCall: { aggregate: async () => ({ _sum: { costUsd: 12 }, _count: { _all: 1 } }) },
+    };
+    const svc = new UsageService(prisma as never, fakeCache);
+    await expect(svc.assertCallAllowed('u1')).rejects.toBeInstanceOf(ServiceUnavailableException);
+  });
+
+  it('passes when under budget and not paused', async () => {
+    const prisma = {
+      appConfig: {
+        findUnique: async ({ where }: { where: { key: string } }) =>
+          where.key === 'llm.budget'
+            ? { value: { monthlyLimitUsd: 100 } }
+            : { value: { paused: false } },
+      },
+      llmCall: { aggregate: async () => ({ _sum: { costUsd: 3 }, _count: { _all: 1 } }) },
+    };
+    const svc = new UsageService(prisma as never, fakeCache);
+    await expect(svc.assertCallAllowed('u1')).resolves.toBeUndefined();
+  });
+});

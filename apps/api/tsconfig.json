@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "target": "ES2022",
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "types": ["node", "multer"],
+    "verbatimModuleSyntax": false,
+    "esModuleInterop": true,
+    "isolatedModules": false,
+    "noUncheckedIndexedAccess": false,
+    "incremental": false
+  },
+  "include": ["src/**/*"]
+}

@@ -1,0 +1,617 @@
+// Career OS schema (P0 baseline). Additive per phase; every migration named + reviewed.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique @db.Citext
+  displayName  String?
+  passwordHash String
+  createdAt    DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @db.Timestamptz(6)
+
+  sessions        Session[]
+  providerConfigs ProviderConfig[]
+  integrations    Integration[]
+  resumeFacts     ResumeFact[]
+  careerGoals     CareerGoal?
+  recoveryKeys    RecoveryKey[]
+  auditEvents     AuditEvent[]
+  llmCalls        LlmCall[]
+  llmHallucinationLogs LlmHallucinationLog[]
+  evidence        Evidence[]
+  candidateSkillStates CandidateSkillState[]
+  skillStateEvents SkillStateEvent[]
+  setupState      SetupStateRow?
+  attempts        Attempt[]
+  xpEvents        XpEvent[]
+  streak          Streak?
+  remediationTasks RemediationTask[]
+  bossBattles      BossBattle[]
+  jobPreferences   UserJobPreferences?
+  marketBriefs     MarketBrief[]
+  resumeVariants   ResumeVariant[]
+  coverLetters     CoverLetter[]
+  applications     Application[]
+
+  @@map("users")
+}
+
+model Session {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  expiresAt DateTime @db.Timestamptz(6)
+  ip        String?
+  userAgent String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+/// Setup wizard state. One row per user (single-user default but multi-user-ready).
+model SetupStateRow {
+  userId       String   @id @db.Uuid
+  state        String   @default("not_started")
+  completedAt  DateTime? @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("setup_state")
+}
+
+/// Application-level config (non-sensitive). Sensitive values live in encrypted_secrets.
+model AppConfig {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  @@map("app_config")
+}
+
+/// Encrypted secret store (AES-GCM, master key from ENCRYPTION_KEY env).
+model EncryptedSecret {
+  id         String   @id @default(uuid()) @db.Uuid
+  ownerType  String   /// "user" | "system"
+  ownerId    String?  @db.Uuid
+  purpose    String   /// e.g. "provider:deepseek:apiKey"
+  ciphertext String   /// base64 iv+tag+ct
+  createdAt  DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt  DateTime @updatedAt @db.Timestamptz(6)
+
+  @@unique([ownerType, ownerId, purpose])
+  @@map("encrypted_secrets")
+}
+
+model ProviderConfig {
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @db.Uuid
+  provider       String
+  chatModel      String
+  reasoningModel String?
+  baseUrl        String?
+  apiKeySecretId String   @db.Uuid /// references EncryptedSecret.id
+  isDefault      Boolean  @default(false)
+  createdAt      DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("provider_configs")
+}
+
+model Integration {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @db.Uuid
+  kind         String   /// "github" | "slack" | "gmail"
+  status       String   @default("connected") /// "connected" | "revoked"
+  tokenSecretId String? @db.Uuid
+  metadata     Json?
+  connectedAt  DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, kind])
+  @@map("integrations")
+}
+
+/// Verified facts from resume + user edits. Field-level encryption lands in P1.
+model ResumeFact {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  kind      String   /// "employment" | "education" | "skill" | "cert" | "project" | "achievement"
+  content   Json
+  verified  Boolean  @default(false)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, kind])
+  @@map("resume_facts")
+}
+
+model CareerGoal {
+  userId       String   @id @db.Uuid
+  targetRoles  String[]
+  locations    String[]
+  remoteOnly   Boolean  @default(false)
+  compMin      Int?
+  compMax      Int?
+  currency     String   @default("USD")
+  seniority    String[]
+  timezone     String
+  updatedAt    DateTime @updatedAt @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("career_goals")
+}
+
+model RecoveryKey {
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @db.Uuid
+  hashPreview    String   /// last 4 chars for display; never store full key
+  acknowledgedAt DateTime? @db.Timestamptz(6)
+  createdAt      DateTime @default(now()) @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("recovery_keys")
+}
+
+/// Canonical skill catalog. Seeded from ESCO subset (see docs). `id` is a stable ESCO-derived slug.
+model Skill {
+  id          String   @id
+  name        String
+  cluster     String?  /// "language" | "framework" | "tool" | "domain" | "practice"
+  aliases     String[] @default([])
+  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+
+  evidence             Evidence[]
+  candidateSkillStates CandidateSkillState[]
+
+  @@index([cluster])
+  @@map("skills")
+}
+
+/// Every atomic proof a candidate can point to. Immutable append-only.
+/// `kind` = self | document | code | assessment | behavioral | outcome (weights in knowledge-rules.ts).
+/// `signal` picks the aggregator rule (correct-independent, presence, sustained-application, ...).
+model Evidence {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @db.Uuid
+  skillId      String
+  kind         String   /// evidence type; see EvidenceKind in shared/knowledge-rules.ts
+  signal       String   /// EvidenceSignal; see knowledge-rules.ts RULE_BY_SIGNAL
+  weightHint   Decimal? @db.Decimal(4, 3) /// optional per-evidence override [0..1]
+  sourceRef    Json?    /// {kind: "resume_fact" | "repo" | "assessment" | ..., id: string}
+  detail       Json?    /// free-form details for UI display
+  observedAt   DateTime @default(now()) @db.Timestamptz(6)
+  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  skill Skill @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  skillStateEvents SkillStateEvent[]
+
+  @@index([userId, skillId, observedAt])
+  @@map("evidence")
+}
+
+/// Denormalised per-user, per-skill snapshot recomputed by the aggregator.
+/// Never edited by hand; always derived from evidence[].
+model CandidateSkillState {
+  userId                 String   @db.Uuid
+  skillId                String
+  proficiency            Decimal  @db.Decimal(5, 2) /// [0..100]
+  confidence             Decimal  @db.Decimal(4, 3) /// [0..1]
+  recencyDays            Int      /// days since most recent evidence
+  historicalDemonstrated Boolean  @default(false) /// monotonic: was ever proven
+  evidenceCount          Int      @default(0)
+  level                  Int      @default(1) /// derived level 1..100
+  updatedAt              DateTime @updatedAt @db.Timestamptz(6)
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  skill Skill @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@id([userId, skillId])
+  @@index([userId, level])
+  @@map("candidate_skill_state")
+}
+
+/// Append-only reason log for every skill-state change. Feeds the "why" panel in the UI.
+model SkillStateEvent {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @db.Uuid
+  skillId     String
+  evidenceId  String?  @db.Uuid /// nullable: rules like longInactivity fire from time, not evidence
+  rule        String   /// which knowledge-rule fired
+  reason      String
+  beforeJson  Json?
+  afterJson   Json?
+  timestamp   DateTime @default(now()) @db.Timestamptz(6)
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  evidence Evidence? @relation(fields: [evidenceId], references: [id], onDelete: SetNull)
+
+  @@index([userId, skillId, timestamp])
+  @@index([evidenceId])
+  @@map("skill_state_events")
+}
+
+/// Grounded-generation hallucination log. One row per suspicious output.
+/// Feeds the eval loop in slice 7. Append-only; retention lands with slice 7.
+model LlmHallucinationLog {
+  id                String   @id @default(uuid()) @db.Uuid
+  userId            String?  @db.Uuid
+  llmCallId         String?  @db.Uuid
+  promptId          String
+  promptVersion     String
+  promptHash        String
+  suspectFragments  String[] @default([])
+  detail            Json?
+  timestamp         DateTime @default(now()) @db.Timestamptz(6)
+
+  user    User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  llmCall LlmCall? @relation(fields: [llmCallId], references: [id], onDelete: SetNull)
+
+  @@index([userId, timestamp])
+  @@index([promptId, timestamp])
+  @@index([llmCallId])
+  @@map("llm_hallucination_log")
+}
+
+/// Per-call audit + cost accounting for every provider LLM invocation.
+/// Non-blocking write; ok to lose a row under crash. Retention: 90 days (enforced by cron in P6).
+model LlmCall {
+  id               String   @id @default(uuid()) @db.Uuid
+  userId           String?  @db.Uuid
+  provider         String   /// "deepseek" | future
+  model            String
+  callKind         String   /// "chat" | "chatStructured" | "test:chat" | "test:structured" | "test:tools" | "test:streaming"
+  promptTokens     Int?
+  completionTokens Int?
+  totalTokens      Int?
+  costUsd          Decimal? @db.Decimal(10, 6)
+  latencyMs        Int
+  ok               Boolean
+  error            String?
+  timestamp        DateTime @default(now()) @db.Timestamptz(6)
+
+  user              User?                @relation(fields: [userId], references: [id], onDelete: SetNull)
+  hallucinationLogs LlmHallucinationLog[]
+
+  @@index([userId, timestamp])
+  @@index([timestamp])
+  @@map("llm_calls")
+}
+
+/// Append-only audit log. Insert-only in application; no UPDATE/DELETE granted to app role.
+model AuditEvent {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String?  @db.Uuid
+  actor        String   /// "user" | "system" | "agent:<role>"
+  action       String
+  resourceType String?
+  resourceId   String?
+  payload      Json?
+  ip           String?
+  userAgent    String?
+  timestamp    DateTime @default(now()) @db.Timestamptz(6)
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId, timestamp])
+  @@index([action, timestamp])
+  @@map("audit_log")
+}
+
+/// Reusable + LLM-generated question pool. One row per canonical variant.
+/// Slice 1 uses hand-seeded rows; slice 2 wires the question-generator agent.
+model Question {
+  id                 String   @id @default(uuid()) @db.Uuid
+  kind               String   /// "knowledge" | (coding | debugging | etc. land in slices 2+)
+  skillIds           String[] /// FK-shaped but not enforced; skill catalogue is ID-stable
+  difficulty         String   /// "easy" | "medium" | "hard"
+  prompt             String
+  keyPoints          String[] /// slice-1 rule-based grader match target
+  answerHint         String?
+  promptHash         String   @unique
+  flagged            Boolean  @default(false)
+  /// Source attribution (slice 12). Null for LLM-generated rows. When set,
+  /// runners must display sourceAttribution + link to satisfy license terms.
+  sourceKind         String?  /// e.g. "system-design-primer" | "tech-interview-handbook"
+  sourceUrl          String?
+  sourceAttribution  String?  /// human-readable credit line rendered under the question
+  createdAt          DateTime @default(now()) @db.Timestamptz(6)
+
+  attempts Attempt[]
+
+  @@index([kind, difficulty])
+  @@index([sourceKind])
+  @@map("question_bank")
+}
+
+/// One row per submission of any assessment (slice 1: knowledge only).
+/// Attempt drives evidence + xp + streak side effects.
+model Attempt {
+  id            String   @id @default(uuid()) @db.Uuid
+  userId        String   @db.Uuid
+  questionId    String?  @db.Uuid
+  kind          String   /// mirrors Question.kind
+  score         Decimal  @db.Decimal(4, 3) /// [0..1]
+  reasoning     String?
+  answerJson    Json?
+  gradingJson   Json?
+  durationMs    Int?
+  createdAt     DateTime @default(now()) @db.Timestamptz(6)
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  question Question? @relation(fields: [questionId], references: [id], onDelete: SetNull)
+  xpEvents XpEvent[]
+
+  @@index([userId, createdAt])
+  @@map("attempts")
+}
+
+/// Append-only XP ledger. `xp` may be negative for future penalty rules.
+model XpEvent {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  attemptId String?  @db.Uuid
+  reason    String   /// "attempt:knowledge" | "streak:milestone" | ...
+  xp        Int
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  attempt Attempt? @relation(fields: [attemptId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@map("xp_events")
+}
+
+/// One row per user. Recomputed on every attempt via pure `streakTick`.
+model Streak {
+  userId          String   @id @db.Uuid
+  currentDays     Int      @default(0)
+  longestDays     Int      @default(0)
+  lastAttemptDate DateTime? @db.Date
+  graceRemaining  Int      @default(2)
+  graceResetsAt   DateTime @db.Date
+  updatedAt       DateTime @updatedAt @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("streaks")
+}
+
+/// One open task per (user, skill) when the aggregator detects repeated failure.
+/// Closed either by the user marking it done or by a subsequent passing attempt
+/// on the same skill (auto-close in `gradeKnowledgeAttempt`).
+model RemediationTask {
+  id              String   @id @default(uuid()) @db.Uuid
+  userId          String   @db.Uuid
+  skillId         String
+  reason          String
+  status          String   @default("open") /// "open" | "closed"
+  sourceAttemptIds String[] @default([])
+  createdAt       DateTime @default(now()) @db.Timestamptz(6)
+  closedAt        DateTime? @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Partial-unique index (`... WHERE status = 'open'`) lives in the migration
+  // SQL because Prisma DSL doesn't express partial indexes. Result: at most
+  // ONE open task per (user, skill); multiple closed rows are fine.
+  @@index([userId, status])
+  @@map("remediation_tasks")
+}
+
+/// Per-user weekly market brief. Generated on demand (walking-skeleton) from
+/// stats computed against jobs the user's prefs would show. Content is LLM
+/// prose grounded in the stats + sources list.
+model MarketBrief {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @db.Uuid
+  generatedAt  DateTime @default(now()) @db.Timestamptz(6)
+  windowStart  DateTime @db.Timestamptz(6)
+  windowEnd    DateTime @db.Timestamptz(6)
+  statsJson    Json     /// {topSkills, topCompanies, newCount, totalCount, remoteShare, ...}
+  content      String   @db.Text
+  sourcesJson  Json     /// [{kind, ref, url}]
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, generatedAt(sort: Desc)])
+  @@map("market_briefs")
+}
+
+/// Per-user job-search preferences. Drives Stage 7 (relevance filter) of the
+/// job pipeline: excludes anything that violates the user's hard rules before
+/// match scoring. Walking-skeleton uses lists only — role classification and
+/// comp-band comparison land when the analysis slice ships.
+model UserJobPreferences {
+  userId             String   @id @db.Uuid
+  targetRoles        String[] @default([]) /// free-text, matched when role classifier ships
+  locations          String[] @default([]) /// free-text city/country
+  remoteOnly         Boolean  @default(false)
+  compMin            Int?     /// annualized in currency below
+  compMax            Int?
+  currency           String   @default("USD") @db.Char(3)
+  seniority          String[] @default([]) /// intern | junior | mid | senior | staff | principal | manager
+  mustHaveSkills     String[] @default([]) /// skill IDs from catalogue; job must have all
+  dealbreakerSkills  String[] @default([]) /// skill IDs; job with any of these gets excluded
+  companyBlacklist   String[] @default([]) /// case-insensitive company names
+  updatedAt          DateTime @updatedAt @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_job_preferences")
+}
+
+/// Append-only raw job fetches. One row per (source, sourceId, fetchedAt).
+/// Never overwritten — normalization derives from these. Global (not
+/// user-scoped) because ingestion is system-wide; filtering happens downstream.
+model JobRaw {
+  id            String   @id @default(uuid()) @db.Uuid
+  source        String   /// adapter id, e.g. "remotive"
+  sourceId      String   /// adapter's stable id for the job posting
+  canonicalUrl  String   /// URL to the job (used for cross-source dedupe)
+  payload       Json     /// full raw payload as returned by the adapter
+  fetchedAt     DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([source, sourceId, fetchedAt])
+  @@index([canonicalUrl])
+  @@map("jobs_raw")
+}
+
+/// Canonical job row (one per unique canonicalUrl for walking-skeleton).
+/// Skill extraction, verification state machine, relevance filter, match
+/// score all land in later slices — for now state defaults to "unverified"
+/// and no scoring exists.
+/// Job-tailored resume variant. Content is a structured shape (summary +
+/// sections + bullets with factRefs), rendered to markdown/PDF/DOCX later.
+/// `factRefs` on each bullet points at `ResumeFact.id`s the LLM used so
+/// generation is grounded and auditable.
+model ResumeVariant {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @db.Uuid
+  jobId        String?  @db.Uuid /// nullable so a variant can outlive the job row
+  roleTarget   String
+  templateId   String   @default("ats-first")
+  contentJson  Json
+  factRefs     String[] @default([]) /// all fact IDs cited across the variant
+  parentId     String?  @db.Uuid /// prior variant this was cloned from
+  createdAt    DateTime @default(now()) @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([jobId])
+  @@map("resume_variants")
+}
+
+/// Per-user job application. State machine lives in `packages/shared/src/
+/// applications.ts` (guards in service). `resumeVariantId` + `coverLetterId`
+/// point at the artifacts the user attached; both nullable so a user can
+/// track a job without generating docs yet. Unique on (userId, jobId) —
+/// tracking the same job twice is a data error, not a UX intent.
+model Application {
+  id              String   @id @default(uuid()) @db.Uuid
+  userId          String   @db.Uuid
+  jobId           String   @db.Uuid
+  state           String   @default("interested") /// interested | applied | interviewing | offer | rejected | ghosted
+  appliedAt       DateTime? @db.Timestamptz(6)
+  resumeVariantId String?  @db.Uuid
+  coverLetterId   String?  @db.Uuid
+  notes           String?
+  createdAt       DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime @updatedAt @db.Timestamptz(6)
+
+  user   User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  events ApplicationEvent[]
+
+  @@unique([userId, jobId])
+  @@index([userId, state])
+  @@map("applications")
+}
+
+/// Append-only transition log for applications. One row per state change,
+/// including the initial `null → interested` transition at create time.
+model ApplicationEvent {
+  id            String   @id @default(uuid()) @db.Uuid
+  applicationId String   @db.Uuid
+  fromState     String?  /// null on the very first row (creation event)
+  toState       String
+  byActor       String   @default("user") /// user | system | agent
+  notes         String?
+  at            DateTime @default(now()) @db.Timestamptz(6)
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId, at])
+  @@map("application_events")
+}
+
+/// Job-tailored cover letter. Sibling of ResumeVariant — same grounded-
+/// generation + fact-check pattern, but per-paragraph instead of per-bullet.
+/// `contentJson` stores `{content, audit}` wrapper (same shape as resume).
+model CoverLetter {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @db.Uuid
+  jobId        String?  @db.Uuid
+  roleTarget   String
+  templateId   String   @default("standard")
+  contentJson  Json
+  factRefs     String[] @default([])
+  parentId     String?  @db.Uuid
+  createdAt    DateTime @default(now()) @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([jobId])
+  @@map("cover_letters")
+}
+
+model NormalizedJob {
+  id              String   @id @default(uuid()) @db.Uuid
+  canonicalUrl    String   @unique
+  title           String
+  company         String
+  location        String?
+  remote          Boolean  @default(false)
+  description     String   @db.Text
+  sourcePostedAt  DateTime? @db.Timestamptz(6)
+  primarySource   String   /// adapter id currently owning this row
+  sourceIds       String[] @default([]) /// adapter id + sourceId pairs for provenance
+  state           String   @default("unverified") /// unverified | verified | discovered | stale | closed
+  /// LLM-extracted skill IDs (from `Skill.id` catalogue). Empty = not yet
+  /// processed. `skillsExtractedAt` records when the extraction ran so a
+  /// re-run can prefer unprocessed rows first.
+  skillIds        String[] @default([])
+  skillsExtractedAt DateTime? @db.Timestamptz(6)
+  firstSeenAt     DateTime @default(now()) @db.Timestamptz(6)
+  lastVerifiedAt  DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([primarySource])
+  @@index([sourcePostedAt(sort: Desc)])
+  @@index([skillIds], type: Gin)
+  @@map("jobs_normalized")
+}
+
+/// Boss battles: milestone-triggered timed challenges. One `active` row per
+/// user at a time; partial-unique on (userId, milestone) WHERE status='passed'
+/// (migration SQL) so a user can retry a milestone after failing/expiring but
+/// can only pass each milestone once.
+model BossBattle {
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String    @db.Uuid
+  milestone    Int       /// 10 | 25 | 50 | 75 | 100
+  startedAt    DateTime  @default(now()) @db.Timestamptz(6)
+  durationS    Int       @default(1800) /// 30 min default
+  submittedAt  DateTime? @db.Timestamptz(6)
+  score        Decimal?  @db.Decimal(4, 3)
+  status       String    @default("active") /// "active" | "passed" | "failed" | "expired"
+  questionIds  String[]  @default([])
+  attemptIds   String[]  @default([])
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@map("boss_battles")
+}

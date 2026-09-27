@@ -1,0 +1,259 @@
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import type { MarketBriefContent } from '@careeros/shared';
+import { DeepSeekProvider, renderPrompt, wrapUntrusted } from '@careeros/ai';
+import { decrypt, loadMasterKey } from '@careeros/secrets';
+import { PrismaService } from '../../prisma/prisma.service';
+import { UsageService } from '../usage/usage.service';
+import { UsageCache } from '../usage/usage.cache';
+import { SensitivityGateService } from '../../common/sensitivity-gate.service';
+import { makeLlmAuditor } from '../../common/llm-audit';
+import { JobPreferencesService } from '../job-prefs/job-prefs.service';
+
+const KEY = loadMasterKey();
+const WINDOW_DAYS = 7;
+const DAY_MS = 86_400_000;
+const TOP_N = 10;
+const JOB_SAMPLE_LIMIT = 25;
+
+export interface BriefStats {
+  windowDays: number;
+  totalCount: number;
+  newCount: number;
+  remoteShare: number;
+  topSkills: Array<{ skillId: string; count: number }>;
+  topCompanies: Array<{ company: string; count: number }>;
+}
+
+export interface BriefSource {
+  kind: 'job';
+  ref: string; // job id
+  url: string; // canonicalUrl (also what the LLM cites by)
+}
+
+export interface BriefDto {
+  id: string;
+  generatedAt: string;
+  windowStart: string;
+  windowEnd: string;
+  stats: BriefStats;
+  content: MarketBriefContent;
+  sources: BriefSource[];
+}
+
+@Injectable()
+export class MarketBriefService {
+  private readonly logger = new Logger(MarketBriefService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly usage: UsageService,
+    private readonly usageCache: UsageCache,
+    private readonly sensitivity: SensitivityGateService,
+    private readonly prefs: JobPreferencesService,
+  ) {}
+
+  async getLatest(userId: string): Promise<BriefDto | null> {
+    const row = await this.prisma.marketBrief.findFirst({
+      where: { userId },
+      orderBy: { generatedAt: 'desc' },
+    });
+    if (!row) return null;
+    return this.toDto(row);
+  }
+
+  async generate(userId: string): Promise<BriefDto> {
+    const now = new Date();
+    const windowStart = new Date(now.getTime() - WINDOW_DAYS * DAY_MS);
+
+    const [pool, prefs] = await Promise.all([
+      this.loadFilteredPool(userId),
+      this.prefs.get(userId),
+    ]);
+    if (pool.length === 0) {
+      throw new BadRequestException(
+        'No matching jobs in the pool. Sync some jobs and set your preferences first.',
+      );
+    }
+
+    const stats = this.computeStats(pool, windowStart);
+    const sample = pool.slice(0, JOB_SAMPLE_LIMIT).map((j) => ({
+      title: j.title,
+      company: j.company,
+      canonicalUrl: j.canonicalUrl,
+    }));
+    const sources: BriefSource[] = sample.map((s) => ({
+      kind: 'job',
+      ref: s.canonicalUrl,
+      url: s.canonicalUrl,
+    }));
+
+    const provider = await this.tryLoadProvider(userId);
+    if (!provider) {
+      throw new BadRequestException(
+        'LLM provider not configured or paused; brief needs an LLM to synthesize prose.',
+      );
+    }
+
+    const candidateContext = [
+      `Target roles: ${prefs.targetRoles.length ? prefs.targetRoles.join(', ') : '(none set)'}`,
+      `Locations: ${prefs.locations.length ? prefs.locations.join(', ') : '(any)'}`,
+      `Remote-only: ${prefs.remoteOnly ? 'yes' : 'no'}`,
+      `Seniority: ${prefs.seniority.length ? prefs.seniority.join(', ') : '(any)'}`,
+      `Must-have skills: ${prefs.mustHaveSkills.length ? prefs.mustHaveSkills.join(', ') : '(none)'}`,
+    ].join('\n');
+
+    const statsRendered = [
+      `- ${stats.totalCount} jobs in your preference-filtered pool over the last ${WINDOW_DAYS}d`,
+      `- ${stats.newCount} of those are new since ${windowStart.toISOString().slice(0, 10)}`,
+      `- ${(stats.remoteShare * 100).toFixed(0)}% are tagged remote`,
+      `- Top skills: ${stats.topSkills.map((s) => `${s.skillId} (${s.count})`).join(', ') || '(none extracted)'}`,
+      `- Top companies: ${stats.topCompanies.map((c) => `${c.company} (${c.count})`).join(', ') || '(none)'}`,
+    ].join('\n');
+
+    // Sample is untrusted third-party content — wrap so any prompt-injection
+    // prose in a title can't re-steer the writer.
+    const sampleWrapped = wrapUntrusted(
+      sample.map((s) => `- ${s.title} @ ${s.company} | ${s.canonicalUrl}`).join('\n'),
+      'job-description',
+    );
+
+    const rendered = renderPrompt('market-brief-writer', {
+      candidateContext,
+      windowDays: String(WINDOW_DAYS),
+      stats: statsRendered,
+      sources: sources.map((s) => `- ${s.url}`).join('\n'),
+      jobSample: sampleWrapped.content,
+    });
+    const result = (await provider.chatStructured({
+      messages: [
+        { role: 'system', content: rendered.system },
+        { role: 'user', content: rendered.user },
+      ],
+      schema: rendered.schema,
+      temperature: 0.3,
+    })) as MarketBriefContent;
+
+    // Drop cited URLs that aren't in our sources list (hallucination guard).
+    const sourceSet = new Set(sources.map((s) => s.url));
+    const cleaned: MarketBriefContent = {
+      sections: result.sections.map((sec) => ({
+        heading: sec.heading,
+        body: sec.body,
+        sourceUrls: sec.sourceUrls.filter((u) => sourceSet.has(u)),
+      })),
+    };
+
+    const row = await this.prisma.marketBrief.create({
+      data: {
+        userId,
+        windowStart,
+        windowEnd: now,
+        statsJson: stats as unknown as Prisma.InputJsonValue,
+        content: JSON.stringify(cleaned),
+        sourcesJson: sources as unknown as Prisma.InputJsonValue,
+      },
+    });
+    return this.toDto(row);
+  }
+
+  private async loadFilteredPool(userId: string) {
+    const prefs = await this.prefs.get(userId);
+    const blacklist = new Set(prefs.companyBlacklist.map((c) => c.toLowerCase().trim()));
+    const mustHave = new Set(prefs.mustHaveSkills);
+    const dealbreakers = new Set(prefs.dealbreakerSkills);
+    const cutoff = new Date(Date.now() - 45 * DAY_MS);
+    // ponytail: 500-row pre-filter cap. If a user has 1000+ matching jobs the
+    // brief silently reflects only the newest 500. Swap to streaming aggregation
+    // or precompute `user_market_snapshot` when this becomes visibly wrong.
+    const rows = await this.prisma.normalizedJob.findMany({
+      where: {
+        AND: [
+          { OR: [{ sourcePostedAt: { gte: cutoff } }, { sourcePostedAt: null, firstSeenAt: { gte: cutoff } }] },
+          prefs.remoteOnly ? { remote: true } : {},
+        ],
+      },
+      orderBy: [{ sourcePostedAt: { sort: 'desc', nulls: 'last' } }, { firstSeenAt: 'desc' }],
+      take: 500,
+    });
+    return rows.filter((r) => {
+      if (blacklist.has(r.company.toLowerCase().trim())) return false;
+      const jobSkills = new Set(r.skillIds);
+      for (const d of dealbreakers) if (jobSkills.has(d)) return false;
+      for (const m of mustHave) if (!jobSkills.has(m)) return false;
+      return true;
+    });
+  }
+
+  private computeStats(
+    pool: Array<{ skillIds: string[]; company: string; remote: boolean; sourcePostedAt: Date | null; firstSeenAt: Date }>,
+    windowStart: Date,
+  ): BriefStats {
+    const skillCounts = new Map<string, number>();
+    const companyCounts = new Map<string, number>();
+    let remoteCount = 0;
+    let newCount = 0;
+    for (const j of pool) {
+      for (const s of j.skillIds) skillCounts.set(s, (skillCounts.get(s) ?? 0) + 1);
+      companyCounts.set(j.company, (companyCounts.get(j.company) ?? 0) + 1);
+      if (j.remote) remoteCount++;
+      const posted = j.sourcePostedAt ?? j.firstSeenAt;
+      if (posted >= windowStart) newCount++;
+    }
+    const sortDesc = <T>(entries: Array<[T, number]>) => entries.sort((a, b) => b[1] - a[1]).slice(0, TOP_N);
+    return {
+      windowDays: WINDOW_DAYS,
+      totalCount: pool.length,
+      newCount,
+      remoteShare: pool.length === 0 ? 0 : remoteCount / pool.length,
+      topSkills: sortDesc([...skillCounts.entries()]).map(([skillId, count]) => ({ skillId, count })),
+      topCompanies: sortDesc([...companyCounts.entries()]).map(([company, count]) => ({ company, count })),
+    };
+  }
+
+  private toDto(row: {
+    id: string;
+    generatedAt: Date;
+    windowStart: Date;
+    windowEnd: Date;
+    statsJson: Prisma.JsonValue;
+    content: string;
+    sourcesJson: Prisma.JsonValue;
+  }): BriefDto {
+    return {
+      id: row.id,
+      generatedAt: row.generatedAt.toISOString(),
+      windowStart: row.windowStart.toISOString(),
+      windowEnd: row.windowEnd.toISOString(),
+      stats: row.statsJson as unknown as BriefStats,
+      content: JSON.parse(row.content) as MarketBriefContent,
+      sources: row.sourcesJson as unknown as BriefSource[],
+    };
+  }
+
+  /** Same shape as CorpusService / JobsService `tryLoadProvider`. */
+  private async tryLoadProvider(userId: string): Promise<DeepSeekProvider | null> {
+    try {
+      await this.usage.assertCallAllowed(userId);
+      const cfg = await this.prisma.providerConfig.findFirst({
+        where: { userId, isDefault: true },
+      });
+      if (!cfg || cfg.provider !== 'deepseek') return null;
+      await this.sensitivity.assertAllowed(cfg.provider, 'public', userId);
+      const secret = await this.prisma.encryptedSecret.findUnique({
+        where: { id: cfg.apiKeySecretId },
+      });
+      if (!secret) return null;
+      const apiKey = decrypt(secret.ciphertext, KEY, `provider:${cfg.provider}:apiKey`);
+      return new DeepSeekProvider({
+        apiKey,
+        baseUrl: cfg.baseUrl ?? undefined,
+        chatModel: cfg.chatModel,
+        onCall: makeLlmAuditor(this.prisma, userId, this.logger as never, this.usageCache),
+      });
+    } catch (err) {
+      this.logger.warn(`market-brief: provider unavailable: ${(err as Error).message}`);
+      return null;
+    }
+  }
+}

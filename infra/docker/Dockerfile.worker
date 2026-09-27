@@ -1,0 +1,24 @@
+# Dev-oriented image. Mirrors Dockerfile.api. Production hardening lands in P6.
+FROM node:20-alpine
+
+RUN apk add --no-cache libc6-compat openssl wget
+RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
+
+WORKDIR /app
+
+COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml turbo.json tsconfig.base.json ./
+COPY apps/worker/package.json apps/worker/
+COPY apps/api/package.json apps/api/
+COPY packages/shared/package.json packages/shared/
+COPY packages/secrets/package.json packages/secrets/
+COPY packages/ai/package.json packages/ai/
+COPY packages/embeddings/package.json packages/embeddings/
+
+RUN pnpm install --frozen-lockfile || pnpm install
+
+COPY . .
+
+# Worker reads through the same Prisma client the api generates.
+RUN pnpm --filter @careeros/api prisma generate
+
+CMD ["pnpm", "--filter", "@careeros/worker", "start"]
