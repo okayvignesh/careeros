@@ -47,6 +47,9 @@ model User {
   skillFacts       SkillFact[]
   factBase         FactBase[]
   agentDevices     AgentDevice[]
+  gmailWatch       GmailWatch?
+  gmailProcessed   GmailProcessedMessage[]
+  approvalItems    ApprovalItem[]
 
   @@map("users")
 }
@@ -951,4 +954,41 @@ model JobRejectLog {
   @@index([sourceName, rejectedAt(sort: Desc)])
   @@index([reason, rejectedAt(sort: Desc)])
   @@map("job_reject_log")
+}
+
+/// E.4: one row per Gmail-connected user. Tracks the last-seen Gmail
+/// `historyId` so `history.list` diffs are cheap + resumable, plus the watch
+/// `expiration` (Gmail auto-expires 7 days after `users.watch`, so the daily
+/// renewal cron re-arms anything within 24h of expiry).
+model GmailWatch {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @unique @db.Uuid
+  historyId    String   /// Gmail returns a uint64, stored as string to dodge JS precision.
+  expiration   DateTime @db.Timestamptz(6) /// watch auto-expiry (ms epoch converted).
+  topicName    String   /// projects/<gcp>/topics/<topic> - stored for audit + renewal
+  createdAt    DateTime @default(now()) @db.Timestamptz(6)
+  renewedAt    DateTime? @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiration])
+  @@map("gmail_watches")
+}
+
+/// E.4: dedupe table. Pub/Sub is at-least-once and the history.list diff can
+/// re-yield the same messageId across overlapping pushes. First insert wins;
+/// duplicates hit the unique index and are treated as no-ops.
+model GmailProcessedMessage {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @db.Uuid
+  messageId    String   /// Gmail message id (opaque)
+  threadId     String?
+  receivedAt   DateTime @db.Timestamptz(6) /// Gmail internalDate parsed to timestamp
+  processedAt  DateTime @default(now()) @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, messageId])
+  @@index([userId, processedAt(sort: Desc)])
+  @@map("gmail_processed_messages")
 }
