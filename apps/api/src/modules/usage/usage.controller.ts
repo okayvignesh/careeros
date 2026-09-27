@@ -1,6 +1,7 @@
 import { BadRequestException, Body, Controller, Get, HttpCode, Post, Query, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import { SessionService } from '../auth/session.service';
+import { RequireAdmin } from '../../common/decorators/require-admin.decorator';
 import { UsageService, type Window } from './usage.service';
 import { SensitivityGateService, type ProviderCeiling } from '../../common/sensitivity-gate.service';
 
@@ -88,6 +89,7 @@ export class UsageController {
   }
 
   @Post('budget')
+  @RequireAdmin()
   @HttpCode(200)
   async setBudget(@Body() body: { monthlyLimitUsd: number | null }, @Req() req: Request) {
     this.session.requireUserId(req);
@@ -107,6 +109,7 @@ export class UsageController {
   }
 
   @Post('pause')
+  @RequireAdmin()
   @HttpCode(200)
   async setPause(@Body() body: { paused: boolean }, @Req() req: Request) {
     this.session.requireUserId(req);
@@ -124,6 +127,7 @@ export class UsageController {
   }
 
   @Post('sensitivity')
+  @RequireAdmin()
   @HttpCode(200)
   async setSensitivity(
     @Body() body: { providerName: string; ceiling: ProviderCeiling },
