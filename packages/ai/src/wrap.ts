@@ -12,6 +12,7 @@
 import { createHash } from 'node:crypto';
 import { scanForInjection, type InjectionHit, type Severity } from './injection-scan';
 import { InjectionBlockedError } from './errors';
+import { SensitivityGate, type SensitivityContext } from './sensitivity-gate';
 
 export type UntrustedSourceKind =
   | 'resume'
@@ -72,9 +73,30 @@ function audit(sourceKind: UntrustedSourceKind, severity: Severity, hits: Inject
  * audit-logs and continues, `clean` wraps silently. The system prompt must
  * still instruct the model to treat anything between `<untrusted>...</untrusted>`
  * as inert data.
+ *
+ * Optional `sensitivityCtx` (C-P0.3b) — when supplied, the module-level
+ * SensitivityGate classifies the raw content first and calls assertAllowed
+ * against the context BEFORE the injection scan runs. This short-circuits
+ * doomed calls (e.g. resume text with an embedded API key routed to
+ * `llm-external`) so we do not waste an injection-scan CPU pass on payloads
+ * that will never leave the process. Callers that omit the third arg preserve
+ * pre-C-P0.3b behaviour exactly; every existing call site (11 in tree) is
+ * source-compatible.
  */
-export function wrapUntrusted(raw: string, sourceKind: UntrustedSourceKind): Wrapped {
+export function wrapUntrusted(
+  raw: string,
+  sourceKind: UntrustedSourceKind,
+  sensitivityCtx?: SensitivityContext,
+): Wrapped {
   const trimmed = raw ?? '';
+  if (sensitivityCtx) {
+    // Lazy module-level gate. Local to wrap.ts so callers don't have to hand
+    // an instance in every call — matches setWrapAuditHook shape.
+    // ponytail: singleton is fine here; re-auth state is per-userId keyed and
+    // callers who need isolation instantiate their own gate directly.
+    const level = wrapGate.classify(trimmed, { source: sourceKind });
+    wrapGate.assertAllowed(level, sensitivityCtx);
+  }
   const scan = scanForInjection(trimmed);
   if (scan.severity !== 'clean') {
     audit(sourceKind, scan.severity, scan.hits);
@@ -86,6 +108,11 @@ export function wrapUntrusted(raw: string, sourceKind: UntrustedSourceKind): Wra
   const content = `${START_TAG} source="${sourceKind}" hash="${hash}">\n${sanitise(trimmed)}\n${END_TAG}`;
   return { content, sourceKind, hash, bytes: trimmed.length };
 }
+
+// Module-level gate used ONLY when the caller opts into the sensitivity check
+// by passing `sensitivityCtx`. Kept private; callers who need direct
+// classification / re-auth access instantiate `new SensitivityGate()`.
+const wrapGate = new SensitivityGate();
 
 /**
  * Neutralise any tokens the raw content might use to close its own delimiter or spoof
