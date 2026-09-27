@@ -1,9 +1,8 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { UnauthorizedException } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { seal } from '@careeros/auth';
 import {
-  CSRF_COOKIE_NAME,
   SESSION_COOKIE_NAME,
   SessionService,
   csrfTokensMatch,
@@ -59,24 +58,48 @@ describe('SessionService (A-H3 + A-M1)', () => {
     process.env.SESSION_SECRET = SECRET;
   });
 
-  it('write emits __Host-prefix-less session in dev + SameSite=Strict + HttpOnly', async () => {
+  it('write emits literal `careeros_session` cookie name in dev + SameSite=Strict + HttpOnly', async () => {
     const prisma = fakePrisma([]);
     const svc = new SessionService(prisma as never);
     const res = fakeRes();
     const sessionId = await svc.write(res, 'user-1');
     expect(sessionId).toMatch(/^[0-9a-f-]{36}$/);
-    // In test env NODE_ENV !== production, so cookie name is not __Host-.
     const setCookies = (res as unknown as { headers: Record<string, string[]> }).headers['Set-Cookie'];
     expect(setCookies).toBeDefined();
-    expect(setCookies.join('\n')).toContain(SESSION_COOKIE_NAME);
+    // A-M1: literal cookie names asserted so a mutation renaming the constant
+    // in session.service.ts fails here rather than being masked by the import.
+    // NODE_ENV !== production in tests → dev-mode name applies.
+    expect(setCookies.some((s) => s.startsWith('careeros_session='))).toBe(true);
+    expect(setCookies.some((s) => s.startsWith('careeros_csrf='))).toBe(true);
     expect(setCookies.join('\n')).toContain('SameSite=Strict');
     expect(setCookies.join('\n')).toContain('HttpOnly');
-    // A CSRF cookie is emitted too, without HttpOnly.
-    const csrf = setCookies.find((s) => s.startsWith(`${CSRF_COOKIE_NAME}=`));
+    const csrf = setCookies.find((s) => s.startsWith('careeros_csrf='));
     expect(csrf).toBeDefined();
     expect(csrf).not.toContain('HttpOnly');
-    // MUTATION-SMOKE: change `SameSite=Strict` back to `SameSite=Lax` in
-    // formatCookie() and this test fails.
+    // MUTATION-SMOKE: rename the dev constant to `foo_session` in
+    // session.service.ts and this test goes red.
+  });
+
+  it('write emits literal `__Host-careeros_session` cookie name in production mode (A-M1)', async () => {
+    // Force IS_PROD=true by re-importing the module in a prod-env context.
+    const savedEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    try {
+      vi.resetModules();
+      const mod = await import('./session.service');
+      const prisma = fakePrisma([]);
+      const svc = new mod.SessionService(prisma as never);
+      const res = fakeRes();
+      await svc.write(res, 'user-1');
+      const setCookies = (res as unknown as { headers: Record<string, string[]> }).headers['Set-Cookie'];
+      expect(setCookies.some((s) => s.startsWith('__Host-careeros_session='))).toBe(true);
+      expect(setCookies.some((s) => s.startsWith('__Host-careeros_csrf='))).toBe(true);
+      // MUTATION-SMOKE: rename the prod constant to `__Host-foo_session` and
+      // this goes red.
+    } finally {
+      process.env.NODE_ENV = savedEnv;
+      vi.resetModules();
+    }
   });
 
   it('read rejects a cookie whose sessionId is NOT in active_sessions (A-H3)', async () => {
