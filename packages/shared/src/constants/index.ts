@@ -24,3 +24,43 @@ export const SETUP_STEPS = [
 ] as const;
 
 export const SETUP_SECTIONS = ['Account', 'Data', 'Profile', 'Finish'] as const;
+
+/**
+ * Map from `SetupStateRow.state` (what the user has *completed*) to the slug
+ * of the *next* wizard step they should be on. Any state ahead of this slug is
+ * URL-jump and gets redirected back. `complete` maps to null (send them to
+ * /dashboard, never back into the wizard). Kept next to SETUP_STEPS so a step
+ * addition/rename can't silently drift from the state machine.
+ * ponytail: single source of truth; middleware + guards import this instead
+ * of duplicating the mapping.
+ */
+export const SETUP_STATE_TO_SLUG: Record<string, string | null> = {
+  not_started: '01-preflight',
+  account_created: '03-provider',
+  provider_configured: '04-capability',
+  provider_verified: '05-embedding',
+  embedding_configured: '06-embedding-test',
+  embedding_verified: '07-github',
+  github_connected: '08-integrations',
+  integrations_reviewed: '09-resume',
+  resume_uploaded: '10-fact-review',
+  facts_reviewed: '11-goals',
+  goals_set: '12-health',
+  health_verified: '13-recovery',
+  recovery_acknowledged: '14-complete',
+  complete: null,
+};
+
+/**
+ * Slugs the user is currently allowed to view given their completed state.
+ * They can always re-visit anything they've already passed (edit their answer)
+ * plus the current step. They cannot skip ahead.
+ * `complete` returns [] — /setup/* is off-limits once done, /dashboard owns them.
+ */
+export function allowedSetupSlugs(state: string): readonly string[] {
+  if (state === 'complete') return [];
+  const currentSlug = SETUP_STATE_TO_SLUG[state] ?? '01-preflight';
+  const currentIdx = SETUP_STEPS.findIndex((s) => s.slug === currentSlug);
+  if (currentIdx < 0) return [SETUP_STEPS[0]!.slug];
+  return SETUP_STEPS.slice(0, currentIdx + 1).map((s) => s.slug);
+}

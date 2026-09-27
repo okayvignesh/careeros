@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { SETUP_STATE_TO_SLUG, allowedSetupSlugs } from '@careeros/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 
 const ORDER = [
@@ -18,16 +19,41 @@ const ORDER = [
   'complete',
 ] as const;
 
+/** Shape returned by GET /setup/state. `currentStepSlug` is where the wizard
+ * should send the user; `allowedSlugs` is what the web middleware whitelists
+ * so URL-jumping to future steps 307s back. Both derive from `state` — they're
+ * pre-computed here so the web layer doesn't need to import shared/constants.
+ */
+export interface SetupStateResponse {
+  state: string;
+  hasUser: boolean;
+  currentStepSlug: string | null;
+  allowedSlugs: readonly string[];
+}
+
 @Injectable()
 export class SetupService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getState(): Promise<{ state: string; hasUser: boolean }> {
+  async getState(): Promise<SetupStateResponse> {
     const first = await this.prisma.user.findFirst({
       select: { id: true, setupState: true },
     });
-    if (!first) return { state: 'not_started', hasUser: false };
-    return { state: first.setupState?.state ?? 'not_started', hasUser: true };
+    if (!first) {
+      return {
+        state: 'not_started',
+        hasUser: false,
+        currentStepSlug: SETUP_STATE_TO_SLUG['not_started'] ?? null,
+        allowedSlugs: allowedSetupSlugs('not_started'),
+      };
+    }
+    const state = first.setupState?.state ?? 'not_started';
+    return {
+      state,
+      hasUser: true,
+      currentStepSlug: SETUP_STATE_TO_SLUG[state] ?? null,
+      allowedSlugs: allowedSetupSlugs(state),
+    };
   }
 
   async isComplete(): Promise<boolean> {
