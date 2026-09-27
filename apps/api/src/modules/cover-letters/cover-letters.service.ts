@@ -1,8 +1,14 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import type { CoverLetterContent, FactCheckResult } from '@careeros/shared';
+import type { CoverLetterContent } from '@careeros/shared';
 import { renderCoverLetterPdf } from '@careeros/resume-render';
-import { DeepSeekProvider, renderPrompt, wrapUntrusted } from '@careeros/ai';
+import {
+  DeepSeekProvider,
+  renderPrompt,
+  runFactCheck,
+  wrapUntrusted,
+  type FactCheckClaim,
+} from '@careeros/ai';
 import { decrypt, loadMasterKey } from '@careeros/secrets';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UsageService } from '../usage/usage.service';
@@ -219,38 +225,28 @@ export class CoverLettersService {
     paragraphs: CoverLetterContent['paragraphs'],
     factById: Map<string, { id: string; kind: string; content: Prisma.JsonValue }>,
   ): Promise<{ finalParagraphs: CoverLetterContent['paragraphs']; audit: FactCheckAudit }> {
-    const rendered = paragraphs
-      .map((p, i) => {
-        const cited = p.factRefs
-          .map((id) => {
-            const f = factById.get(id);
-            return f ? `    - id=${f.id} kind=${f.kind} ${summariseFact(f.content)}` : `    - id=${id} (MISSING)`;
-          })
-          .join('\n');
-        return `[${i}] ${p.text}\n  cites:\n${cited}`;
-      })
-      .join('\n\n');
+    // Reuse the shared C-P4.7a gate. Paragraph shape maps 1:1 to Claim; the
+    // per-paragraph drop + audit stays here (cover-letter domain shape).
+    const claims: FactCheckClaim[] = paragraphs.map((p, i) => ({
+      index: i,
+      text: p.text,
+      cited: p.factRefs.map((id) => {
+        const f = factById.get(id);
+        return f
+          ? { id: f.id, kind: f.kind, summary: summariseFact(f.content) }
+          : { id, kind: 'missing', summary: '(MISSING)' };
+      }),
+    }));
 
-    let verdicts: Map<number, { supported: boolean; reason: string }> | null = null;
-    try {
-      const prompt = renderPrompt('resume-bullet-fact-check', { bullets: rendered });
-      // A-M9: per-user LLM concurrency ceiling.
-      const result = (await this.usage.runWithUserLimit(userId, () =>
-        provider.chatStructured({
-          messages: [
-            { role: 'system', content: prompt.system },
-            { role: 'user', content: prompt.user },
-          ],
-          schema: prompt.schema,
-          temperature: 0,
-        }),
-      )) as FactCheckResult;
-      verdicts = new Map(result.results.map((r) => [r.bulletIndex, { supported: r.supported, reason: r.reason }]));
-    } catch (err) {
-      this.logger.warn(`cover-letter fact-check failed, marking unchecked: ${(err as Error).message}`);
-    }
+    // A-M9 concurrency ceiling passed through to the shared gate.
+    const outcome = await runFactCheck({
+      provider,
+      claims,
+      runWithUserLimit: (fn) => this.usage.runWithUserLimit(userId, fn),
+    });
 
-    if (!verdicts) {
+    if (!outcome.ok) {
+      this.logger.warn(`cover-letter fact-check failed, marking unchecked: ${outcome.reason}`);
       return {
         finalParagraphs: paragraphs,
         audit: {
@@ -263,10 +259,11 @@ export class CoverLettersService {
       };
     }
 
+    const verdicts = outcome.verdicts;
     const dropped: DroppedParagraph[] = [];
     let passed = 0;
     const finalParagraphs = paragraphs.filter((p, i) => {
-      const v = verdicts!.get(i);
+      const v = verdicts.get(i);
       // Missing verdict = DROP (same trust-critical default as resume slice).
       if (!v) {
         dropped.push({ index: i, text: p.text, reason: 'no verdict returned by fact-check' });
@@ -280,6 +277,9 @@ export class CoverLettersService {
       return false;
     });
 
+    for (const d of dropped) {
+      await this.auditDropped(userId, d.text, d.reason);
+    }
     const status: AuditStatus = dropped.length === 0 ? 'passed' : 'partial';
     return {
       finalParagraphs,
@@ -291,6 +291,24 @@ export class CoverLettersService {
         dropped,
       },
     };
+  }
+
+  /** Cross-service audit row on every dropped claim. Never throws. */
+  private async auditDropped(userId: string, claim: string, reason: string): Promise<void> {
+    try {
+      await this.prisma.auditEvent.create({
+        data: {
+          userId,
+          actor: 'system',
+          action: 'factcheck.claim.dropped',
+          resourceType: 'cover_letter',
+          resourceId: userId,
+          payload: { service: 'cover-letters', claim, reason },
+        },
+      });
+    } catch {
+      /* audit must not throw (also silent when the test fake omits auditEvent) */
+    }
   }
 
   private async loadFactRefs(userId: string, ids: string[]): Promise<FactRefInfo[]> {

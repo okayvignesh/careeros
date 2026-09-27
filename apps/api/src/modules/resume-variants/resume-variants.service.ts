@@ -1,8 +1,14 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import type { FactCheckResult, TailoredResumeContent } from '@careeros/shared';
+import type { TailoredResumeContent } from '@careeros/shared';
 import { renderResumePdf } from '@careeros/resume-render';
-import { DeepSeekProvider, renderPrompt, wrapUntrusted } from '@careeros/ai';
+import {
+  DeepSeekProvider,
+  renderPrompt,
+  runFactCheck,
+  wrapUntrusted,
+  type FactCheckClaim,
+} from '@careeros/ai';
 import { decrypt, loadMasterKey } from '@careeros/secrets';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UsageService } from '../usage/usage.service';
@@ -227,10 +233,13 @@ export class ResumeVariantsService {
 
   /**
    * Batched fact-check: one LLM call for the whole variant. Each bullet gets
-   * a flat index, the cited fact contents are attached inline, and the LLM
+   * a flat index, cited fact contents are attached inline, and the LLM
    * returns per-index supported+reason. Unsupported bullets are dropped.
    * If the check itself fails, the variant is marked `unchecked` — user gets
    * a draft they can trust less, not no draft at all.
+   *
+   * The LLM round-trip lives in `@careeros/ai::runFactCheck` (C-P4.7a); this
+   * method owns the resume-specific flatten + drop + audit shape.
    */
   private async runFactCheck(
     userId: string,
@@ -258,39 +267,29 @@ export class ResumeVariantsService {
       };
     }
 
-    const bulletsRendered = flat
-      .map((b) => {
-        const cited = b.factRefs
-          .map((id) => {
-            const f = factById.get(id);
-            return f ? `    - id=${f.id} kind=${f.kind} ${summariseFact(f.content)}` : `    - id=${id} (MISSING)`;
-          })
-          .join('\n');
-        return `[${b.idx}] ${b.text}\n  cites:\n${cited}`;
-      })
-      .join('\n\n');
+    // Shape claims for the shared gate. `summariseFact` stays here (domain
+    // knowledge of the ResumeFact JSON shape).
+    const claims: FactCheckClaim[] = flat.map((b) => ({
+      index: b.idx,
+      text: b.text,
+      cited: b.factRefs.map((id) => {
+        const f = factById.get(id);
+        return f
+          ? { id: f.id, kind: f.kind, summary: summariseFact(f.content) }
+          : { id, kind: 'missing', summary: '(MISSING)' };
+      }),
+    }));
 
-    let verdicts: Map<number, { supported: boolean; reason: string }> | null = null;
-    try {
-      const rendered = renderPrompt('resume-bullet-fact-check', { bullets: bulletsRendered });
-      // A-M9: per-user LLM concurrency ceiling.
-      const result = (await this.usage.runWithUserLimit(userId, () =>
-        provider.chatStructured({
-          messages: [
-            { role: 'system', content: rendered.system },
-            { role: 'user', content: rendered.user },
-          ],
-          schema: rendered.schema,
-          temperature: 0,
-        }),
-      )) as FactCheckResult;
-      verdicts = new Map(result.results.map((r) => [r.bulletIndex, { supported: r.supported, reason: r.reason }]));
-    } catch (err) {
-      this.logger.warn(`fact-check pass failed, marking variant unchecked: ${(err as Error).message}`);
-    }
+    // A-M9: per-user LLM concurrency ceiling passed through the shared gate.
+    const outcome = await runFactCheck({
+      provider,
+      claims,
+      runWithUserLimit: (fn) => this.usage.runWithUserLimit(userId, fn),
+    });
 
-    if (!verdicts) {
+    if (!outcome.ok) {
       // Fact-check failed — keep everything, mark audit unchecked.
+      this.logger.warn(`fact-check pass failed, marking variant unchecked: ${outcome.reason}`);
       return {
         finalSections: sections,
         audit: {
@@ -303,6 +302,7 @@ export class ResumeVariantsService {
       };
     }
 
+    const verdicts = outcome.verdicts;
     // Iterate positionally (matches `flat` order) instead of .find-by-text so
     // duplicate bullet text within a section doesn't collide onto one flat entry.
     const dropped: DroppedBullet[] = [];
@@ -313,7 +313,7 @@ export class ResumeVariantsService {
         heading: sec.heading,
         bullets: sec.bullets.filter((b) => {
           const idx = cursor++;
-          const v = verdicts!.get(idx);
+          const v = verdicts.get(idx);
           // Missing verdict = DROP. Trust-critical gate: "when in doubt, keep"
           // launders LLM omissions into false-green audits. If the auditor
           // didn't score a bullet, we don't ship it.
@@ -334,10 +334,33 @@ export class ResumeVariantsService {
     const bulletsChecked = flat.length;
     const bulletsDropped = dropped.length;
     const status: AuditStatus = bulletsDropped === 0 ? 'passed' : 'partial';
+    // Also emit an audit_log row per drop for cross-service uniformity
+    // (C-P4.7 spec: `factcheck.claim.dropped { service, claim, reason }`).
+    for (const d of dropped) {
+      await this.auditDropped(userId, d.text, d.reason);
+    }
     return {
       finalSections,
       audit: { status, bulletsChecked, bulletsPassed: passed, bulletsDropped, dropped },
     };
+  }
+
+  /** Cross-service audit row on every dropped claim. Never throws. */
+  private async auditDropped(userId: string, claim: string, reason: string): Promise<void> {
+    try {
+      await this.prisma.auditEvent.create({
+        data: {
+          userId,
+          actor: 'system',
+          action: 'factcheck.claim.dropped',
+          resourceType: 'resume_variant',
+          resourceId: userId,
+          payload: { service: 'resume-variants', claim, reason },
+        },
+      });
+    } catch {
+      /* audit must not throw (also silent when the test fake omits auditEvent) */
+    }
   }
 
   /** Render the variant as PDF via `@careeros/resume-render`. */
