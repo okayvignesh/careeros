@@ -1,0 +1,16 @@
+{
+  "source": "linkedin",
+  "subject": "1 new job for you",
+  "from": "jobs-noreply@linkedin.com",
+  "receivedAt": "2026-01-01T09:00:00.000Z",
+  "jobs": [
+    {
+      "title": "Senior Software Engineer",
+      "company": "Acme, Inc.",
+      "location": "Berlin, Germany",
+      "url": "https://www.linkedin.com/comm/jobs/view/3891234567",
+      "snippet": "Acme, Inc. · Berlin, Germany · 2 days ago",
+      "postedAt": "2025-12-30T09:00:00.000Z"
+    }
+  ]
+}

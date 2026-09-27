@@ -1,0 +1,48 @@
+{
+  "source": "linkedin",
+  "subject": "5 new backend roles in Germany",
+  "from": "jobs-noreply@linkedin.com",
+  "receivedAt": "2026-01-01T09:00:00.000Z",
+  "jobs": [
+    {
+      "title": "Backend Engineer",
+      "company": "Alpha Co",
+      "location": "Berlin, Germany",
+      "url": "https://www.linkedin.com/comm/jobs/view/9990000001",
+      "snippet": "Alpha Co · Berlin, Germany · 1 hour ago",
+      "postedAt": "2026-01-01T08:00:00.000Z"
+    },
+    {
+      "title": "Backend Engineer II",
+      "company": "Beta Co",
+      "location": "Munich, Germany",
+      "url": "https://www.linkedin.com/comm/jobs/view/9990000002",
+      "snippet": "Beta Co · Munich, Germany · 2 hours ago",
+      "postedAt": "2026-01-01T07:00:00.000Z"
+    },
+    {
+      "title": "Senior Backend Engineer",
+      "company": "Gamma Co",
+      "location": "Hamburg, Germany",
+      "url": "https://www.linkedin.com/comm/jobs/view/9990000003",
+      "snippet": "Gamma Co · Hamburg, Germany · 4 hours ago",
+      "postedAt": "2026-01-01T05:00:00.000Z"
+    },
+    {
+      "title": "Staff Backend Engineer",
+      "company": "Delta Co",
+      "location": "Cologne, Germany",
+      "url": "https://www.linkedin.com/comm/jobs/view/9990000004",
+      "snippet": "Delta Co · Cologne, Germany · 6 hours ago",
+      "postedAt": "2026-01-01T03:00:00.000Z"
+    },
+    {
+      "title": "Principal Backend Engineer",
+      "company": "Epsilon Co",
+      "location": "Frankfurt, Germany",
+      "url": "https://www.linkedin.com/comm/jobs/view/9990000005",
+      "snippet": "Epsilon Co · Frankfurt, Germany · 8 hours ago",
+      "postedAt": "2026-01-01T01:00:00.000Z"
+    }
+  ]
+}

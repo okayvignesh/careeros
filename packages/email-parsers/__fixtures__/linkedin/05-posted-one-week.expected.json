@@ -1,0 +1,16 @@
+{
+  "source": "linkedin",
+  "subject": "1 new job matching your search",
+  "from": "jobs-noreply@linkedin.com",
+  "receivedAt": "2026-01-01T09:00:00.000Z",
+  "jobs": [
+    {
+      "title": "Machine Learning Engineer",
+      "company": "Massive Dynamic",
+      "location": "Zurich, Switzerland",
+      "url": "https://www.linkedin.com/comm/jobs/view/7200000501",
+      "snippet": "Massive Dynamic · Zurich, Switzerland · 1 week ago",
+      "postedAt": "2025-12-25T09:00:00.000Z"
+    }
+  ]
+}

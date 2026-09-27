@@ -1,0 +1,16 @@
+{
+  "source": "linkedin",
+  "subject": "New match: Data Platform Engineer",
+  "from": "jobs-noreply@linkedin.com",
+  "receivedAt": "2026-01-01T09:00:00.000Z",
+  "jobs": [
+    {
+      "title": "Data Platform Engineer",
+      "company": "Contoso Ltd",
+      "location": "Amsterdam, Netherlands",
+      "url": "https://www.linkedin.com/comm/jobs/view/6120000042",
+      "snippet": "Contoso Ltd · Amsterdam, Netherlands · 4 hours ago",
+      "postedAt": "2026-01-01T05:00:00.000Z"
+    }
+  ]
+}
