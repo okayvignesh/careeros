@@ -1,6 +1,10 @@
 # Phase 3.5 — Desktop companion agent
 
-**Status:** Not started
+**Status:** Backend groundwork shipped (D.1 + D.2 + D.5 of 8 streams). D.3/D.4/D.6 Electron scaffold + downloads UI + electron-updater still require operator Mac/Windows machines. See `plan/HANDOFF.md`.
+- D.1 `@careeros/browser-agent` (task schema + allowlist YAML + pacing + kill-switch + selector-health) — Shipped: `4212b78` → `9537bbb`, 39 tests
+- D.2 Agent auth backend (`agent_devices` + JWT + WSS + 8 endpoints + 6 audit actions) — Shipped: `7e4957e` → `4563b4b`, 35 tests
+- D.5 `scripts/browser-agent/linkedin-discover.ts` + 8 fixtures + selector-drift probe — Shipped: `7537f04` → `13ab751`, 12 tests
+- **Deferred (needs operator machine):** D.3 downloads UI, D.4 Electron scaffold, D.6 electron-updater, D.7 keychain, D.8 corp proxy + screenshot cleanup
 **Blueprint refs:** §10.5 (application automation), §16 (security). Agent itself is a plan extension.
 **Screens in scope:** new — download page + "Devices" settings panel + pairing dialog. Not part of the 59-screen export.
 

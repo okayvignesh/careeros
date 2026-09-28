@@ -1,6 +1,6 @@
 # Phase 1 — Personal intelligence (candidate digital twin)
 
-**Status:** In progress (slice 8 settings-suite + tests: screens 52/53/54/62 shipped, Redis-cached usage aggregation, composite indexes on `llm_calls`, HNSW config on Qdrant collections, vitest suite reusing `.demo.ts` files, fast-check property tests on the aggregator, expanded axe a11y across 9 P1 screens, DeepSeek+GitHub route-stubbed golden-flow skeleton. Slice 4 Usage & Costs shipped; slice 1 skill graph core landed; slice 2 GitHub ingest MVP wired: worker + BullMQ + language-based presence evidence + auto-sync on connect.)
+**Status:** In progress (slices 1-8 shipped + verified as noted below. Wave C additions: commit-ingest slice 2b `packages/shared/git-analysis` (150+ langs + 4-signal AI-assist heuristic, wired into github-sync + gitlab-sync) — Shipped: `1b08cda`, `e2621fe`, `c83b55f`. ESCO 188-skill seed + `skill_facts` + `fact_base` prisma models — Shipped: `a1bce36`, `3ba64f4`, `f4396ca`. `learning_priority` formula + `/me/skills/learning-priority` endpoint — Shipped: `635e8ab`, `1cf6b4b`, `ef9ae94`. 24-fixture skill-extract eval suite — Shipped: `e71f53f`, `75747af`, `848e027`. GitLab integration (A-H6b delivered) — Shipped: `253f667`, `409d8d2`, `c63e29d`, `7c601fe`. See `plan/HANDOFF.md` for full ship map.)
 **Blueprint refs:** §5 (knowledge engine), §6 (skill graph), §7 (GitHub intel), §4 (evidence model)
 **Screens in scope:** `careeros-screens/phase-1-personal-intelligence/` (15–19, 21, 51–54, 62)
 

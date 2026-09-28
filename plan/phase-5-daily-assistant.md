@@ -1,6 +1,11 @@
 # Phase 5 — Daily assistant (Slack + Gmail)
 
-**Status:** Not started
+**Status:** Backend groundwork shipped (E.2 + E.4 + E.6 of 9 streams). External blocker: Slack + Gmail OAuth review is calendar-blocking. See `plan/HANDOFF.md`.
+- E.2 Slack Events API + Block Kit + slash commands + OAuth + `manifest.yml` + `docs/slack-setup.md` — Shipped: `8ac1e41` → `bd2c82b`, 41 tests
+- E.4 Gmail Pub/Sub + JWT verify + history-diff + daily watch renewal cron — Shipped: `9b69468` → `f45a39b`, 23 tests
+- E.6 `packages/email-parsers` (LinkedIn + Indeed + Naukri + sender allowlist + 30 fixtures) + `email-ingest` service — Shipped: `e59ef71` → `c9218b6`
+- **Deferred:** E.1 install docs polish, E.3 daily-brief composer + BullMQ scheduler, E.5 email classifier + evals, E.7 email→application fuzzy match + inbox-triage screen 50 (WEB), E.8 injection defense on emails (partially covered via E.6 wrapUntrusted), E.9 `packages/messaging` Channel + per-event prefs
+- **External blockers:** Slack app OAuth review (`manifest.yml` ready) + Google OAuth verification + Pub/Sub topic creation on your Google Cloud project
 **Blueprint refs:** §11 (daily integration), §19.3 (email workflow)
 **Screens in scope:** `careeros-screens/phase-5-daily-assistant/` (49, 50, 58)
 

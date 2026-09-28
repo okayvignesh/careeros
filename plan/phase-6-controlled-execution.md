@@ -1,6 +1,10 @@
 # Phase 6 — Controlled execution + hardening
 
-**Status:** Not started
+**Status:** Backend groundwork shipped (F.1 + F.6 of 11 streams). See `plan/HANDOFF.md`.
+- F.1 Approval queue + 5-state machine + bulk-threshold + fresh-reauth gate + `ApprovalsWorker` interface (for F.2/F.3/F.5 subscribers) — Shipped: `74e3a4c` → `4326e3d`, 28 tests, 6 audit actions
+- F.6 `audit_log` append-only DDL (REVOKE UPDATE/DELETE from app role) + `careeros_audit_reader` read-only role + SECURITY DEFINER `audit_log_retention_prune()` + daily cron worker + `docs/audit-log.md` — Shipped: `411556e` → `eb50acd`
+- **Deferred:** F.2 Ashby + Greenhouse submit adapters, F.3 agent form-fill scripts (needs D agent to finish), F.4 interview prep + talk-track, F.5 outreach composer + Gmail drafts (waits on E.4 Gmail live), F.7 backup+restore CI (mostly done via C-P0.8), F.8 data portability, F.9 usage-cost dashboard (WEB), F.10 screens 45-64 (WEB), F.11 `@RequireAdmin()` on public webhooks + per-integration OAuth scope drop-unused
+- **External blockers:** Weekly restore-test CI needs ≥1 real week of runs before Wave H can flip
 **Blueprint refs:** §10.5 (application automation), §16 (security), §25 (risks)
 **Screens in scope:** `careeros-screens/phase-6-controlled-execution/` (45, 46, 47, 48, 57, 59, 60, 63, 64)
 
