@@ -43,7 +43,7 @@ Sources: 4 audit reports in `plan/_audit_*.md` (do not delete these — every en
 
 Purpose: every Critical + High security finding ships before any new feature. Cheap Mediums included where the diff is trivial.
 
-**Wave A status: 20 of 20 findings SHIPPED (all Critical + High + Medium + Low). Remediation batches Batch1/Batch2 shipped honesty fixes on top.** A-L2 not landed in a dedicated commit; folded into normalization work implicitly.
+**Wave A status: 20 of 20 findings SHIPPED (all Critical + High + Medium + Low). Remediation batches Batch1/Batch2 shipped honesty fixes on top.** A-L2 folded into A-C1 `85a3afb` (normalization work); marker ticked 2026-09-28.
 
 | ID | Sev | Category | File:line | What + fix | Maps to |
 |---|---|---|---|---|---|
@@ -68,7 +68,7 @@ Purpose: every Critical + High security finding ships before any new feature. Ch
 | ✅ A-M8 | M | Fail-open middleware | `apps/web/src/middleware.ts:26-28` | SHIPPED `b670dd9`. On API-down the middleware allows through. Redirect to `/service-unavailable` on network error; explicit deny-fail. | security.md item 1 |
 | ✅ A-M9 | M | Per-user LLM burst cap | `apps/api/src/modules/usage/usage.service.ts` + every `tryLoadProvider` caller | SHIPPED `841861a`. `assertCallAllowed` only checks budget. Add `p-limit(2)` per user per LLM call site (single-user OK today; multi-user-ready). | security item 4 + ai-safety item 9 |
 | ✅ A-L1 | L | Error leakage | `packages/ai/src/providers/deepseek.ts:231` | SHIPPED `b38c5c0`. Upstream error string re-thrown to client. Wrap as `LLM provider error`; log raw server-side. | — |
-| A-L2 | L | Email normalization | `apps/api/src/modules/auth/auth.service.ts:14,24` | NOT LANDED in dedicated commit; deferred (trivial, one-liner). `email.toLowerCase()` missing NFC. `email.normalize('NFC').toLowerCase()`. | — |
+| ✅ A-L2 | L | Email normalization | `apps/api/src/modules/auth/auth.service.ts:189-191` | SHIPPED via A-C1 `85a3afb` (folded into normalization work). `normalizeEmail(email)` = `email.normalize('NFC').toLowerCase()`; applied at every user lookup (`createUser`, `verifyCredentials`, `verifyCredentialsWithLockout`). | — |
 
 Wave A workstream AC (applied to every finding): **fix landed** + **regression test asserts the vuln is closed** + **finding appears once in `audit_log`** + **maps back to a security.md checkbox that gets ticked**.
 

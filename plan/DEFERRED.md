@@ -39,7 +39,7 @@ Last refreshed: 2026-09-28. Baseline commit for the wave: `b519769`. HEAD: `c921
 - `NEXT_TELEMETRY_DISABLED=1` in web Dockerfile.
 - `USAGE_STATS=on` opt-in env stub.
 - `docs/security.md` outbound-path listing.
-- Renovate config + weekly PR cadence (item 10).
+- ~~Renovate config + weekly PR cadence (item 10).~~ SHIPPED 2026-09-28: `.github/renovate.json` with Monday-6am schedule, grouped by nestjs/prisma/next+react/simplewebauthn/type-defs/docker, monthly lock-file maintenance, vulnerability alerts always-on.
 - CodeQL + Trivy CI gates (item 10).
 - Distroless base images + non-root UID + read-only rootfs + cap-drop + seccomp (item 10).
 - `gitleaks` pre-commit hook + CI job (item 10).
