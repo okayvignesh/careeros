@@ -8,10 +8,13 @@
 //   DELETE /integrations/gmail                 - auth-required
 //
 // The webhook is deliberately at `/webhooks/gmail/push` and NOT under
-// `/integrations/...` so the operator can pin per-webhook rate limits by path
-// (Wave F.11 will hang a `requireAdmin` guard + rate-limit on this path). It
-// is safe to leave un-cookied because handlePubSubPush verifies the Google
-// JWT before doing anything (see gmail.service + gmail.jwt-verify).
+// `/integrations/...` so the operator can pin per-webhook rate limits by path.
+// F.11: 300 req/min per IP cap on the Pub/Sub push endpoint (Google Pub/Sub
+// pushes come from a shared IP pool; 300/min is well above real traffic for a
+// single-user deployment yet cheap enough to shed accidental floods before
+// the JWT verify runs). The controller is safe to leave un-cookied because
+// handlePubSubPush verifies the Google JWT before touching state (see
+// gmail.service + gmail.jwt-verify).
 import {
   BadRequestException,
   Body,
@@ -25,6 +28,7 @@ import {
   Req,
   Res,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import { SessionService } from '../auth/session.service';
 import { GmailService, type PubSubEnvelope } from './gmail.service';
@@ -81,6 +85,10 @@ export class GmailController {
   // reason).
   @Post('webhooks/gmail/push')
   @HttpCode(204)
+  // F.11: cap floods before JWT verify runs. Real Pub/Sub push traffic for a
+  // single-user deployment sits well under 60/min; 300/min gives 5x headroom
+  // for burst delivery on watch renewal + still sheds obvious floods.
+  @Throttle({ default: { limit: 300, ttl: 60_000 } })
   async push(
     @Headers('authorization') authorization: string | undefined,
     @Body() envelope: PubSubEnvelope,
