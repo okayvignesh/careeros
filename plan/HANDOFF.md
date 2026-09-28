@@ -143,7 +143,7 @@ Wave-C remediation: `Cgamma-next16-{a,b}` `68bc18e`, `68b77c3` (Next 16 async-AP
 | D.4 Electron scaffold + tray + pairing window + keytar + wss-client + task-runner | **not started** | — |
 | D.5 linkedin-selectors + linkedin-parse + linkedin-discover Playwright script + probe + README | shipped | `7537f04`, `09726fa`, `b964eee`, `13ab751` |
 | D.6 packaging (electron-builder + electron-updater) | **not started** | — |
-| D.7 auth JWT scope + refresh rotation + pairing rate limit | **partially in D.2** | — |
+| D.7 auth JWT scope + refresh rotation + pairing rate limit + version reporting | shipped via D.2 (verified 2026-09-28) | agent.controller.ts + agent.service.ts + agent.gateway.ts + tests |
 | D.8 ops (proxy config, screenshot cleanup, log rotation) | **not started** | — |
 
 ### Wave E — Daily assistant (partial: 3 of 9 shipped)
@@ -210,7 +210,6 @@ Each of these can spawn a fresh implementer immediately. No apps/web collision.
 | C-P2.4 build-code sandbox consumer wire | see TODO in packages/sandbox from `751307e` | C-P2.1 pool (shipped) |
 | C-P2.5 verbal + mock-interview multi-turn | plan/phase-2:94-105 | whisper.cpp service in compose |
 | D.6 packaging (electron-builder + updater) | plan/phase-3.5:65-68 | D.4 Electron scaffold |
-| D.7 JWT scope refinement + rotation tests | plan/phase-3.5:71-74 | D.2 endpoints (shipped) |
 | D.8 ops (proxy + screenshot cleanup + log rotation) | plan/phase-3.5:116-118 | D.4 Electron scaffold |
 | E.3 daily-brief composer + tz-aware scheduler | plan/phase-5:41-43,91-95 | E.2 Slack + P1 dashboard data (both shipped) |
 | E.5 email classifier | plan/phase-5:65-68 | E.4 Gmail (shipped) |

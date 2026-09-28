@@ -125,7 +125,7 @@ Last refreshed: 2026-09-28. Baseline commit for the wave: `b519769`. HEAD: `c921
 - D.3 downloads page + Settings→Devices (web-blocked).
 - D.4 Electron scaffold + tray + pairing window + keytar + wss-client + task-runner.
 - D.6 packaging (electron-builder + updater).
-- D.7 JWT scope refinement + rotation tests.
+- ~~D.7 JWT scope refinement + rotation tests.~~ SHIPPED via D.2 (verified 2026-09-28); all 35 agent tests green.
 - D.8 proxy config + screenshot cleanup + log rotation.
 
 ### P4 (the hunt)

@@ -176,7 +176,7 @@ Workstreams:
 4. NOT STARTED — Electron scaffold: main/renderer, tray, pairing window, `keytar`, `wss-client`, `task-runner` (53–62).
 5. ✅ SHIPPED `7537f04` + `09726fa` + `b964eee` + `13ab751` — `scripts/linkedin-discover.ts` first script + fixture-based tests + selector-health probe (59,87–91).
 6. NOT STARTED — Packaging: `electron-builder` (dmg/nsis/AppImage) + tag CI + `electron-updater` (65–68).
-7. PARTIALLY SHIPPED via D.2 — Auth: JWT scope `agent:*`, refresh rotation, pairing rate limit 5/hr/IP, agent version reporting (71–74). (Explicit 5/hr limit + version reporting deferred.)
+7. ✅ SHIPPED via D.2 (verified 2026-09-28) — Auth: JWT scope `agent:*` (agent.service.ts:21,214), refresh rotation (agent.service.ts:290-296 replaces old row in same tx), pairing rate limit 5/hr/IP on `pair/complete` (agent.controller.ts:80) + 3/min on `pair/start` (agent.controller.ts:49), agent version reporting on WSS connect (agent.gateway.ts:52-58) + on `pair/complete` (agent.service.ts:117). All 35 agent tests green.
 8. NOT STARTED — Ops: corporate-proxy config, screenshot cleanup 30d, log rotation 14d (116–118).
 
 ### Wave E — P5 daily assistant (new phase)
