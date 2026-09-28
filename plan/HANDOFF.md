@@ -174,7 +174,7 @@ Wave-C remediation: `Cgamma-next16-{a,b}` `68bc18e`, `68b77c3` (Next 16 async-AP
 | F.8 data portability (export + delete + parity) | **not started** | — |
 | F.9 Advanced Usage & Costs dashboard | **not started** | — |
 | F.10 screens 45/46/47/48/57/59/60/63/64 | **not started** | — |
-| F.11 requireAdmin guard + webhook rate limits + scope drop-unused | **partially via C-P3.8** | `24f436b` |
+| F.11 requireAdmin guard + webhook rate limits + scope drop-unused | **partial: C-P3.8 admin guard + F.11a Gmail push 300/min** | `24f436b`, `bfb8271` |
 
 ### Setup flow audit remediation
 

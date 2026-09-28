@@ -213,7 +213,7 @@ Workstreams:
 8. NOT STARTED — Data portability: `POST /me/export` + `POST /me/delete` + row-count parity tests (85–90,157–158).
 9. NOT STARTED — Advanced Usage & Costs dashboard: cost projection, cache-hit, latency histograms, error-rate, model-compare, eval-pass, CSV/JSON export, alert config, anomaly, thumbs-down feedback loop (107–118).
 10. NOT STARTED (web-owned) — Screens 45/46/47/48/57/59/60/63/64 (121–129).
-11. PARTIALLY SHIPPED via C-P3.8 `24f436b` — `requireAdmin` guard + rate-limit on every public webhook + per-integration OAuth scope drop-unused (64–67). (Guard shipped; webhook rate-limit + scope drop-unused deferred.)
+11. PARTIALLY SHIPPED — `requireAdmin` guard via C-P3.8 `24f436b`; F.11a `bfb8271` shipped Gmail Pub/Sub push webhook 300/min per-IP cap. Slack webhook rate-limits (events/interactive/commands/oauth) + per-integration OAuth scope drop-unused audit deferred until parallel session releases the slack module.
 
 ### Wave G — Product completeness gaps (58 items grouped)
 
