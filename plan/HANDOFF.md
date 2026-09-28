@@ -158,7 +158,7 @@ Wave-C remediation: `Cgamma-next16-{a,b}` `68bc18e`, `68b77c3` (Next 16 async-AP
 | E.6 email-parsers package (linkedin/indeed/naukri) + fixtures + evals + ingest service + wrapUntrusted + consumer | shipped | `e59ef71`, `7f23899`, `687c73e`, `c9218b6` |
 | E.7 email→application fuzzy match + inbox triage | **not started** | — |
 | E.8 injection defense on emails | **partially, via E.6e wrapUntrusted wire** | `c9218b6` |
-| E.9 packages/messaging Channel interface | **not started** | — |
+| E.9 packages/messaging Channel interface + Slack impl (injected) + Web + stubs + registry + prefs | shipped | `cbd6dcd` |
 
 ### Wave F — Controlled execution (partial: 2 of 11 shipped)
 
@@ -214,7 +214,6 @@ Each of these can spawn a fresh implementer immediately. No apps/web collision.
 | E.3 daily-brief composer + tz-aware scheduler | plan/phase-5:41-43,91-95 | E.2 Slack + P1 dashboard data (both shipped) |
 | E.5 email classifier | plan/phase-5:65-68 | E.4 Gmail (shipped) |
 | E.7 email→application fuzzy match + inbox triage | plan/phase-5:83-87,108-115 | E.5 classifier |
-| E.9 packages/messaging Channel interface | plan/phase-5:99-103 | none |
 | F.2 ATS submit adapters | plan/phase-6:26-32 | C-P3.1 adapters (shipped) |
 | F.3 agent form-fill | plan/phase-6:35-43 | D.4 Electron |
 | F.4 interview prep + talk-track | plan/phase-6:47-52 | C-P4.4 dossier (shipped) |

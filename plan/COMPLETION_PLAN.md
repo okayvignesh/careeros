@@ -194,7 +194,7 @@ Workstreams:
 6. ✅ SHIPPED `e59ef71` + `7f23899` + `687c73e` + `c9218b6` — Email parsers `packages/email-parsers/{linkedin,indeed,naukri}.ts` + sender allowlist + golden evals 10+ per platform (72–79,138). Also folds in email-ingest service + queue consumer.
 7. NOT STARTED — Email→application fuzzy match with confidence bands + `email_application_links` + inbox-triage screen 50 (83–87,108–115).
 8. PARTIALLY SHIPPED via E.6e `c9218b6` — Injection defense: `wrapUntrusted("email")` on every body + `injection-scan` on every incoming email + `SUSPECTED_INJECTION` triage flag (155–162).
-9. NOT STARTED — `packages/messaging/Channel` interface + Slack + web + stubs for WhatsApp/Discord (99–103); per-event preferences (104).
+9. ✅ SHIPPED `cbd6dcd` — `packages/messaging` Channel interface + WebChannel (writer injected) + SlackChannel (postMessage injected) + WhatsApp/Discord stubs + ChannelRegistry.sendAll + channelsFor per-event preferences (99–103, 104). Actual Slack HTTP wire lives in apps/api when the parallel session releases the slack module.
 
 ### Wave F — P6 controlled execution (new phase)
 

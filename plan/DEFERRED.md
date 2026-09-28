@@ -140,7 +140,7 @@ Last refreshed: 2026-09-28. Baseline commit for the wave: `b519769`. HEAD: `c921
 - E.3 daily-brief composer + tz-aware scheduler.
 - E.5 email classifier + eval sets per class.
 - E.7 email→application fuzzy match + inbox triage screen 50.
-- E.9 packages/messaging Channel interface + Web channel + stubs for WhatsApp/Discord.
+- ~~E.9 packages/messaging Channel interface + Web channel + stubs for WhatsApp/Discord.~~ SHIPPED `cbd6dcd` 2026-09-28. Slack HTTP wire deferred until parallel session releases slack module.
 
 ### P6 (controlled execution)
 - F.2 ATS submit adapters (Ashby, Greenhouse).
