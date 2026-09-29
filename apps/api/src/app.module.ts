@@ -44,6 +44,7 @@ import { ApprovalsModule } from './modules/approvals/approvals.module';
 import { GmailModule } from './modules/gmail/gmail.module';
 import { EmailIngestModule } from './modules/email-ingest/email-ingest.module';
 import { SlackModule } from './modules/slack/slack.module';
+import { MeModule } from './modules/me/me.module';
 
 const loggerParams: Params = {
   pinoHttp: {
@@ -108,6 +109,7 @@ const loggerParams: Params = {
     GmailModule,
     EmailIngestModule,
     SlackModule,
+    MeModule,
     HealthModule,
     SetupModule,
   ],

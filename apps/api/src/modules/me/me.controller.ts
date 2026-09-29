@@ -1,0 +1,125 @@
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  ForbiddenException,
+  HttpCode,
+  Post,
+  Req,
+} from '@nestjs/common';
+import type { Request } from 'express';
+import { PrismaService } from '../../prisma/prisma.service';
+import { AuthService } from '../auth/auth.service';
+import { SessionService } from '../auth/session.service';
+import { MeService } from './me.service';
+
+/**
+ * F.8 (Wave F / P6): data-portability endpoints.
+ *
+ *   POST /me/export  auth + fresh re-auth (< 5 min)
+ *                    Returns the JSON export payload in the response body.
+ *                    ponytail: MVP is inline; MinIO upload + age encryption
+ *                    upgrade path noted in me.service.ts.
+ *
+ *   POST /me/delete  auth + fresh re-auth + email confirmation
+ *                    Body: { confirmEmail: "<user.email>" }
+ *                    Wipes the User row (cascade removes user-owned rows;
+ *                    SetNull unlinks audit-adjacent rows per F.6).
+ *                    Returns 204.
+ *
+ * Fresh re-auth pattern mirrors recovery.controller.ts + agent.controller.ts;
+ * TODO(C-P0.3): swap for shared hasFreshReauth() when it lands.
+ */
+const FRESH_REAUTH_MAX_AGE_MS = 5 * 60 * 1000;
+
+@Controller('me')
+export class MeController {
+  constructor(
+    private readonly me: MeService,
+    private readonly session: SessionService,
+    private readonly auth: AuthService,
+    private readonly prisma: PrismaService,
+  ) {}
+
+  @Post('export')
+  @HttpCode(200)
+  async exportSelf(@Req() req: Request) {
+    const sealed = this.session.read(req);
+    if (!sealed) throw new ForbiddenException('Not signed in');
+    if (Date.now() - sealed.createdAt > FRESH_REAUTH_MAX_AGE_MS) {
+      throw new ForbiddenException('Fresh re-authentication required');
+    }
+    const payload = await this.me.exportForUser(sealed.userId);
+    await audit(this.prisma, sealed.userId, req, 'user.data.exported', {
+      tables: payload.manifest.tables.length,
+      totalRows: payload.manifest.tables.reduce((acc, t) => acc + t.rowCount, 0),
+      schemaVersion: payload.manifest.schemaVersion,
+    });
+    return payload;
+  }
+
+  @Post('delete')
+  @HttpCode(204)
+  async deleteSelf(
+    @Req() req: Request,
+    @Body() body: { confirmEmail?: string },
+  ) {
+    const sealed = this.session.read(req);
+    if (!sealed) throw new ForbiddenException('Not signed in');
+    if (Date.now() - sealed.createdAt > FRESH_REAUTH_MAX_AGE_MS) {
+      throw new ForbiddenException('Fresh re-authentication required');
+    }
+    if (!body?.confirmEmail || typeof body.confirmEmail !== 'string') {
+      throw new BadRequestException('confirmEmail required');
+    }
+    // Compare against the actual email on file (case + NFC normalized both
+    // sides, matches auth.service.normalizeEmail).
+    const submitted = body.confirmEmail.normalize('NFC').toLowerCase();
+    const user = await this.prisma.user.findUnique({
+      where: { id: sealed.userId },
+      select: { email: true },
+    });
+    if (!user || user.email.normalize('NFC').toLowerCase() !== submitted) {
+      throw new ForbiddenException('confirmEmail does not match');
+    }
+    const { rowCounts } = await this.me.deleteUser(sealed.userId);
+    // Best-effort: sessions/cookies for this user were cascade-deleted along
+    // with everything else, so subsequent requests using the sealed cookie
+    // will fail at SessionService.requireUserId (row lookup returns null).
+    await audit(this.prisma, null, req, 'user.data.deleted', {
+      userId: sealed.userId,
+      rowCounts,
+    });
+    // Explicit `void` so nest's HttpCode 204 has no body per HTTP spec.
+    void this.auth; // keep AuthService in the injected list for future
+  }
+}
+
+function requestIp(req: Request): string {
+  const fwd = req.headers['x-forwarded-for'];
+  if (typeof fwd === 'string' && fwd.length > 0) return fwd.split(',')[0].trim();
+  return req.ip ?? req.socket?.remoteAddress ?? 'unknown';
+}
+
+async function audit(
+  prisma: PrismaService,
+  userId: string | null,
+  req: Request,
+  action: string,
+  payload: Record<string, unknown> | null,
+): Promise<void> {
+  await prisma.auditEvent
+    .create({
+      data: {
+        userId,
+        actor: userId ? 'user' : 'system',
+        action,
+        resourceType: 'user',
+        resourceId: userId,
+        payload: (payload ?? undefined) as never,
+        ip: requestIp(req),
+        userAgent: String(req.headers['user-agent'] ?? '').slice(0, 512) || null,
+      },
+    })
+    .catch(() => undefined);
+}
