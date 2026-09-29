@@ -139,7 +139,7 @@ Last refreshed: 2026-09-28. Baseline commit for the wave: `b519769`. HEAD: `c921
 - E.1 Slack app manifest + install docs (E.2d shipped partial docs).
 - ~~E.3 daily-brief composer + tz-aware scheduler.~~ SHIPPED `33864cd` 2026-09-29. Follow-ups (E.3b): wire ChannelRegistry from @careeros/messaging (needs slack module release), `/brief --snooze N` slash command, DAILY_BRIEF_DISABLE=0 in prod compose, Testcontainers integration test (seed prefs → tick scheduler → assert audit row + reschedule).
 - ~~E.5 email classifier + eval sets per class.~~ SHIPPED `299fabd` 2026-09-29 with 27 scaffold fixtures. Follow-ups: expand fixtures to 30+ per class (bulk authoring, no wiring work); wire classifier into email-ingest.service.ts consumer (needs ProviderConfig plumbing; lands with E.7 when the class needs to be persisted).
-- E.7 email→application fuzzy match + inbox triage screen 50.
+- ~~E.7 email->application fuzzy match + inbox triage.~~ SHIPPED `4fc6b40` 2026-09-29 (backend + Prisma models + endpoints). Screen 50 inbox-triage UI is web-blocked. Wire InboxService.ingest into email-ingest.service.ts deferred until E.5 classifier output carries company + role parsed fields.
 - ~~E.9 packages/messaging Channel interface + Web channel + stubs for WhatsApp/Discord.~~ SHIPPED `cbd6dcd` 2026-09-28. Slack HTTP wire deferred until parallel session releases slack module.
 
 ### P6 (controlled execution)
