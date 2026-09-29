@@ -1,0 +1,66 @@
+Career OS incorporates the following open-source components. This file
+lists direct dependencies + their licenses; transitive licenses are
+inspected during release via `pnpm licenses list --prod` and the
+generated SBOM (see `docs/verify.md`).
+
+Placeholder pending v1.0 release: this file will be regenerated from
+the shipped lockfile at release-cut time. Below is the current
+top-level attribution.
+
+## Direct dependencies (representative)
+
+### Runtime
+
+- @nestjs/*                    MIT
+- next                         MIT
+- react, react-dom             MIT
+- @prisma/client, prisma       Apache-2.0
+- ioredis                      MIT
+- bullmq                       MIT
+- pino, nestjs-pino            MIT
+- @simplewebauthn/*            MIT
+- googleapis                   Apache-2.0
+- @slack/*                     MIT
+- @monaco-editor/react         MIT
+- @react-pdf/renderer          MIT
+- socket.io                    MIT
+- pdfjs-dist                   Apache-2.0
+- multer                       MIT
+- helmet                       MIT
+- csrf-csrf                    MIT
+- zod                          MIT
+- p-limit                      MIT
+- iron-session                 MIT
+
+### Build + test
+
+- typescript                   Apache-2.0
+- vitest                       MIT
+- playwright                   Apache-2.0
+- testcontainers               MIT
+- msw                          MIT
+- fast-check                   MIT
+- turbo                        MPL-2.0
+- prettier                     MIT
+- eslint                       MIT
+
+### Docker + infra
+
+- postgres:16                  PostgreSQL License
+- redis:7                      RSAL / SSPL (see backup notes)
+- qdrant                       Apache-2.0
+- bitnamilegacy/minio          Apache-2.0
+- squid                        GPL-2.0-or-later
+
+## License notice for AGPL-affected work
+
+If Career OS is redistributed under a copyleft license (AGPL-3.0 is
+the working assumption per `plan/COMPLETION_PLAN.md` §6 open decision
+2), operators offering it as a network service must publish source
+modifications. Personal-use self-hosting has no such obligation.
+
+## Third-party model providers
+
+Model outputs from DeepSeek, OpenAI, Anthropic, OpenRouter, and local
+providers (via Ollama) are the user's own; Career OS does not claim
+ownership of generated content and does not license it.
