@@ -171,7 +171,7 @@ Wave-C remediation: `Cgamma-next16-{a,b}` `68bc18e`, `68b77c3` (Next 16 async-AP
 | F.5 outreach composer + templates + timing + Gmail drafts | **not started** | — |
 | F.6 audit_log append-only DDL + retention worker + test + docs | shipped | `411556e`, `d99d0a4`, `b319dee`, `eb50acd` |
 | F.7 backup + restore CI + off-site + RPO/RTO | **partially via C-P0.5b + C-P0.8** | — |
-| F.8 data portability (export + delete + parity) | **not started** | — |
+| F.8 data portability (export + delete + parity + USER_TABLES SoT) | shipped (unit tests; MinIO + age + integration deferred) | `5a800b0` |
 | F.9 Advanced Usage & Costs dashboard | **not started** | — |
 | F.10 screens 45/46/47/48/57/59/60/63/64 | **not started** | — |
 | F.11 requireAdmin guard + webhook rate limits + scope drop-unused | **partial: C-P3.8 admin guard + F.11a Gmail push 300/min** | `24f436b`, `bfb8271` |
@@ -218,7 +218,6 @@ Each of these can spawn a fresh implementer immediately. No apps/web collision.
 | F.3 agent form-fill | plan/phase-6:35-43 | D.4 Electron |
 | F.4 interview prep + talk-track | plan/phase-6:47-52 | C-P4.4 dossier (shipped) |
 | F.5 outreach composer | plan/phase-6:55-61 | C-P4.7 fact-check gate (shipped) |
-| F.8 data portability | plan/phase-6:85-90 | none |
 | F.9 Advanced Usage & Costs dashboard | plan/phase-6:107-118 | C-P4.8 metrics (shipped) |
 | F.11 rate-limit every public webhook + scope drop-unused | plan/phase-6:64-67 | C-P3.8 admin guard (shipped) |
 
