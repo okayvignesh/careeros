@@ -79,6 +79,11 @@ export {
   type PromptExample,
 } from './prompts';
 export {
+  InterviewPrepPlanSchema,
+  type InterviewPrepPlan,
+} from './prompts/interview-prep-planner';
+export { TalkTrackSchema, type TalkTrack } from './prompts/talk-track-generator';
+export {
   SkillExtractEval,
   KnowledgeGraderEval,
   QuestionGeneratorEval,

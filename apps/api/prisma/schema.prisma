@@ -53,8 +53,32 @@ model User {
   dailyBriefPreference DailyBriefPreference?
   inboxItems       InboxItem[]
   emailApplicationLinks EmailApplicationLink[]
+  interviewPreps   InterviewPrep[]
 
   @@map("users")
+}
+
+/// F.4 (Wave F / P6): per-application interview prep + talk-tracks.
+/// One row per (user, application). `plan` is JSONB:
+///   { topics: Array<{ id, title, source, evidenceFactIds: string[],
+///     suggestedDurationSec: number }> }
+/// `talkTracks` is JSONB keyed by topic id:
+///   { <topicId>: { draft, factRefs: string[], generatedAt: ISO } }
+model InterviewPrep {
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  applicationId  String   @map("application_id") @db.Uuid
+  plan           Json
+  talkTracks     Json     @default("{}") @map("talk_tracks")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, applicationId])
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("interview_prep")
 }
 
 /// E.7 (Wave E / P5): inbox triage row per inbound email.
@@ -884,6 +908,7 @@ model Application {
   events ApplicationEvent[]
   emailApplicationLinks EmailApplicationLink[]
   inboxItems InboxItem[]
+  interviewPreps InterviewPrep[]
 
   @@unique([userId, jobId])
   @@index([userId, state])

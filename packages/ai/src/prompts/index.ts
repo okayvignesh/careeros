@@ -18,6 +18,8 @@ import './tailored-resume-writer';
 import './resume-bullet-fact-check';
 import './cover-letter-writer';
 import './email-classifier';
+import './interview-prep-planner';
+import './talk-track-generator';
 
 export { allPrompts, getPrompt, promptHash, renderPrompt } from './registry';
 export type { PromptDef, RenderedPrompt, PromptExample } from './types';
