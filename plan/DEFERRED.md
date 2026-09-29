@@ -149,7 +149,7 @@ Last refreshed: 2026-09-28. Baseline commit for the wave: `b519769`. HEAD: `c921
 - F.5 outreach composer + templates + timing + Gmail drafts.
 - F.7 backup + restore CI + off-site + RPO/RTO (partial via C-P0.5b + C-P0.8).
 - ~~F.8 data portability (`/me/export` + `/me/delete` + parity).~~ SHIPPED `5a800b0` 2026-09-29. Follow-ups: MinIO upload target for export payload, `age` encryption pass, testcontainers integration test seed → export → delete → assertParity round-trip.
-- F.9 Advanced Usage & Costs dashboard.
+- ~~F.9 Advanced Usage & Costs dashboard.~~ SHIPPED `d996216` 2026-09-29 (backend). Follow-ups: model comparison view (needs multi-provider active), eval pass-rate chart (needs nightly-evals summary table in DB), alert config webhook UI (F.10), thumbs-down feedback loop (artifact UI), per-user retention override (needs UI), cache-hit rate per prompt (needs promptId column on llm_calls).
 - F.10 screens 45/46/47/48/57/59/60/63/64 (web-blocked).
 - F.11 rate-limit every public webhook + scope drop-unused.
 
