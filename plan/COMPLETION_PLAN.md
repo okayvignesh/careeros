@@ -213,7 +213,7 @@ Workstreams:
 8. ✅ SHIPPED `5a800b0` — Data portability: `POST /me/export` (JSON payload + manifest with per-table SHA-256), `POST /me/delete` (confirmEmail + fresh re-auth + cascade), `MeService.assertDeletedForUser` parity check, USER_TABLES single source of truth (36 tables), 7 unit tests. MinIO upload + age encryption + integration test deferred (85–90,157–158).
 9. NOT STARTED — Advanced Usage & Costs dashboard: cost projection, cache-hit, latency histograms, error-rate, model-compare, eval-pass, CSV/JSON export, alert config, anomaly, thumbs-down feedback loop (107–118).
 10. NOT STARTED (web-owned) — Screens 45/46/47/48/57/59/60/63/64 (121–129).
-11. PARTIALLY SHIPPED — `requireAdmin` guard via C-P3.8 `24f436b`; F.11a `bfb8271` shipped Gmail Pub/Sub push webhook 300/min per-IP cap. Slack webhook rate-limits (events/interactive/commands/oauth) + per-integration OAuth scope drop-unused audit deferred until parallel session releases the slack module.
+11. PARTIALLY SHIPPED — `requireAdmin` guard via C-P3.8 `24f436b`; F.11a `bfb8271` Gmail Pub/Sub push webhook 300/min per-IP cap; F.11c `a4d6877` OAuth scope audit (Slack `EXPECTED_SLACK_SCOPES` + `auditSlackScopes` + install-time warn on missing/excess + docs/oauth-scope-audit.md single source of truth). Slack webhook rate-limits (events/interactive/commands/oauth) still deferred until parallel session releases the slack module.
 
 ### Wave G — Product completeness gaps (58 items grouped)
 
