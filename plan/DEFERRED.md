@@ -19,6 +19,10 @@ Last refreshed: 2026-09-28. Baseline commit for the wave: `b519769`. HEAD: `c921
 
 ---
 
+## Docs + legal
+- Shipped 2026-09-29: `CHANGELOG.md`, `CONTRIBUTING.md`, `SECURITY.md`, `NOTICES`, `docs/install.md`, `docs/threat-model-operator.md`, `docs/verify.md` (commit `2942e26`).
+- Still pending: `LICENSE` file (§6 open decision 2), `docs/runbook.md`, `docs/incident-response.md`, `docs/user-manual.md`, `docs/gmail-setup.md`, `postmortem-template.md`.
+
 ## Cross-cutting: security.md unticked, not yet blocked
 
 - HTTPS reachable in prod (item 1) — cannot enforce until VPS + domain + TLS choice landed.
