@@ -146,7 +146,7 @@ Last refreshed: 2026-09-28. Baseline commit for the wave: `b519769`. HEAD: `c921
 - F.2 ATS submit adapters (Ashby, Greenhouse).
 - F.3 agent form-fill (allowlist YAML + scripts + probe).
 - ~~F.4 interview prep + talk-track + fact-check.~~ SHIPPED `c47c5a8` 2026-09-29. Deferred: reuse P2 verbal-defense runner (needs C-P2.5), mock-interview schedule sub-plan, per-prompt evals (packages/ai/src/evals/interview-prep-planner + talk-track-generator).
-- F.5 outreach composer + templates + timing + Gmail drafts.
+- ~~F.5 outreach composer + templates + timing + Gmail drafts.~~ SHIPPED `971ddd3` 2026-09-29. Deferred: actual Gmail draft creation (needs `gmail.compose` scope expansion + Google verification), reply tracking (needs E.5 wire), per-prompt evals for outreach-composer, approval-queue integration with F.1.
 - F.7 backup + restore CI + off-site + RPO/RTO (partial via C-P0.5b + C-P0.8).
 - ~~F.8 data portability (`/me/export` + `/me/delete` + parity).~~ SHIPPED `5a800b0` 2026-09-29. Follow-ups: MinIO upload target for export payload, `age` encryption pass, testcontainers integration test seed → export → delete → assertParity round-trip.
 - ~~F.9 Advanced Usage & Costs dashboard.~~ SHIPPED `d996216` 2026-09-29 (backend). Follow-ups: model comparison view (needs multi-provider active), eval pass-rate chart (needs nightly-evals summary table in DB), alert config webhook UI (F.10), thumbs-down feedback loop (artifact UI), per-user retention override (needs UI), cache-hit rate per prompt (needs promptId column on llm_calls).

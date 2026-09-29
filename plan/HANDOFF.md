@@ -168,7 +168,7 @@ Wave-C remediation: `Cgamma-next16-{a,b}` `68bc18e`, `68b77c3` (Next 16 async-AP
 | F.2 ATS submit adapters (Ashby, Greenhouse, idempotency, backoff) | **not started** | — |
 | F.3 agent form-fill (allowlist YAML + scripts + probe) | **not started** | — |
 | F.4 interview prep + talk-track (planner + generator prompts + fact-check gate) | shipped (verbal-defense reuse deferred) | `c47c5a8` |
-| F.5 outreach composer + templates + timing + Gmail drafts | **not started** | — |
+| F.5 outreach composer (5 templates x 4 variants + prompt + fact-check + business-hour timing) | shipped (Gmail draft + reply tracking deferred) | `971ddd3` |
 | F.6 audit_log append-only DDL + retention worker + test + docs | shipped | `411556e`, `d99d0a4`, `b319dee`, `eb50acd` |
 | F.7 backup + restore CI + off-site + RPO/RTO | **partially via C-P0.5b + C-P0.8** | — |
 | F.8 data portability (export + delete + parity + USER_TABLES SoT) | shipped (unit tests; MinIO + age + integration deferred) | `5a800b0` |
@@ -213,7 +213,6 @@ Each of these can spawn a fresh implementer immediately. No apps/web collision.
 | D.8 ops (proxy + screenshot cleanup + log rotation) | plan/phase-3.5:116-118 | D.4 Electron scaffold |
 | F.2 ATS submit adapters | plan/phase-6:26-32 | C-P3.1 adapters (shipped) |
 | F.3 agent form-fill | plan/phase-6:35-43 | D.4 Electron |
-| F.5 outreach composer | plan/phase-6:55-61 | C-P4.7 fact-check gate (shipped) |
 | F.11b rate-limit remaining Slack webhooks (events/interactive/commands/oauth) | plan/phase-6:64-67 | dirty slack module in parallel session |
 
 ### 3b. Web-blocked streams (waiting on parallel session)
