@@ -50,8 +50,31 @@ model User {
   gmailWatch       GmailWatch?
   gmailProcessed   GmailProcessedMessage[]
   approvalItems    ApprovalItem[]
+  dailyBriefPreference DailyBriefPreference?
 
   @@map("users")
+}
+
+/// E.3 (Wave E / P5): daily-brief preferences. One row per user (PK = userId).
+/// Absence = not yet configured = the scheduler treats as opted-out.
+/// `sendHourLocal` (0-23) is in the user's IANA timezone; the scheduler
+/// converts to UTC per enqueue so DST is respected. `channels` is a subset
+/// of the ChannelKind union in @careeros/messaging.
+model DailyBriefPreference {
+  userId        String   @id @map("user_id") @db.Uuid
+  isEnabled     Boolean  @default(true) @map("is_enabled")
+  timezone      String   @default("UTC")
+  sendHourLocal Int      @default(8) @db.SmallInt @map("send_hour_local")
+  channels      String[] @default(["web"])
+  snoozedUntil  DateTime? @map("snoozed_until") @db.Timestamptz(6)
+  lastSentAt    DateTime? @map("last_sent_at") @db.Timestamptz(6)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([isEnabled])
+  @@map("daily_brief_preferences")
 }
 
 /// D.2 (P3.5 desktop companion): one row per paired desktop agent instance.

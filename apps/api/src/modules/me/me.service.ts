@@ -37,6 +37,7 @@ export const USER_TABLES: readonly UserTable[] = [
   { name: 'candidate_skill_states', delegate: 'candidateSkillState', deleteBehavior: 'cascade' },
   { name: 'career_goals', delegate: 'careerGoal', deleteBehavior: 'cascade' },
   { name: 'cover_letters', delegate: 'coverLetter', deleteBehavior: 'cascade' },
+  { name: 'daily_brief_preferences', delegate: 'dailyBriefPreference', deleteBehavior: 'cascade' },
   { name: 'evidence', delegate: 'evidence', deleteBehavior: 'cascade' },
   { name: 'fact_base', delegate: 'factBase', deleteBehavior: 'cascade' },
   { name: 'gmail_processed_messages', delegate: 'gmailProcessedMessage', deleteBehavior: 'cascade' },
