@@ -138,7 +138,7 @@ Last refreshed: 2026-09-28. Baseline commit for the wave: `b519769`. HEAD: `c921
 ### P5 (daily assistant)
 - E.1 Slack app manifest + install docs (E.2d shipped partial docs).
 - E.3 daily-brief composer + tz-aware scheduler.
-- E.5 email classifier + eval sets per class.
+- ~~E.5 email classifier + eval sets per class.~~ SHIPPED `299fabd` 2026-09-29 with 27 scaffold fixtures. Follow-ups: expand fixtures to 30+ per class (bulk authoring, no wiring work); wire classifier into email-ingest.service.ts consumer (needs ProviderConfig plumbing; lands with E.7 when the class needs to be persisted).
 - E.7 email→application fuzzy match + inbox triage screen 50.
 - ~~E.9 packages/messaging Channel interface + Web channel + stubs for WhatsApp/Discord.~~ SHIPPED `cbd6dcd` 2026-09-28. Slack HTTP wire deferred until parallel session releases slack module.
 

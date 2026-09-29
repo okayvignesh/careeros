@@ -154,7 +154,7 @@ Wave-C remediation: `Cgamma-next16-{a,b}` `68bc18e`, `68b77c3` (Next 16 async-AP
 | E.2 Slack Events + signing + dedupe + slash commands + Block Kit + OAuth + controller + manifest + docs | shipped | `8ac1e41`, `74713a4`, `ec15f9c`, `bd2c82b` |
 | E.3 daily-brief composer + tz-aware scheduler | **not started** | — |
 | E.4 Gmail Pub/Sub + history diff + watch renewal cron | shipped | `9b69468`, `a180dee`, `8066c9b`, `f45a39b` |
-| E.5 email classifier + eval sets | **not started** | — |
+| E.5 email classifier (heuristic + LLM prompt + orchestrator + 27 fixtures) | shipped (wire into email-ingest deferred to E.7) | `299fabd` |
 | E.6 email-parsers package (linkedin/indeed/naukri) + fixtures + evals + ingest service + wrapUntrusted + consumer | shipped | `e59ef71`, `7f23899`, `687c73e`, `c9218b6` |
 | E.7 email→application fuzzy match + inbox triage | **not started** | — |
 | E.8 injection defense on emails | **partially, via E.6e wrapUntrusted wire** | `c9218b6` |
@@ -212,7 +212,6 @@ Each of these can spawn a fresh implementer immediately. No apps/web collision.
 | D.6 packaging (electron-builder + updater) | plan/phase-3.5:65-68 | D.4 Electron scaffold |
 | D.8 ops (proxy + screenshot cleanup + log rotation) | plan/phase-3.5:116-118 | D.4 Electron scaffold |
 | E.3 daily-brief composer + tz-aware scheduler | plan/phase-5:41-43,91-95 | E.2 Slack + P1 dashboard data (both shipped) |
-| E.5 email classifier | plan/phase-5:65-68 | E.4 Gmail (shipped) |
 | E.7 email→application fuzzy match + inbox triage | plan/phase-5:83-87,108-115 | E.5 classifier |
 | F.2 ATS submit adapters | plan/phase-6:26-32 | C-P3.1 adapters (shipped) |
 | F.3 agent form-fill | plan/phase-6:35-43 | D.4 Electron |
