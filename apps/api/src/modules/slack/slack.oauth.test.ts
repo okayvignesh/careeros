@@ -2,7 +2,7 @@
 // stateful fake so we can assert the upsert path.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { decrypt, loadMasterKey } from '@careeros/secrets';
-import { SlackOAuthService } from './slack.oauth';
+import { EXPECTED_SLACK_SCOPES, SlackOAuthService, auditSlackScopes } from './slack.oauth';
 
 function fakePrisma() {
   const rows = new Map<string, { ciphertext: string; ownerType: string; ownerId: string | null; purpose: string }>();
@@ -93,5 +93,34 @@ describe('SlackOAuthService.completeInstall', () => {
   it('loadBotToken returns null when no install exists', async () => {
     const svc = new SlackOAuthService(fakePrisma() as never);
     expect(await svc.loadBotToken()).toBeNull();
+  });
+});
+
+// F.11c: OAuth scope audit.
+describe('auditSlackScopes', () => {
+  it('flags missing scopes when the install did not grant everything the code needs', () => {
+    const a = auditSlackScopes(['commands']);
+    expect(a.missing).toEqual(['chat:write']);
+    expect(a.excess).toEqual([]);
+  });
+
+  it('flags excess scopes when the install granted more than the code uses', () => {
+    const a = auditSlackScopes(['commands', 'chat:write', 'channels:read', 'files:write']);
+    expect(a.missing).toEqual([]);
+    expect(a.excess).toEqual(['channels:read', 'files:write']);
+    // MUTATION-SMOKE: swap the sort in auditSlackScopes for input order and
+    // this fails on the alphabetical assertion.
+  });
+
+  it('clean when scopes match exactly', () => {
+    const a = auditSlackScopes([...EXPECTED_SLACK_SCOPES]);
+    expect(a.missing).toEqual([]);
+    expect(a.excess).toEqual([]);
+  });
+
+  it('EXPECTED_SLACK_SCOPES pins the actual runtime need', () => {
+    expect(EXPECTED_SLACK_SCOPES).toEqual(['commands', 'chat:write']);
+    // Adding a slack API call that needs a new scope must bump this list
+    // AND update docs/oauth-scope-audit.md in the same commit.
   });
 });

@@ -16,6 +16,44 @@ const KEY = loadMasterKey();
 const PURPOSE = 'integration:slack:bot_token';
 const OAUTH_URL = 'https://slack.com/api/oauth.v2.access';
 
+/**
+ * F.11c: audit of Slack bot scopes the shipped code actually uses.
+ *   `commands`   - required to receive slash commands (E.2 shipped).
+ *   `chat:write` - required to post to any channel/DM via chat.postMessage
+ *                   (planned for E.3 daily-brief; the built-in SlackChannel
+ *                   in @careeros/messaging assumes this).
+ * Anything the Slack app manifest requests beyond this list is dead
+ * grant; the audit hook logs a warning at OAuth-completion time so the
+ * operator can trim the manifest before public release.
+ *
+ * See docs/oauth-scope-audit.md for the cross-integration table.
+ */
+export const EXPECTED_SLACK_SCOPES: readonly string[] = ['commands', 'chat:write'];
+
+export interface ScopeAudit {
+  readonly granted: readonly string[];
+  readonly expected: readonly string[];
+  readonly missing: readonly string[];
+  readonly excess: readonly string[];
+}
+
+/**
+ * Pure comparison; exposed for tests. `granted` order is preserved; both
+ * `missing` and `excess` are sorted for stable log lines + snapshots.
+ */
+export function auditSlackScopes(granted: readonly string[]): ScopeAudit {
+  const grantedSet = new Set(granted);
+  const expectedSet = new Set(EXPECTED_SLACK_SCOPES);
+  const missing = [...expectedSet].filter((s) => !grantedSet.has(s)).sort();
+  const excess = [...grantedSet].filter((s) => !expectedSet.has(s)).sort();
+  return {
+    granted,
+    expected: EXPECTED_SLACK_SCOPES,
+    missing,
+    excess,
+  };
+}
+
 export interface SlackOAuthResult {
   ok: true;
   teamId: string;
@@ -95,6 +133,19 @@ export class SlackOAuthService {
       update: { ciphertext },
     });
 
+    const scopes = (json.scope ?? '').split(',').filter(Boolean);
+    const audit = auditSlackScopes(scopes);
+    if (audit.missing.length > 0) {
+      this.logger.warn(
+        `slack install T=${json.team.id} missing scopes: ${audit.missing.join(',')} (features that need them will fail at runtime)`,
+      );
+    }
+    if (audit.excess.length > 0) {
+      this.logger.warn(
+        `slack install T=${json.team.id} granted unused scopes: ${audit.excess.join(',')} (trim from the app manifest for least-privilege; F.11c)`,
+      );
+    }
+
     this.logger.log(`slack workspace installed: ${json.team.id}`);
     return {
       ok: true,
@@ -102,7 +153,7 @@ export class SlackOAuthService {
       teamName: json.team.name ?? null,
       botUserId: json.bot_user_id ?? '',
       appId: json.app_id ?? '',
-      scopes: (json.scope ?? '').split(',').filter(Boolean),
+      scopes,
     };
   }
 
