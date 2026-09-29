@@ -48,6 +48,7 @@ import { MeModule } from './modules/me/me.module';
 import { DailyBriefModule } from './modules/daily-brief/daily-brief.module';
 import { InboxModule } from './modules/inbox/inbox.module';
 import { InterviewPrepModule } from './modules/interview-prep/interview-prep.module';
+import { OutreachModule } from './modules/outreach/outreach.module';
 
 const loggerParams: Params = {
   pinoHttp: {
@@ -116,6 +117,7 @@ const loggerParams: Params = {
     DailyBriefModule,
     InboxModule,
     InterviewPrepModule,
+    OutreachModule,
     HealthModule,
     SetupModule,
   ],

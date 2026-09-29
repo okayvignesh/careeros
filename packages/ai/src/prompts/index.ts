@@ -20,6 +20,7 @@ import './cover-letter-writer';
 import './email-classifier';
 import './interview-prep-planner';
 import './talk-track-generator';
+import './outreach-composer';
 
 export { allPrompts, getPrompt, promptHash, renderPrompt } from './registry';
 export type { PromptDef, RenderedPrompt, PromptExample } from './types';

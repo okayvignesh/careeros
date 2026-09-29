@@ -54,8 +54,40 @@ model User {
   inboxItems       InboxItem[]
   emailApplicationLinks EmailApplicationLink[]
   interviewPreps   InterviewPrep[]
+  outreachMessages OutreachMessage[]
 
   @@map("users")
+}
+
+/// F.5 (Wave F / P6): outreach message. One row per generated draft.
+/// Status transitions: draft -> approved -> sent (or discarded).
+/// Never batch-sent; each row is individually approvable per the spec.
+model OutreachMessage {
+  id              String   @id @default(uuid()) @db.Uuid
+  userId          String   @map("user_id") @db.Uuid
+  applicationId   String?  @map("application_id") @db.Uuid
+  templateId      String   @map("template_id") /// cold-reach | warm-referral | event-followup | alumni-connection | application-followup
+  industryVariant String   @default("default") @map("industry_variant") /// startup | enterprise | academia | default
+  recipientEmail  String   @map("recipient_email")
+  recipientName   String?  @map("recipient_name")
+  recipientRole   String?  @map("recipient_role")
+  subject         String
+  body            String
+  factRefs        String[] @default([]) @map("fact_refs")
+  status          String   @default("draft") /// draft | approved | sent | discarded
+  sendAt          DateTime? @map("send_at") @db.Timestamptz(6)
+  approvedAt      DateTime? @map("approved_at") @db.Timestamptz(6)
+  sentAt          DateTime? @map("sent_at") @db.Timestamptz(6)
+  gmailDraftId    String?  @map("gmail_draft_id")
+  replyMessageId  String?  @map("reply_message_id")
+  generatedAt     DateTime @default(now()) @map("generated_at") @db.Timestamptz(6)
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  application Application? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+
+  @@index([userId, status, generatedAt(sort: Desc)])
+  @@map("outreach_messages")
 }
 
 /// F.4 (Wave F / P6): per-application interview prep + talk-tracks.
@@ -909,6 +941,7 @@ model Application {
   emailApplicationLinks EmailApplicationLink[]
   inboxItems InboxItem[]
   interviewPreps InterviewPrep[]
+  outreachMessages OutreachMessage[]
 
   @@unique([userId, jobId])
   @@index([userId, state])

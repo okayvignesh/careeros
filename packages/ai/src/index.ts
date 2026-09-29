@@ -83,6 +83,7 @@ export {
   type InterviewPrepPlan,
 } from './prompts/interview-prep-planner';
 export { TalkTrackSchema, type TalkTrack } from './prompts/talk-track-generator';
+export { OutreachDraftSchema, type OutreachDraft } from './prompts/outreach-composer';
 export {
   SkillExtractEval,
   KnowledgeGraderEval,

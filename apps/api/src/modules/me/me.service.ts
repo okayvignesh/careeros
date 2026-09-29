@@ -44,6 +44,7 @@ export const USER_TABLES: readonly UserTable[] = [
   { name: 'gmail_processed_messages', delegate: 'gmailProcessedMessage', deleteBehavior: 'cascade' },
   { name: 'inbox_items', delegate: 'inboxItem', deleteBehavior: 'cascade' },
   { name: 'interview_prep', delegate: 'interviewPrep', deleteBehavior: 'cascade' },
+  { name: 'outreach_messages', delegate: 'outreachMessage', deleteBehavior: 'cascade' },
   { name: 'gmail_watch', delegate: 'gmailWatch', deleteBehavior: 'cascade' },
   { name: 'integrations', delegate: 'integration', deleteBehavior: 'cascade' },
   { name: 'llm_calls', delegate: 'llmCall', deleteBehavior: 'set_null' },
