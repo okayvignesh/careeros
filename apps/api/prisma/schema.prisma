@@ -51,8 +51,61 @@ model User {
   gmailProcessed   GmailProcessedMessage[]
   approvalItems    ApprovalItem[]
   dailyBriefPreference DailyBriefPreference?
+  inboxItems       InboxItem[]
+  emailApplicationLinks EmailApplicationLink[]
 
   @@map("users")
+}
+
+/// E.7 (Wave E / P5): inbox triage row per inbound email.
+/// `class` + `classConfidence` come from the E.5 classifier.
+/// `linkedApplicationId` is set when the fuzzy matcher hits >= 0.85 or
+/// the user manually links. `status`: new | linked | dismissed.
+/// Composite unique on (userId, emailId) so re-ingest is idempotent.
+model InboxItem {
+  id                  String   @id @default(uuid()) @db.Uuid
+  userId              String   @map("user_id") @db.Uuid
+  emailId             String   @map("email_id")
+  fromAddress         String   @map("from_address")
+  subject             String
+  snippet             String?
+  class               String
+  classConfidence     Float    @map("class_confidence") @db.Real
+  linkedApplicationId String?  @map("linked_application_id") @db.Uuid
+  status              String   @default("new") /// new | linked | dismissed
+  arrivedAt           DateTime @default(now()) @map("arrived_at") @db.Timestamptz(6)
+  reviewedAt          DateTime? @map("reviewed_at") @db.Timestamptz(6)
+
+  user               User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  linkedApplication  Application?  @relation(fields: [linkedApplicationId], references: [id], onDelete: SetNull)
+  links              EmailApplicationLink[]
+
+  @@unique([userId, emailId])
+  @@index([userId, status, arrivedAt(sort: Desc)])
+  @@map("inbox_items")
+}
+
+/// E.7 soft link between an InboxItem and an Application. `confidence`
+/// captured at link time; `by` = 'auto' when the matcher created it,
+/// 'user' when a manual override wired it. `unlinkedAt` on unlink so
+/// the audit trail survives.
+model EmailApplicationLink {
+  id            String   @id @default(uuid()) @db.Uuid
+  userId        String   @map("user_id") @db.Uuid
+  inboxItemId   String   @map("inbox_item_id") @db.Uuid
+  applicationId String   @map("application_id") @db.Uuid
+  confidence    Float    @db.Real
+  by            String   @default("auto")
+  linkedAt      DateTime @default(now()) @map("linked_at") @db.Timestamptz(6)
+  unlinkedAt    DateTime? @map("unlinked_at") @db.Timestamptz(6)
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  inboxItem   InboxItem   @relation(fields: [inboxItemId], references: [id], onDelete: Cascade)
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@unique([inboxItemId, applicationId])
+  @@index([userId, applicationId])
+  @@map("email_application_links")
 }
 
 /// E.3 (Wave E / P5): daily-brief preferences. One row per user (PK = userId).
@@ -829,6 +882,8 @@ model Application {
 
   user   User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   events ApplicationEvent[]
+  emailApplicationLinks EmailApplicationLink[]
+  inboxItems InboxItem[]
 
   @@unique([userId, jobId])
   @@index([userId, state])

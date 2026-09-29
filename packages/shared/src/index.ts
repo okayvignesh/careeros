@@ -13,5 +13,6 @@ export * from './match';
 export * from './applications';
 export * from './git-analysis';
 export * from './email-classifier';
+export * from './fuzzy-match';
 // './net' NOT re-exported here on purpose: it uses `node:dns`/`node:net` and
 // must not leak into client bundles. Consumers import from '@careeros/shared/net'.
