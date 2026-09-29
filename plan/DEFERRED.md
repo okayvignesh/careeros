@@ -145,7 +145,7 @@ Last refreshed: 2026-09-28. Baseline commit for the wave: `b519769`. HEAD: `c921
 ### P6 (controlled execution)
 - F.2 ATS submit adapters (Ashby, Greenhouse).
 - F.3 agent form-fill (allowlist YAML + scripts + probe).
-- F.4 interview prep + talk-track + fact-check.
+- ~~F.4 interview prep + talk-track + fact-check.~~ SHIPPED `c47c5a8` 2026-09-29. Deferred: reuse P2 verbal-defense runner (needs C-P2.5), mock-interview schedule sub-plan, per-prompt evals (packages/ai/src/evals/interview-prep-planner + talk-track-generator).
 - F.5 outreach composer + templates + timing + Gmail drafts.
 - F.7 backup + restore CI + off-site + RPO/RTO (partial via C-P0.5b + C-P0.8).
 - ~~F.8 data portability (`/me/export` + `/me/delete` + parity).~~ SHIPPED `5a800b0` 2026-09-29. Follow-ups: MinIO upload target for export payload, `age` encryption pass, testcontainers integration test seed → export → delete → assertParity round-trip.
