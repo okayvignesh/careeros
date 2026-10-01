@@ -20,6 +20,7 @@
     "@careeros/embeddings": "workspace:*",
     "@careeros/job-pipeline": "workspace:*",
     "@careeros/resume-render": "workspace:*",
+    "@careeros/sandbox": "workspace:*",
     "@careeros/secrets": "workspace:*",
     "@careeros/shared": "workspace:*",
     "@nest-lab/throttler-storage-redis": "^1.2.0",

@@ -301,6 +301,23 @@ export const DebuggingGradeSchema = z.object({
 });
 export type DebuggingGrade = z.infer<typeof DebuggingGradeSchema>;
 
+// LLM-generated build task. Candidate implements `starter` → test harness runs
+// `tests` against their implementation inside the sandbox. Harness contract:
+// every test prints exactly one of `PASS <name>` or `FAIL <name>` to stdout,
+// one line per test, no other markers. Grader parses PASS/FAIL counts for
+// score = passed / total. `description` + examples go in the prompt; `tests`
+// are the hidden answer key (never shown pre-grade).
+export const GeneratedBuildTaskSchema = z.object({
+  language: z.enum(['node', 'python', 'go', 'typescript']),
+  title: z.string().min(4).max(120),
+  description: z.string().min(20).max(2000),
+  starter: z.string().min(0).max(4000),
+  tests: z.string().min(20).max(4000),
+  timeoutMs: z.number().int().min(1000).max(30_000).default(10_000),
+  difficulty: z.enum(['easy', 'medium', 'hard']),
+});
+export type GeneratedBuildTask = z.infer<typeof GeneratedBuildTaskSchema>;
+
 // LLM-generated mock interview: 3 questions (2 technical + 1 behavioral).
 // Each carries its own keyPoints so the grader can score per-Q. Interview
 // runs single-turn — user submits all 3 answers at once.

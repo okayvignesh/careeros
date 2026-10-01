@@ -16,6 +16,7 @@ import {
   xpLevel,
   type CodeReviewGrade,
   type DebuggingGrade,
+  type GeneratedBuildTask,
   type GeneratedCodeReview,
   type GeneratedDebuggingTask,
   type GeneratedMockInterview,
@@ -28,6 +29,7 @@ import {
   type RubricGradeResponse,
 } from '@careeros/shared';
 import { DeepSeekProvider, renderPrompt, wrapUntrusted, type Sensitivity } from '@careeros/ai';
+import { runSandboxed, type LanguageId, type SandboxResult } from '@careeros/sandbox';
 import { decrypt, loadMasterKey } from '@careeros/secrets';
 import { PrismaService } from '../../prisma/prisma.service';
 import { syncSkillState } from '../../common/aggregate-skill';
@@ -35,6 +37,7 @@ import { UsageService } from '../usage/usage.service';
 import { UsageCache } from '../usage/usage.cache';
 import { SensitivityGateService } from '../../common/sensitivity-gate.service';
 import { makeLlmAuditor } from '../../common/llm-audit';
+import { renderBuildTaskPrompt } from './prompts/build-task-generator';
 
 const KEY = loadMasterKey();
 
@@ -110,6 +113,17 @@ export interface DebuggingTask {
   difficulty: string;
 }
 
+export interface BuildTask {
+  id: string;
+  title: string;
+  description: string;
+  language: LanguageId;
+  starter: string;
+  timeoutMs: number;
+  skillIds: string[];
+  difficulty: string;
+}
+
 export interface SystemDesignTask {
   id: string;
   scenario: string;
@@ -145,6 +159,13 @@ export interface AttemptResult {
 @Injectable()
 export class AssessmentsService {
   private readonly logger = new Logger(AssessmentsService.name);
+
+  // Sandbox entry seam. Tests overwrite this field with a stub so build-task
+  // grading can be exercised without Docker. ponytail: field, not constructor
+  // arg; constructor signature is referenced across every assessments test file
+  // and widening it is more churn than reaching in here.
+  protected runSandbox: (opts: Parameters<typeof runSandboxed>[0]) => Promise<SandboxResult> =
+    runSandboxed;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -1505,6 +1526,295 @@ export class AssessmentsService {
   }
 
   /**
+   * Pick a build task the user hasn't seen in the cooldown window. Reuses
+   * `question` with kind='build': `description` in `prompt`, hidden `tests`
+   * in `keyPoints[0]`, `{language, title, starter, timeoutMs}` JSON in
+   * `answerHint`. On empty pool with no LLM provider, falls back to the
+   * hand-seeded set (same shape as `KNOWLEDGE_SEED`).
+   */
+  async nextBuildTask(userId: string, skillId?: string): Promise<BuildTask> {
+    await this.ensureBuildSeed();
+    const cooldownStart = new Date(Date.now() - 14 * 86_400_000);
+    const recent = await this.prisma.attempt.findMany({
+      where: { userId, kind: 'build', createdAt: { gte: cooldownStart } },
+      select: { questionId: true },
+    });
+    const excludeIds = recent.map((r) => r.questionId).filter((id): id is string => !!id);
+    const where: { kind: string; flagged: boolean; id?: { notIn: string[] }; skillIds?: { has: string } } = {
+      kind: 'build',
+      flagged: false,
+    };
+    if (excludeIds.length > 0) where.id = { notIn: excludeIds };
+    if (skillId) where.skillIds = { has: skillId };
+    let eligible = await this.prisma.question.findMany({ where });
+    if (skillId && eligible.length < MIN_ELIGIBLE_POOL) {
+      if (eligible.length === 0) {
+        const gen = await this.generateBuildTask(userId, skillId).catch(() => null);
+        if (gen) {
+          const row = await this.prisma.question.findUnique({ where: { id: gen.id } });
+          if (row) eligible = [row];
+        }
+      } else {
+        void this.generateBuildTask(userId, skillId).catch(() => null);
+      }
+    }
+    const pool =
+      eligible.length > 0
+        ? eligible
+        : await this.prisma.question.findMany({ where: { kind: 'build', flagged: false } });
+    if (pool.length === 0) throw new NotFoundException('No build tasks available');
+    const pick = pool[Math.floor(Math.random() * pool.length)]!;
+    const meta = safeJson<{
+      language?: LanguageId;
+      title?: string;
+      starter?: string;
+      timeoutMs?: number;
+    }>(pick.answerHint ?? '{}') ?? {};
+    return {
+      id: pick.id,
+      title: meta.title ?? 'Build task',
+      description: pick.prompt,
+      language: meta.language ?? 'node',
+      starter: meta.starter ?? '',
+      timeoutMs: meta.timeoutMs ?? 10_000,
+      skillIds: pick.skillIds,
+      difficulty: pick.difficulty,
+    };
+  }
+
+  async generateBuildTask(
+    userId: string,
+    skillId: string,
+    difficulty: 'easy' | 'medium' | 'hard' = 'medium',
+  ): Promise<BuildTask | null> {
+    const skill = await this.prisma.skill.findUnique({ where: { id: skillId } });
+    if (!skill) return null;
+    try {
+      await this.usage.assertCallAllowed(userId);
+      const cfg = await this.prisma.providerConfig.findFirst({
+        where: { userId, isDefault: true },
+      });
+      if (!cfg) return null;
+      await this.sensitivity.assertAllowed(cfg.provider, 'public', userId);
+
+      const secret = await this.prisma.encryptedSecret.findUnique({
+        where: { id: cfg.apiKeySecretId },
+      });
+      if (!secret) return null;
+      const apiKey = decrypt(secret.ciphertext, KEY, `provider:${cfg.provider}:apiKey`);
+
+      if (cfg.provider !== 'deepseek') return null;
+      const provider = new DeepSeekProvider({
+        apiKey,
+        baseUrl: cfg.baseUrl ?? undefined,
+        chatModel: cfg.chatModel,
+        onCall: makeLlmAuditor(this.prisma, userId, this.logger as never, this.usageCache),
+      });
+
+      const rendered = renderBuildTaskPrompt({
+        skillId: skill.id,
+        skillName: skill.name,
+        difficulty,
+      });
+      const result = (await this.usage.runWithUserLimit(userId, () =>
+        provider.chatStructured({
+          messages: [
+            { role: 'system', content: rendered.system },
+            { role: 'user', content: rendered.user },
+          ],
+          schema: rendered.schema,
+          temperature: 0.7,
+        }),
+      )) as GeneratedBuildTask;
+
+      const promptHash = hashPrompt(`${result.title}::${result.description}`);
+      const row = await this.prisma.question.upsert({
+        where: { promptHash },
+        create: {
+          kind: 'build',
+          skillIds: [skillId],
+          difficulty: result.difficulty,
+          prompt: result.description,
+          keyPoints: [result.tests],
+          answerHint: JSON.stringify({
+            language: result.language,
+            title: result.title,
+            starter: result.starter,
+            timeoutMs: result.timeoutMs,
+          }),
+          promptHash,
+        },
+        update: {},
+      });
+      return {
+        id: row.id,
+        title: result.title,
+        description: result.description,
+        language: result.language,
+        starter: result.starter,
+        timeoutMs: result.timeoutMs,
+        skillIds: row.skillIds,
+        difficulty: row.difficulty,
+      };
+    } catch (err) {
+      this.logger.warn(`build-task-generator failed for skill=${skillId}: ${(err as Error).message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Grade a build-task submission by executing it in the Docker-per-run sandbox.
+   * The sandbox call is the real wire from C-P2.4 (replaces the previous TODO).
+   * Contract: tests print `PASS <name>` / `FAIL <name>` lines; score =
+   * passed / (passed + failed). Zero recognised lines → score 0 with a
+   * self-reported reason, never a thrown error. Sandbox paused / timeout /
+   * crash all map to score 0 with the status surfaced in reasoning + gradingJson
+   * so the runner UI can tell the user why.
+   */
+  async gradeBuildAttempt(
+    userId: string,
+    input: { questionId: string; code: string; durationMs?: number },
+  ): Promise<AttemptResult> {
+    if (typeof input.code !== 'string' || input.code.trim().length === 0) {
+      throw new BadRequestException('code is required');
+    }
+    const q = await this.prisma.question.findUnique({ where: { id: input.questionId } });
+    if (!q || q.kind !== 'build') {
+      throw new NotFoundException('Task not found');
+    }
+    const meta = safeJson<{
+      language?: LanguageId;
+      title?: string;
+      starter?: string;
+      timeoutMs?: number;
+    }>(q.answerHint ?? '{}') ?? {};
+    const language = meta.language ?? 'node';
+    const starter = meta.starter ?? '';
+    const tests = q.keyPoints[0] ?? '';
+    const timeoutMs = Math.min(Math.max(meta.timeoutMs ?? 10_000, 1_000), 30_000);
+    if (!tests) {
+      throw new BadRequestException('Task is malformed: missing tests');
+    }
+
+    // starter + candidate + tests concatenated as one file. The generator contract
+    // promises tests reference the symbols the candidate exports in `starter`.
+    const program = `${starter}\n${input.code}\n${tests}\n`;
+    const sandboxResult = await this.runSandbox({ language, code: program, timeoutMs });
+    const grading = scoreBuildRun(sandboxResult);
+
+    const attempt = await this.prisma.attempt.create({
+      data: {
+        userId,
+        questionId: q.id,
+        kind: 'build',
+        score: grading.score.toFixed(3),
+        reasoning: grading.reasoning,
+        answerJson: { code: input.code },
+        gradingJson: {
+          passed: grading.passed,
+          failed: grading.failed,
+          total: grading.total,
+          sandbox: {
+            status: sandboxResult.status,
+            exitCode: sandboxResult.exitCode,
+            wallTimeMs: sandboxResult.wallTimeMs,
+            ...(sandboxResult.killedBy ? { killedBy: sandboxResult.killedBy } : {}),
+          },
+          grader: 'sandbox' as const,
+        },
+        ...(input.durationMs != null ? { durationMs: input.durationMs } : {}),
+      },
+    });
+
+    const signal = grading.score >= 0.7 ? 'correct-independent' : 'incorrect-with-correction';
+    const skillDeltas: AttemptResult['skillDeltas'] = [];
+    for (const skillId of q.skillIds) {
+      const skill = await this.prisma.skill.findUnique({ where: { id: skillId } });
+      if (!skill) continue;
+      const beforeState = await this.prisma.candidateSkillState.findUnique({
+        where: { userId_skillId: { userId, skillId } },
+      });
+      await this.prisma.evidence.create({
+        data: {
+          userId,
+          skillId,
+          kind: 'assessment',
+          signal,
+          weightHint: grading.score.toFixed(3),
+          sourceRef: { kind: 'attempt', id: attempt.id },
+          detail: {
+            questionId: q.id,
+            passed: grading.passed,
+            failed: grading.failed,
+            total: grading.total,
+            sandboxStatus: sandboxResult.status,
+          },
+        },
+      });
+      const after = await syncSkillState(this.prisma, userId, skillId);
+      skillDeltas.push({
+        skillId,
+        beforeLevel: beforeState?.level ?? 1,
+        afterLevel: after.level,
+        beforeProficiency: beforeState ? Number(beforeState.proficiency) : 0,
+        afterProficiency: after.state.proficiency,
+      });
+      await this.reconcileRemediation(userId, skillId, skill.name, grading.score);
+    }
+
+    const xpAwarded = xpFor('build', grading.score);
+    await this.prisma.xpEvent.create({
+      data: { userId, attemptId: attempt.id, reason: 'attempt:build', xp: xpAwarded },
+    });
+
+    const [xpSum, streakState] = await Promise.all([
+      this.prisma.xpEvent.aggregate({ where: { userId }, _sum: { xp: true } }),
+      this.tickStreak(userId, new Date()),
+    ]);
+    const totalXp = xpSum._sum.xp ?? 0;
+
+    const hits = grading.passedNames.map((n) => `pass: ${n}`);
+    const misses = grading.failedNames.map((n) => `fail: ${n}`);
+    return {
+      attemptId: attempt.id,
+      score: grading.score,
+      hits,
+      misses,
+      reasoning: grading.reasoning,
+      xpAwarded,
+      totalXp,
+      ...levelChange(totalXp, xpAwarded),
+      streakDays: streakState.currentDays,
+      skillDeltas,
+    };
+  }
+
+  /** Hand-seeded build-task so `nextBuildTask` works before any LLM provider is wired. */
+  private async ensureBuildSeed(): Promise<void> {
+    for (const seed of BUILD_SEED) {
+      const promptHash = hashPrompt(`${seed.title}::${seed.description}`);
+      await this.prisma.question.upsert({
+        where: { promptHash },
+        create: {
+          kind: 'build',
+          skillIds: seed.skillIds,
+          difficulty: seed.difficulty,
+          prompt: seed.description,
+          keyPoints: [seed.tests],
+          answerHint: JSON.stringify({
+            language: seed.language,
+            title: seed.title,
+            starter: seed.starter,
+            timeoutMs: seed.timeoutMs,
+          }),
+          promptHash,
+        },
+        update: {},
+      });
+    }
+  }
+
+  /**
    * Return the next boss-battle milestone the user is eligible for, plus any
    * active boss (so the runner can resume). "Eligible" = user's current level
    * has reached the milestone AND no passed boss row exists for it.
@@ -1995,6 +2305,74 @@ function safeJson<T>(s: string): T | null {
   }
 }
 
+/**
+ * Parse PASS/FAIL lines out of a sandbox run and compute score = passed/total.
+ * Line regex matches `PASS <name>` / `FAIL <name>` anywhere on a line; the test
+ * harness contract (see build-task-generator prompt) requires one such line per
+ * test case. Sandbox non-ok statuses (timeout, oom, crash, paused) short-circuit
+ * to score 0 and surface the status in `reasoning` for the runner UI.
+ */
+export function scoreBuildRun(result: SandboxResult): {
+  score: number;
+  passed: number;
+  failed: number;
+  total: number;
+  passedNames: string[];
+  failedNames: string[];
+  reasoning: string;
+} {
+  if (result.status !== 'ok') {
+    const stderrTail = result.stderr.slice(-400);
+    return {
+      score: 0,
+      passed: 0,
+      failed: 0,
+      total: 0,
+      passedNames: [],
+      failedNames: [],
+      reasoning:
+        `Sandbox ${result.status}${result.killedBy ? ` (${result.killedBy})` : ''}` +
+        (stderrTail ? `: ${stderrTail}` : '.'),
+    };
+  }
+  const passedNames: string[] = [];
+  const failedNames: string[] = [];
+  for (const line of result.stdout.split(/\r?\n/)) {
+    const pass = line.match(/^\s*PASS\s+(.+?)\s*$/);
+    if (pass && pass[1]) {
+      passedNames.push(pass[1]);
+      continue;
+    }
+    const fail = line.match(/^\s*FAIL\s+(.+?)\s*$/);
+    if (fail && fail[1]) failedNames.push(fail[1]);
+  }
+  const total = passedNames.length + failedNames.length;
+  if (total === 0) {
+    return {
+      score: 0,
+      passed: 0,
+      failed: 0,
+      total: 0,
+      passedNames: [],
+      failedNames: [],
+      reasoning: 'No PASS/FAIL lines emitted by test harness. Did the implementation compile?',
+    };
+  }
+  const score = passedNames.length / total;
+  return {
+    score,
+    passed: passedNames.length,
+    failed: failedNames.length,
+    total,
+    passedNames,
+    failedNames,
+    reasoning:
+      score === 1
+        ? `All ${total} tests passed.`
+        : `${passedNames.length}/${total} tests passed. Failing: ${failedNames.join(', ')}.`,
+  };
+}
+
 // ponytail: 5 hand-seeded questions covering the common P1 skills. Replaced by
 // the question-generator agent + eval-gated bank in slice 2.
 const KNOWLEDGE_SEED: Array<{
@@ -2043,5 +2421,53 @@ const KNOWLEDGE_SEED: Array<{
       'Why prefer a distroless base image over ubuntu for a production Node service? Name at least two concrete benefits.',
     keyPoints: ['smaller', 'attack surface', 'no shell'],
     answerHint: 'Think image size and CVE exposure.',
+  },
+];
+
+// ponytail: 2 hand-seeded build tasks per language so the consumer wire ships
+// without blocking on a build-task eval set. Replaced by `build-task-generator`
+// once operators have provider credentials wired. Test harness contract: each
+// test case prints exactly one of `PASS <name>` or `FAIL <name>` to stdout.
+const BUILD_SEED: Array<{
+  skillIds: string[];
+  difficulty: string;
+  language: LanguageId;
+  title: string;
+  description: string;
+  starter: string;
+  tests: string;
+  timeoutMs: number;
+}> = [
+  {
+    skillIds: ['node-js'],
+    difficulty: 'easy',
+    language: 'node',
+    title: 'Implement sum(a, b)',
+    description:
+      'Export a function `sum(a, b)` that returns the arithmetic sum of two numbers. Submit the full function; the harness will exercise it with three cases.',
+    starter: '// Edit below. Keep the name `sum` so the test harness can find it.\nfunction sum(a, b) {\n  // your code\n}\n',
+    tests: [
+      "const assert = (cond, name) => console.log((cond ? 'PASS ' : 'FAIL ') + name);",
+      "assert(sum(1, 2) === 3, 'adds positives');",
+      "assert(sum(-1, 1) === 0, 'adds mixed signs');",
+      "assert(sum(0, 0) === 0, 'adds zero');",
+    ].join('\n'),
+    timeoutMs: 10_000,
+  },
+  {
+    skillIds: ['python'],
+    difficulty: 'easy',
+    language: 'python',
+    title: 'Implement reverse_words(s)',
+    description:
+      "Define `reverse_words(s)` that returns the input string with the order of whitespace-separated words reversed. Single spaces between words; `reverse_words('a b c') == 'c b a'`.",
+    starter: "def reverse_words(s):\n    # your code\n    return s\n",
+    tests: [
+      'def _assert(cond, name): print(("PASS " if cond else "FAIL ") + name)',
+      "_assert(reverse_words('a b c') == 'c b a', 'three words')",
+      "_assert(reverse_words('hello') == 'hello', 'single word')",
+      "_assert(reverse_words('') == '', 'empty string')",
+    ].join('\n'),
+    timeoutMs: 10_000,
   },
 ];

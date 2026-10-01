@@ -1,4 +1,5 @@
-// TODO(C-P2.4): consume this from apps/api/src/modules/assessments/assessment-runner when the code-review + debugging assessment types ship.
+// C-P2.4: consumed by apps/api/src/modules/assessments/assessments.service.ts
+// (gradeBuildAttempt) to run user-submitted build-task code in Docker-per-run.
 import { runDockerContainer, isDockerAvailable, buildDockerArgs, generateContainerName } from './docker';
 import { withPool } from './pool';
 import { isSandboxPaused } from './kill-switch';

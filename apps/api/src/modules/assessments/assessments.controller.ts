@@ -207,6 +207,56 @@ export class AssessmentsController {
     return this.assessments.gradeDebuggingAttempt(userId, input);
   }
 
+  @Get('build/next')
+  async nextBuild(@Query('skillId') skillId: string | undefined, @Req() req: Request) {
+    const userId = this.session.requireUserId(req);
+    return this.assessments.nextBuildTask(userId, skillId || undefined);
+  }
+
+  @Post('build/generate')
+  @HttpCode(201)
+  async generateBuild(
+    @Body() body: { skillId: string; difficulty?: 'easy' | 'medium' | 'hard' },
+    @Req() req: Request,
+  ) {
+    const userId = this.session.requireUserId(req);
+    if (typeof body.skillId !== 'string' || !body.skillId) {
+      throw new BadRequestException('skillId is required');
+    }
+    const difficulty = body.difficulty ?? 'medium';
+    if (!['easy', 'medium', 'hard'].includes(difficulty)) {
+      throw new BadRequestException('difficulty must be easy | medium | hard');
+    }
+    const task = await this.assessments.generateBuildTask(userId, body.skillId, difficulty);
+    if (!task) {
+      throw new BadRequestException(
+        'Could not generate a build task. Configure an AI provider, ensure LLM calls are not paused, and try again.',
+      );
+    }
+    return task;
+  }
+
+  @Post('build/grade')
+  @HttpCode(200)
+  async gradeBuild(
+    @Body() body: { questionId: string; code: string; durationMs?: number },
+    @Req() req: Request,
+  ) {
+    const userId = this.session.requireUserId(req);
+    if (typeof body.questionId !== 'string' || !body.questionId) {
+      throw new BadRequestException('questionId is required');
+    }
+    if (typeof body.code !== 'string') {
+      throw new BadRequestException('code must be a string');
+    }
+    const input: { questionId: string; code: string; durationMs?: number } = {
+      questionId: body.questionId,
+      code: body.code,
+    };
+    if (typeof body.durationMs === 'number') input.durationMs = body.durationMs;
+    return this.assessments.gradeBuildAttempt(userId, input);
+  }
+
   @Get('mock-interview/next')
   async nextMockInterview(@Query('skillId') skillId: string | undefined, @Req() req: Request) {
     const userId = this.session.requireUserId(req);
