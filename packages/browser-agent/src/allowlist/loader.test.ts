@@ -60,14 +60,25 @@ describe('allowlist loader', () => {
     expect([...entries.keys()].sort()).toEqual(['a.com', 'b.com']);
   });
 
-  it('ships all five phase-3.5 domains at the default location', () => {
+  it('ships all phase-3.5 domains plus the F.3 generic fallback at the default location', () => {
     const entries = loadAllowlistDir(defaultAllowlistDir());
     expect([...entries.keys()].sort()).toEqual(
-      ['ashbyhq.com', 'greenhouse.io', 'indeed.com', 'linkedin.com', 'naukri.com'],
+      ['*', 'ashbyhq.com', 'greenhouse.io', 'indeed.com', 'linkedin.com', 'naukri.com'],
     );
     for (const e of entries.values()) {
       expect(e.allowed_paths.length).toBeGreaterThan(0);
       expect(e.forbidden_selectors).toContain('input[type=password]');
     }
+  });
+
+  it('accepts entries with F.3 field_selectors + submit_selector blocks', () => {
+    const entries = loadAllowlistDir(defaultAllowlistDir());
+    const ashby = entries.get('ashbyhq.com');
+    expect(ashby?.field_selectors?.email).toBeDefined();
+    expect(ashby?.submit_selector).toBeDefined();
+    expect(ashby?.success_signal).toBeDefined();
+    const greenhouse = entries.get('greenhouse.io');
+    expect(greenhouse?.field_selectors?.resume_upload).toBeDefined();
+    expect(greenhouse?.submit_selector).toBeDefined();
   });
 });

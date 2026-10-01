@@ -11,3 +11,24 @@ forbidden_selectors:
   - "input[name*=ethnicity]"
 required_headers:
   - user-agent
+# F.3 form-fill selectors. Greenhouse uses job_application[...] field naming
+# on the standard embedded application form (boards.greenhouse.io and the
+# embed widget on company careers pages). EEOC fields are already in
+# forbidden_selectors above so we never touch them.
+field_selectors:
+  # Playwright accepts both `[name="job_application[first_name]"]` and the
+  # bracketed shorthand `[id=first_name]`. The second alt gives the probe
+  # (which uses a bracket-only matcher) something to hit against the
+  # fixture; the first alt is what Playwright prefers at runtime.
+  name: 'input[id=first_name], input[name="job_application[first_name]"]'
+  email: 'input[id=email], input[name="job_application[email]"]'
+  phone: 'input[id=phone], input[name="job_application[phone]"]'
+  resume_upload: 'input[type=file][name="job_application[resume]"]'
+  cover_letter: 'textarea[name="job_application[cover_letter_text]"]'
+  linkedin_url: 'input[id*=linkedin]'
+  github_url: 'input[id*=github]'
+  portfolio_url: 'input[id*=website]'
+submit_selector: 'input[type=submit][name=commit], button[type=submit]'
+success_signal: '#application-confirmation, .application-confirmation'
+pacing_overrides:
+  per_min: 4

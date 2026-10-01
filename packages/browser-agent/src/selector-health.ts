@@ -112,9 +112,14 @@ function parseSelector(selector: string): ParsedSelector | null {
       out.classes.push(m[1]!);
       i += m[0].length;
     } else if (ch === '[') {
-      const m = /^\[([\w-]+)(\*?=)?"?([^"\]]*)"?\]/.exec(s.slice(i));
+      // Try quoted form first (allows [, ] inside the value); fall back to
+      // bare word. Supports attr-only (`[hidden]`), `=`, `*=`, `~=`, `|=`.
+      const quoted = /^\[([\w-]+)(\*?=|~=|\|=)?"([^"]*)"\]/.exec(s.slice(i));
+      const bare = /^\[([\w-]+)(\*?=|~=|\|=)?([^\]"]*)\]/.exec(s.slice(i));
+      const m = quoted ?? bare;
       if (!m) return null;
-      const op = m[2] === '*=' ? '*=' : m[2] === '=' ? '=' : null;
+      const rawOp = m[2];
+      const op = rawOp === '*=' ? '*=' : rawOp === '=' ? '=' : null;
       out.attrs.push({ name: m[1]!.toLowerCase(), op, value: op ? m[3]! : null });
       i += m[0].length;
     } else {

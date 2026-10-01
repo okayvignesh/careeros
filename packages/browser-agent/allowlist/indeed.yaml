@@ -12,3 +12,11 @@ forbidden_selectors:
 required_headers:
   - user-agent
   - accept-language
+# F.3 form-fill: Indeed Easy Apply (iae-indeed) uses a hosted modal with
+# randomized element ids. The script indeed-easy-apply ships as a stub.
+# ponytail: stub, selectors not yet captured; wire when a user hits this ATS,
+# upgrade path is capture fixtures via LIVE=1 probe then fill field_selectors.
+submit_selector: "button[data-testid=indeedApplyButton]"
+success_signal: "div[data-testid=post-apply-screen]"
+pacing_overrides:
+  per_min: 3

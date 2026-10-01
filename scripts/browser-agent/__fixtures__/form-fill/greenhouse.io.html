@@ -1,0 +1,22 @@
+<!doctype html>
+<!--
+  F.3 selector-health fixture for greenhouse.io. Hand-curated minimal DOM
+  matching the embedded boards.greenhouse.io application form. Keep in sync
+  when bumping allowlist/greenhouse.yaml.
+-->
+<html>
+  <body>
+    <form id="application_form">
+      <input id="first_name" name="job_application[first_name]" type="text" />
+      <input id="email" name="job_application[email]" type="email" />
+      <input id="phone" name="job_application[phone]" type="tel" />
+      <input name="job_application[resume]" type="file" accept=".pdf,.doc,.docx" />
+      <textarea name="job_application[cover_letter_text]"></textarea>
+      <input id="question_linkedin" name="job_application[answers_attributes][0][text_value]" />
+      <input id="question_github" name="job_application[answers_attributes][1][text_value]" />
+      <input id="question_website" name="job_application[answers_attributes][2][text_value]" />
+      <input type="submit" name="commit" value="Submit Application" />
+    </form>
+    <div id="application-confirmation" hidden>Application Submitted</div>
+  </body>
+</html>

@@ -1,0 +1,21 @@
+<!doctype html>
+<!--
+  F.3 selector-health fixture for ashbyhq.com. Hand-curated minimal DOM
+  matching the public jobs.ashbyhq.com application form. Keep in sync when
+  bumping allowlist/ashby.yaml.
+-->
+<html>
+  <body>
+    <form class="application-form">
+      <label>Name<input name="_systemfield_name" type="text" required /></label>
+      <label>Email<input name="_systemfield_email" type="email" required /></label>
+      <label>Phone<input name="_systemfield_phone" type="tel" /></label>
+      <label>LinkedIn<input name="_systemfield_linkedinUrl" type="url" /></label>
+      <label>GitHub<input name="_systemfield_githubUrl" type="url" /></label>
+      <label>Portfolio<input name="_systemfield_website" type="url" /></label>
+      <label>Resume<input name="_systemfield_resume" type="file" accept=".pdf,.docx" /></label>
+      <button type="submit">Submit Application</button>
+    </form>
+    <div data-testid="application-confirmation" hidden>Thanks!</div>
+  </body>
+</html>

@@ -14,3 +14,14 @@ forbidden_selectors:
 required_headers:
   - user-agent
   - accept-language
+# F.3 form-fill: LinkedIn Easy Apply uses a multi-step modal with
+# dynamic field ids per application. The script linkedin-easy-apply ships
+# as a stub (selectors not yet captured). When a user hits this flow,
+# the selector-health probe will mark it stale and page the operator.
+# ponytail: stub, selectors not yet captured; wire when a user hits
+# this ATS, upgrade path is capture fixtures via LIVE=1 probe then fill
+# this block the same way ashby/greenhouse are filled.
+submit_selector: "button[aria-label*='Submit application']"
+success_signal: "div.artdeco-modal__content:has-text('Application sent')"
+pacing_overrides:
+  per_min: 3

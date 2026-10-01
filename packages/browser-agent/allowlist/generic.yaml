@@ -1,0 +1,36 @@
+domain: "*"
+allowed_paths:
+  - /
+# F.3 generic-apply fallback: used when no per-domain entry matches. The
+# generic-apply script attempts a best-effort pass using semantic input
+# names/ids common across ATS boards. If any field doesn't match, the
+# script bails and the user gets the "open in browser to complete" fallback.
+# This entry's domain is "*" to signal wildcard; the loader map keys off it,
+# but the server-side task validator should prefer named entries first and
+# only fall through to "*" when nothing else matches.
+# ponytail: best-effort heuristic; upgrade path is per-domain yaml once a
+# user hits a site often enough to be worth capturing.
+forbidden_selectors:
+  - "input[type=password]"
+  - "input[name*=ssn]"
+  - "input[name*=social_security]"
+  - "input[name*=race]"
+  - "input[name*=ethnicity]"
+  - "input[name*=gender]"
+  - "input[name*=disability]"
+  - "input[name*=veteran]"
+required_headers:
+  - user-agent
+field_selectors:
+  name: "input[name*=name i]:not([type=hidden]):not([name*=user i]):not([name*=company i])"
+  email: "input[type=email], input[name*=email i]"
+  phone: "input[type=tel], input[name*=phone i]"
+  resume_upload: "input[type=file][name*=resume i], input[type=file][accept*=pdf]"
+  cover_letter: "textarea[name*=cover i], textarea[name*=letter i], textarea[name*=message i]"
+  linkedin_url: "input[name*=linkedin i]"
+  github_url: "input[name*=github i]"
+  portfolio_url: "input[name*=website i], input[name*=portfolio i]"
+submit_selector: "button[type=submit], input[type=submit]"
+success_signal: "[class*=success i], [class*=confirmation i], h1:has-text('Thank you'), h1:has-text('submitted')"
+pacing_overrides:
+  per_min: 2

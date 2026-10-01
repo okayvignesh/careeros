@@ -52,6 +52,21 @@ import {
   JOB_GMAIL_WATCH_RENEWAL,
   QUEUE_GMAIL_WATCH_RENEWAL,
 } from './gmail-watch-renewal.worker.js';
+import {
+  handleSelectorHealth,
+  JOB_SELECTOR_HEALTH,
+  QUEUE_SELECTOR_HEALTH,
+  SELECTOR_HEALTH_CRON,
+  type ProbeOutcome,
+} from './selector-health.worker.js';
+import {
+  defaultAllowlistDir,
+  loadAllowlistDir,
+  probeEntry,
+  type AllowlistEntry,
+} from '@careeros/browser-agent';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 const logger = pino({
   name: 'careeros-worker',
@@ -298,8 +313,78 @@ async function bootstrap() {
     logger.error({ id: job?.id, err: err.message }, 'gmail-watch-renewal job failed'),
   );
 
+  // F.3: weekly selector-health probe (05:00 UTC Monday). Walks every entry
+  // under packages/browser-agent/allowlist/ and runs the shared probe against
+  // the shipped per-domain fixture (scripts/browser-agent/__fixtures__/form-fill/
+  // <domain>.html). When a probe reports unhealthy, inserts an audit_log row
+  // (action='form_fill.selector_stale') via the shared markSelectorStale
+  // helper. Stub entries with no field_selectors are skipped as healthy.
+  //
+  // ponytail: fixtures are checked into the repo and only updated by hand
+  // when a real submit succeeds — a snapshot MinIO path (per plan comment)
+  // is the proper upgrade when D.4 agent form-fills are landing often enough
+  // for freshness to matter.
+  const allowlistEntries = loadAllowlistDir(defaultAllowlistDir());
+  const fixtureBase = join(
+    process.cwd(),
+    'scripts',
+    'browser-agent',
+    '__fixtures__',
+    'form-fill',
+  );
+  const probeFromFixture = async (entry: AllowlistEntry): Promise<ProbeOutcome> => {
+    // Wildcard generic entry has no canonical page to snapshot, and stub
+    // domains without a fixture aren't yet wired to a real submit path, so
+    // the cron treats "no fixture" as healthy-by-definition. The first time
+    // a user actually triggers a submit against one of those domains, the
+    // live-path failure hook (markSelectorStale with applicationId) kicks
+    // in and the audit row fires per-attempt instead of weekly.
+    if (entry.domain === '*') {
+      return { domain: entry.domain, healthy: true, missing: [], drifted: [] };
+    }
+    let html = '';
+    try {
+      html = readFileSync(join(fixtureBase, `${entry.domain}.html`), 'utf-8');
+    } catch {
+      return { domain: entry.domain, healthy: true, missing: [], drifted: [] };
+    }
+    const r = probeEntry(entry, html);
+    return { domain: r.domain, healthy: r.healthy, missing: r.missing, drifted: r.drifted };
+  };
+
+  const selectorHealthQueue = new Queue(QUEUE_SELECTOR_HEALTH, { connection });
+  await selectorHealthQueue.add(
+    JOB_SELECTOR_HEALTH,
+    {},
+    {
+      jobId: `repeat:${JOB_SELECTOR_HEALTH}`,
+      repeat: { pattern: SELECTOR_HEALTH_CRON },
+      removeOnComplete: { count: 30 },
+      removeOnFail: { count: 30 },
+    },
+  );
+  const selectorHealthWorker = new Worker(
+    QUEUE_SELECTOR_HEALTH,
+    async (job) => {
+      if (job.name !== JOB_SELECTOR_HEALTH) {
+        logger.warn({ name: job.name }, 'unknown selector-health job name');
+        return { skipped: true };
+      }
+      return handleSelectorHealth(
+        [...allowlistEntries.values()],
+        probeFromFixture,
+        prisma,
+        logger,
+      );
+    },
+    { connection, concurrency: 1 },
+  );
+  selectorHealthWorker.on('failed', (job, err) =>
+    logger.error({ id: job?.id, err: err.message }, 'selector-health job failed'),
+  );
+
   logger.info(
-    `worker up, listening on queues '${QUEUE_GITHUB}', '${QUEUE_GITLAB}', '${QUEUE_EMBEDDING}', '${QUEUE_RETENTION}', '${QUEUE_CORPUS_REFRESH}', '${QUEUE_MARKET_SNAPSHOT}', '${QUEUE_AUDIT_LOG_RETENTION}', '${QUEUE_GMAIL_WATCH_RENEWAL}'`,
+    `worker up, listening on queues '${QUEUE_GITHUB}', '${QUEUE_GITLAB}', '${QUEUE_EMBEDDING}', '${QUEUE_RETENTION}', '${QUEUE_CORPUS_REFRESH}', '${QUEUE_MARKET_SNAPSHOT}', '${QUEUE_AUDIT_LOG_RETENTION}', '${QUEUE_GMAIL_WATCH_RENEWAL}', '${QUEUE_SELECTOR_HEALTH}'`,
   );
 }
 

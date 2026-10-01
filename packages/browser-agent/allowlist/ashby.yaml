@@ -9,3 +9,19 @@ forbidden_selectors:
   - "input[name*=social_security]"
 required_headers:
   - user-agent
+# F.3 form-fill selectors. Captured against jobs.ashbyhq.com standard
+# application form (2026-10). The _systemfield_ prefix is stable across every
+# tenant; custom questions below the resume upload use tenant-specific ids
+# which the agent handles via the generic-apply fallback.
+field_selectors:
+  name: "input[name=_systemfield_name]"
+  email: "input[name=_systemfield_email]"
+  phone: "input[name=_systemfield_phone]"
+  resume_upload: "input[type=file][name=_systemfield_resume]"
+  linkedin_url: "input[name=_systemfield_linkedinUrl]"
+  github_url: "input[name=_systemfield_githubUrl]"
+  portfolio_url: "input[name=_systemfield_website]"
+submit_selector: "button[type=submit]"
+success_signal: "[data-testid=application-confirmation], h1:has-text('Application submitted')"
+pacing_overrides:
+  per_min: 4
