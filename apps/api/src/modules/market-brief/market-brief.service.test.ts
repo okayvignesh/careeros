@@ -168,23 +168,41 @@ class TestMarketBriefService extends MarketBriefService {
   }
 }
 
+function fakeSnapshots(diff?: Partial<import('./snapshot.service').TrendDiff>) {
+  const base = {
+    hasComparison: false,
+    postingsDelta: { absolute: 0, percent: 0 },
+    remoteShareDelta: 0,
+    medianCompDelta: 0,
+    topSkillsAdded: [],
+    topSkillsRemoved: [],
+    topSkillsRankChange: [],
+    newCompanies: [],
+  };
+  return {
+    diffAgainstLastWeek: async () => ({ ...base, ...diff }),
+  };
+}
+
 function build(opts: {
   jobs?: Job[];
   script?: MarketBriefContent | null;
   prefs?: Partial<typeof DEFAULT_PREFS>;
+  diff?: Partial<import('./snapshot.service').TrendDiff>;
 } = {}) {
   const jobs = opts.jobs ?? pool();
   const prisma = fakePrisma(jobs);
   const usage = fakeUsage();
   const prefs = fakePrefs(opts.prefs);
+  const snapshots = fakeSnapshots(opts.diff);
   const script = opts.script === undefined
     ? { sections: [{ heading: 'Overview', body: 'body', sourceUrls: [] }] }
     : opts.script;
   const svc = new TestMarketBriefService(
-    [prisma as never, usage as never, {} as never, {} as never, prefs as never],
+    [prisma as never, usage as never, {} as never, {} as never, prefs as never, snapshots as never],
     script,
   );
-  return { svc, prisma, usage, prefs };
+  return { svc, prisma, usage, prefs, snapshots };
 }
 
 // -----------------------------------------------------------------------------
@@ -496,7 +514,14 @@ describe('MarketBriefService.getLatest', () => {
     };
     prisma.calls.findFirstReturns.push(stored);
     const svc = new TestMarketBriefService(
-      [prisma as never, fakeUsage() as never, {} as never, {} as never, fakePrefs() as never],
+      [
+        prisma as never,
+        fakeUsage() as never,
+        {} as never,
+        {} as never,
+        fakePrefs() as never,
+        fakeSnapshots() as never,
+      ],
       null,
     );
     const dto = await svc.getLatest('u1');
@@ -505,6 +530,9 @@ describe('MarketBriefService.getLatest', () => {
     expect(dto!.content.sections[0].heading).toBe('H');
     expect(dto!.stats.totalCount).toBe(3);
     expect(dto!.sources).toHaveLength(1);
+    // Diff is always present on the DTO (shape invariant); default hasComparison=false.
+    expect(dto!.diff).toBeDefined();
+    expect(dto!.diff.hasComparison).toBe(false);
   });
 });
 
@@ -654,7 +682,7 @@ describe('MarketBriefService.generate per-sentence fact-check (C-P4.7c)', () => 
     const jobs = pool();
     const prisma = fakePrisma(jobs);
     const svc = new MultiScriptService(
-      [prisma as never, fakeUsage() as never, {} as never, {} as never, fakePrefs() as never],
+      [prisma as never, fakeUsage() as never, {} as never, {} as never, fakePrefs() as never, fakeSnapshots() as never],
       [writer, audit],
     );
 
@@ -699,7 +727,7 @@ describe('MarketBriefService.generate per-sentence fact-check (C-P4.7c)', () => 
     const jobs = pool();
     const prisma = fakePrisma(jobs);
     const svc = new MultiScriptService(
-      [prisma as never, fakeUsage() as never, {} as never, {} as never, fakePrefs() as never],
+      [prisma as never, fakeUsage() as never, {} as never, {} as never, fakePrefs() as never, fakeSnapshots() as never],
       [writer, audit],
     );
 
@@ -724,7 +752,7 @@ describe('MarketBriefService.generate per-sentence fact-check (C-P4.7c)', () => 
     const jobs = pool();
     const prisma = fakePrisma(jobs);
     const svc = new MultiScriptService(
-      [prisma as never, fakeUsage() as never, {} as never, {} as never, fakePrefs() as never],
+      [prisma as never, fakeUsage() as never, {} as never, {} as never, fakePrefs() as never, fakeSnapshots() as never],
       [writer, new Error('deepseek 500')],
     );
 
@@ -752,7 +780,7 @@ describe('MarketBriefService.generate per-sentence fact-check (C-P4.7c)', () => 
     const jobs = pool();
     const prisma = fakePrisma(jobs);
     const svc = new MultiScriptService(
-      [prisma as never, fakeUsage() as never, {} as never, {} as never, fakePrefs() as never],
+      [prisma as never, fakeUsage() as never, {} as never, {} as never, fakePrefs() as never, fakeSnapshots() as never],
       [writer, audit],
     );
 
@@ -785,5 +813,50 @@ describe('splitSentences', () => {
 
   it('multi-terminator collapses (e.g. "!!") into one sentence', () => {
     expect(splitSentences('Wow!! Really? Yes.')).toEqual(['Wow!!', 'Really?', 'Yes.']);
+  });
+});
+
+// -----------------------------------------------------------------------------
+// C-P3 debt: "what changed vs last week" diff inlined into the brief payload.
+// Both generate() and getLatest() must now carry the TrendDiff on the DTO so
+// the brief page can render deltas without a second /me/market/snapshot/trend
+// round-trip.
+// -----------------------------------------------------------------------------
+
+describe('MarketBriefService diff inlined on BriefDto', () => {
+  it('generate(): DTO carries the SnapshotService.diffAgainstLastWeek result', async () => {
+    const { svc } = build({
+      diff: {
+        hasComparison: true,
+        from: { snapshotAt: '2026-09-20T06:00:00.000Z', snapshotId: 'prior' },
+        to: { snapshotAt: '2026-09-27T06:00:00.000Z', snapshotId: 'latest' },
+        postingsDelta: { absolute: 15, percent: 0.25 },
+        remoteShareDelta: 0.1,
+        topSkillsAdded: ['rust'],
+        topSkillsRemoved: ['java'],
+        newCompanies: ['Wayne'],
+      },
+    });
+    const dto = await svc.generate('u1');
+    expect(dto.diff.hasComparison).toBe(true);
+    expect(dto.diff.postingsDelta.absolute).toBe(15);
+    expect(dto.diff.topSkillsAdded).toEqual(['rust']);
+    expect(dto.diff.newCompanies).toEqual(['Wayne']);
+  });
+
+  it('getLatest(): DTO carries hasComparison=false when there is no prior snapshot', async () => {
+    const { svc, prisma } = build();
+    prisma.calls.findFirstReturns.push({
+      id: 'brief-last',
+      generatedAt: new Date('2026-09-27T00:00:00Z'),
+      windowStart: new Date('2026-09-20T00:00:00Z'),
+      windowEnd: new Date('2026-09-27T00:00:00Z'),
+      statsJson: { totalCount: 0, newCount: 0, remoteShare: 0, topSkills: [], topCompanies: [], windowDays: 7 },
+      content: JSON.stringify({ sections: [{ heading: 'H', body: 'B', sourceUrls: [] }] }),
+      sourcesJson: [],
+    });
+    const dto = await svc.getLatest('u1');
+    expect(dto).not.toBeNull();
+    expect(dto!.diff.hasComparison).toBe(false);
   });
 });

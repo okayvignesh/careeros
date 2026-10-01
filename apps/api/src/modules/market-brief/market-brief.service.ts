@@ -16,6 +16,7 @@ import { UsageCache } from '../usage/usage.cache';
 import { SensitivityGateService } from '../../common/sensitivity-gate.service';
 import { makeLlmAuditor } from '../../common/llm-audit';
 import { JobPreferencesService } from '../job-prefs/job-prefs.service';
+import { SnapshotService, type TrendDiff } from './snapshot.service';
 
 const KEY = loadMasterKey();
 const WINDOW_DAYS = 7;
@@ -46,6 +47,14 @@ export interface BriefDto {
   stats: BriefStats;
   content: MarketBriefContent;
   sources: BriefSource[];
+  /**
+   * C-P3 debt: "what changed vs last week". Served from the same brief payload
+   * (vs the dedicated `/me/market/snapshot/trend` endpoint) so the brief page
+   * can render deltas without a second round-trip. `hasComparison=false` when
+   * there's no prior snapshot in the 7-14d window; the FE renders "no
+   * comparison yet" in that case.
+   */
+  diff: TrendDiff;
 }
 
 @Injectable()
@@ -58,6 +67,7 @@ export class MarketBriefService {
     private readonly usageCache: UsageCache,
     private readonly sensitivity: SensitivityGateService,
     private readonly prefs: JobPreferencesService,
+    private readonly snapshots: SnapshotService,
   ) {}
 
   async getLatest(userId: string): Promise<BriefDto | null> {
@@ -66,7 +76,7 @@ export class MarketBriefService {
       orderBy: { generatedAt: 'desc' },
     });
     if (!row) return null;
-    return this.toDto(row);
+    return this.toDto(row, await this.snapshots.diffAgainstLastWeek(userId));
   }
 
   async generate(userId: string): Promise<BriefDto> {
@@ -197,7 +207,7 @@ export class MarketBriefService {
         sourcesJson: sources as unknown as Prisma.InputJsonValue,
       },
     });
-    return this.toDto(row);
+    return this.toDto(row, await this.snapshots.diffAgainstLastWeek(userId));
   }
 
   /**
@@ -368,15 +378,18 @@ export class MarketBriefService {
     return computeStatsFn(pool, windowStart);
   }
 
-  private toDto(row: {
-    id: string;
-    generatedAt: Date;
-    windowStart: Date;
-    windowEnd: Date;
-    statsJson: Prisma.JsonValue;
-    content: string;
-    sourcesJson: Prisma.JsonValue;
-  }): BriefDto {
+  private toDto(
+    row: {
+      id: string;
+      generatedAt: Date;
+      windowStart: Date;
+      windowEnd: Date;
+      statsJson: Prisma.JsonValue;
+      content: string;
+      sourcesJson: Prisma.JsonValue;
+    },
+    diff: TrendDiff,
+  ): BriefDto {
     return {
       id: row.id,
       generatedAt: row.generatedAt.toISOString(),
@@ -385,6 +398,7 @@ export class MarketBriefService {
       stats: row.statsJson as unknown as BriefStats,
       content: JSON.parse(row.content) as MarketBriefContent,
       sources: row.sourcesJson as unknown as BriefSource[],
+      diff,
     };
   }
 
