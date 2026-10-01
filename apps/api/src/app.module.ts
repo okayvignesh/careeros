@@ -49,6 +49,7 @@ import { DailyBriefModule } from './modules/daily-brief/daily-brief.module';
 import { InboxModule } from './modules/inbox/inbox.module';
 import { InterviewPrepModule } from './modules/interview-prep/interview-prep.module';
 import { OutreachModule } from './modules/outreach/outreach.module';
+import { AtsSubmitModule } from './modules/ats-submit/ats-submit.module';
 
 const loggerParams: Params = {
   pinoHttp: {
@@ -118,6 +119,7 @@ const loggerParams: Params = {
     InboxModule,
     InterviewPrepModule,
     OutreachModule,
+    AtsSubmitModule,
     HealthModule,
     SetupModule,
   ],

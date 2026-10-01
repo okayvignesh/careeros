@@ -55,8 +55,35 @@ model User {
   emailApplicationLinks EmailApplicationLink[]
   interviewPreps   InterviewPrep[]
   outreachMessages OutreachMessage[]
+  atsSubmissions   AtsSubmission[]
 
   @@map("users")
+}
+
+/// F.2 (Wave F / P6): ATS application submission attempt. Idempotency
+/// via (applicationId, ats, idempotencyKey) unique composite. Status
+/// transitions pending -> submitted | failed | cancelled.
+model AtsSubmission {
+  id               String   @id @default(uuid()) @db.Uuid
+  userId           String   @map("user_id") @db.Uuid
+  applicationId    String   @map("application_id") @db.Uuid
+  ats              String   /// 'ashby' | 'greenhouse'
+  idempotencyKey   String   @map("idempotency_key")
+  status           String   @default("pending") /// pending | submitted | failed | cancelled
+  attemptCount     Int      @default(0) @map("attempt_count")
+  lastError        String?  @map("last_error")
+  responseJson     Json?    @map("response_json")
+  submittedAt      DateTime? @map("submitted_at") @db.Timestamptz(6)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@unique([applicationId, ats, idempotencyKey])
+  @@index([userId, status, createdAt(sort: Desc)])
+  @@index([ats, status])
+  @@map("ats_submissions")
 }
 
 /// F.5 (Wave F / P6): outreach message. One row per generated draft.
@@ -942,6 +969,7 @@ model Application {
   inboxItems InboxItem[]
   interviewPreps InterviewPrep[]
   outreachMessages OutreachMessage[]
+  atsSubmissions AtsSubmission[]
 
   @@unique([userId, jobId])
   @@index([userId, state])
