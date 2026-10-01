@@ -1852,10 +1852,13 @@ export class AssessmentsService {
   }
 
   /**
-   * Start a boss battle for a milestone. Picks 3 knowledge questions from the
-   * user's touched skills (skills with any evidence); generates fresh if the
-   * eligible pool is thin. Rejects if an active boss already exists or the
-   * milestone is already passed.
+   * Start a boss battle for a milestone. Picks 3 knowledge questions drawn
+   * from a *related* set of touched skills (3+ user-touched skills sharing an
+   * ESCO category — frontend, backend, cloud, ...), so the encounter rewards
+   * combining neighbouring skills rather than regurgitating one. Generates
+   * fresh if the eligible pool is thin. Rejects if an active boss already
+   * exists, the milestone is already passed, or the user has not touched 3+
+   * related skills yet.
    */
   async startBossBattle(userId: string, milestone: number): Promise<BossBattleTask> {
     if (!BOSS_MILESTONES.includes(milestone as (typeof BOSS_MILESTONES)[number])) {
@@ -1874,10 +1877,25 @@ export class AssessmentsService {
     });
     if (alreadyPassed) throw new BadRequestException(`Milestone ${milestone} already cleared`);
 
-    const questions = await this.pickBossQuestions(userId);
+    // 3+ related-skills threshold: resolve the user's touched skills to their
+    // ESCO categories (populated by apps/api/src/seed/esco.ts) and require at
+    // least one category with 3 or more touched skills before the fight is
+    // even allowed to start. "Related" = share a category. This blocks the
+    // degenerate case where a user with only `react` + a stale evidence row
+    // on `postgres` triggers a milestone that cannot be a true combo check.
+    // ponytail: using `category` directly; swap to a persisted
+    // `skill_graph_core` adjacency table when ESCO relations ingest lands.
+    const relatedSet = await this.getLargestRelatedTouchedSet(userId);
+    if (relatedSet.skillIds.length < 3) {
+      throw new BadRequestException(
+        'Boss battle needs 3+ related skills touched. Earn evidence on more skills in a shared area (frontend, backend, cloud, ...) first.',
+      );
+    }
+
+    const questions = await this.pickBossQuestions(userId, relatedSet.skillIds);
     if (questions.length < 3) {
       throw new BadRequestException(
-        'Not enough questions available. Complete a few knowledge attempts first so the bank fills up.',
+        'Not enough questions available for your related-skill cluster. Complete a few knowledge attempts across those skills first so the bank fills up.',
       );
     }
 
@@ -1925,7 +1943,15 @@ export class AssessmentsService {
     userId: string,
     id: string,
     answers: string[],
-  ): Promise<AttemptResult & { bossStatus: 'passed' | 'failed' | 'expired' }> {
+  ): Promise<
+    AttemptResult & {
+      bossStatus: 'passed' | 'failed' | 'expired';
+      comboDetected: boolean;
+      comboMultiplier: number;
+      comboCategory: string | null;
+      relatedSkillsDemonstrated: string[];
+    }
+  > {
     const row = await this.prisma.bossBattle.findFirst({ where: { id, userId } });
     if (!row) throw new NotFoundException('Boss battle not found');
     if (row.status !== 'active') {
@@ -1987,6 +2013,13 @@ export class AssessmentsService {
     const overall = perQuestionScores.reduce((a, s) => a + s, 0) / Math.max(1, perQuestionScores.length);
     const bossStatus: 'passed' | 'failed' = overall >= 0.7 ? 'passed' : 'failed';
 
+    // Multi-skill combo: deterministic parse off the per-question scores +
+    // skill tags. Rewards the user for actually using 2+ *related* skills
+    // (shared ESCO category) within the same encounter. The bonus is only
+    // meaningful on a passing boss — on a failed boss the bonus still appears
+    // in the reasoning line so the user sees what combo would have earned.
+    const combo = await this.detectBossCombo(row.questionIds, perQuestionScores);
+
     await this.prisma.bossBattle.update({
       where: { id },
       data: {
@@ -1997,9 +2030,18 @@ export class AssessmentsService {
       },
     });
 
-    const xpAwarded = xpFor('boss-battle', overall);
+    const xpBase = xpFor('boss-battle', overall);
+    const xpAwarded =
+      bossStatus === 'passed' ? Math.round(xpBase * combo.comboMultiplier) : xpBase;
     await this.prisma.xpEvent.create({
-      data: { userId, reason: `attempt:boss-battle:L${row.milestone}`, xp: xpAwarded },
+      data: {
+        userId,
+        reason:
+          combo.combo && bossStatus === 'passed'
+            ? `attempt:boss-battle:L${row.milestone}:combo`
+            : `attempt:boss-battle:L${row.milestone}`,
+        xp: xpAwarded,
+      },
     });
 
     const [xpSum, streakState] = await Promise.all([
@@ -2017,18 +2059,28 @@ export class AssessmentsService {
       .filter(({ s }) => s < 0.7)
       .map(({ s, i }) => `Q${i + 1}: ${(s * 100).toFixed(0)}%`);
 
+    const comboLine =
+      combo.combo && bossStatus === 'passed'
+        ? ` Combo detected: ${combo.relatedSkillsDemonstrated.length} ${combo.comboCategory ?? 'related'} skills, ${Math.round((combo.comboMultiplier - 1) * 100)}% XP bonus.`
+        : combo.combo
+          ? ` Combo detected but boss failed (bonus applies only to passes).`
+          : '';
     return {
       attemptId: id,
       score: overall,
       hits,
       misses,
-      reasoning: `Boss battle L${row.milestone}: ${bossStatus.toUpperCase()} (${(overall * 100).toFixed(0)}%). ${hits.length}/${perQuestionScores.length} questions passed.`,
+      reasoning: `Boss battle L${row.milestone}: ${bossStatus.toUpperCase()} (${(overall * 100).toFixed(0)}%). ${hits.length}/${perQuestionScores.length} questions passed.${comboLine}`,
       xpAwarded,
       totalXp,
       ...levelChange(totalXp, xpAwarded),
       streakDays: streakState.currentDays,
       skillDeltas: [],
       bossStatus,
+      comboDetected: combo.combo,
+      comboMultiplier: combo.comboMultiplier,
+      comboCategory: combo.comboCategory,
+      relatedSkillsDemonstrated: combo.relatedSkillsDemonstrated,
     };
   }
 
@@ -2037,26 +2089,34 @@ export class AssessmentsService {
   }
 
   /**
-   * Pick 3 knowledge questions from skills the user has touched. Generates
-   * fresh if the eligible pool is under 3. Bias toward variety: no more than
-   * one Q from the same skill unless the user's touched-skill pool is <3.
+   * Pick 3 knowledge questions, restricted to the supplied related-skill set
+   * when the caller provides one (boss-battle). Without a restriction, falls
+   * back to any touched skill (not used by boss-battle today, kept for future
+   * reuse). Variety: avoid repeating the same single skill across picks when
+   * the related pool has 3+ skills to pick from.
    */
   private async pickBossQuestions(
     userId: string,
+    restrictToSkills?: string[],
   ): Promise<Array<{ id: string; prompt: string; skillIds: string[]; difficulty: string }>> {
     await this.ensureSeed();
-    const touched = await this.prisma.evidence.findMany({
-      where: { userId },
-      select: { skillId: true },
-      distinct: ['skillId'],
-    });
-    const touchedSkills = touched.map((t) => t.skillId).filter((s): s is string => !!s);
+    let eligibleSkills: string[];
+    if (restrictToSkills && restrictToSkills.length > 0) {
+      eligibleSkills = restrictToSkills;
+    } else {
+      const touched = await this.prisma.evidence.findMany({
+        where: { userId },
+        select: { skillId: true },
+        distinct: ['skillId'],
+      });
+      eligibleSkills = touched.map((t) => t.skillId).filter((s): s is string => !!s);
+    }
 
     const pool = await this.prisma.question.findMany({
       where: {
         kind: 'knowledge',
         flagged: false,
-        ...(touchedSkills.length > 0 ? { skillIds: { hasSome: touchedSkills } } : {}),
+        ...(eligibleSkills.length > 0 ? { skillIds: { hasSome: eligibleSkills } } : {}),
       },
       take: 30,
     });
@@ -2069,7 +2129,7 @@ export class AssessmentsService {
     for (const q of shuffled) {
       if (picked.length === 3) break;
       const overlap = q.skillIds.some((s) => usedSkills.has(s));
-      if (overlap && touchedSkills.length >= 3) continue;
+      if (overlap && eligibleSkills.length >= 3) continue;
       picked.push(q);
       for (const s of q.skillIds) usedSkills.add(s);
     }
@@ -2085,6 +2145,117 @@ export class AssessmentsService {
       skillIds: q.skillIds,
       difficulty: q.difficulty,
     }));
+  }
+
+  /**
+   * Resolve the user's touched skills (any evidence) to their ESCO category
+   * and return the largest category group with 3 or more touched skills.
+   * Returns an empty skillIds array when no cluster meets the threshold —
+   * callers must treat that as "boss-battle not eligible yet".
+   *
+   * ponytail: in-process group-by over a small set (touched skills + ~200
+   * skill rows). Push into SQL when either side grows past a few thousand.
+   */
+  private async getLargestRelatedTouchedSet(
+    userId: string,
+  ): Promise<{ category: string | null; skillIds: string[] }> {
+    const touched = await this.prisma.evidence.findMany({
+      where: { userId },
+      select: { skillId: true },
+      distinct: ['skillId'],
+    });
+    const touchedIds = touched.map((t) => t.skillId).filter((s): s is string => !!s);
+    if (touchedIds.length < 3) return { category: null, skillIds: [] };
+
+    const skillRows = await this.prisma.skill.findMany({
+      where: { id: { in: touchedIds } },
+      select: { id: true, category: true },
+    });
+    const byCategory = new Map<string, string[]>();
+    for (const s of skillRows) {
+      // Skills with no category (seed drift, legacy rows) do not count as
+      // "related" to anything — a null bucket would create a false group.
+      if (!s.category) continue;
+      const bucket = byCategory.get(s.category) ?? [];
+      bucket.push(s.id);
+      byCategory.set(s.category, bucket);
+    }
+    let best: { category: string; skillIds: string[] } | null = null;
+    for (const [cat, ids] of byCategory) {
+      if (ids.length < 3) continue;
+      if (!best || ids.length > best.skillIds.length) best = { category: cat, skillIds: ids };
+    }
+    return best ?? { category: null, skillIds: [] };
+  }
+
+  /**
+   * Multi-skill combo detection. Given per-question outcomes + the question
+   * rows, resolve each question's skills to their ESCO category, pick the
+   * category that spans the most *passed* questions, and count how many
+   * distinct skills in that category the user actually demonstrated (passed
+   * question tagged with that skill). Combo = 2+ distinct related skills
+   * passed. Returns the related skill IDs so the grading payload can cite
+   * them + the multiplier the caller should apply to XP.
+   *
+   * ponytail: deterministic parse off `question.skillIds` + `skill.category`,
+   * no LLM round trip. Upgrade path when build-task / debugging boss variants
+   * land: feed the LLM grader the related-skill list and ask it to score
+   * cross-skill usage; keep this as the floor.
+   */
+  private async detectBossCombo(
+    questionIds: string[],
+    perQuestionScores: number[],
+  ): Promise<{
+    comboCategory: string | null;
+    relatedSkillsDemonstrated: string[];
+    combo: boolean;
+    comboMultiplier: number;
+  }> {
+    const questions = await this.prisma.question.findMany({
+      where: { id: { in: questionIds } },
+      select: { id: true, skillIds: true },
+    });
+    const allSkillIds = Array.from(new Set(questions.flatMap((q) => q.skillIds)));
+    if (allSkillIds.length === 0) {
+      return { comboCategory: null, relatedSkillsDemonstrated: [], combo: false, comboMultiplier: 1 };
+    }
+    const skillRows = await this.prisma.skill.findMany({
+      where: { id: { in: allSkillIds } },
+      select: { id: true, category: true },
+    });
+    const categoryOf = new Map(skillRows.map((s) => [s.id, s.category ?? null] as const));
+
+    // Map category -> set of distinct skillIds the user *passed on*.
+    const passedByCategory = new Map<string, Set<string>>();
+    for (let i = 0; i < questionIds.length; i++) {
+      const qid = questionIds[i]!;
+      const score = perQuestionScores[i] ?? 0;
+      if (score < 0.7) continue;
+      const q = questions.find((x) => x.id === qid);
+      if (!q) continue;
+      for (const sid of q.skillIds) {
+        const cat = categoryOf.get(sid);
+        if (!cat) continue;
+        const bucket = passedByCategory.get(cat) ?? new Set<string>();
+        bucket.add(sid);
+        passedByCategory.set(cat, bucket);
+      }
+    }
+    let best: { category: string; skills: Set<string> } | null = null;
+    for (const [cat, skills] of passedByCategory) {
+      if (!best || skills.size > best.skills.size) best = { category: cat, skills };
+    }
+    const demonstrated = best?.skills ?? new Set<string>();
+    const combo = demonstrated.size >= 2;
+    // 1.25x multiplier is deliberately modest: enough to be visible, small
+    // enough that a lucky mono-skill pass isn't dwarfed. ponytail: fixed
+    // constant; move to shared/knowledge-rules.ts if a second caller rewards combos.
+    return {
+      comboCategory: best?.category ?? null,
+      relatedSkillsDemonstrated: Array.from(demonstrated),
+      combo,
+      comboMultiplier: combo ? 1.25 : 1,
+    };
   }
 
   private serializeBoss(

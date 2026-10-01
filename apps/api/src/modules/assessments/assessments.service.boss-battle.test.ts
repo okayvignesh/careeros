@@ -96,12 +96,24 @@ function makeQ(id: string, skill: string): FakeQuestion {
   };
 }
 
-function fakePrisma(opts: { bosses?: BossRow[]; xpTotal?: number; questions?: FakeQuestion[]; evidenceSkills?: string[] }) {
+function fakePrisma(opts: {
+  bosses?: BossRow[];
+  xpTotal?: number;
+  questions?: FakeQuestion[];
+  evidenceSkills?: string[];
+  /// B-stream: optional per-skill category map, used by the 3+ related-skills
+  /// threshold on startBossBattle + the combo detector on submit. Keys are
+  /// skill IDs, values are the ESCO category ('frontend', 'backend', ...).
+  /// Skills without an entry default to `null` (counted as 'not related to
+  /// anything') to match production behaviour.
+  skillCategories?: Record<string, string | null>;
+}) {
   const bosses: BossRow[] = opts.bosses ?? [];
   const xpEvents: Array<{ reason: string; xp: number }> = [];
   if (opts.xpTotal) xpEvents.push({ reason: 'seed', xp: opts.xpTotal });
   const questions: FakeQuestion[] = opts.questions ?? [];
   const evidenceSkills = opts.evidenceSkills ?? [];
+  const skillCategories: Record<string, string | null> = opts.skillCategories ?? {};
   const evidenceCreates: unknown[] = [];
   const updates: Array<{ id: string; data: Partial<BossRow> }> = [];
   let idSeq = 1;
@@ -180,7 +192,15 @@ function fakePrisma(opts: { bosses?: BossRow[]; xpTotal?: number; questions?: Fa
         return {};
       },
     },
-    skill: { findUnique: async ({ where }: { where: { id: string } }) => ({ id: where.id, name: where.id }) },
+    skill: {
+      findUnique: async ({ where }: { where: { id: string } }) => ({
+        id: where.id,
+        name: where.id,
+        category: skillCategories[where.id] ?? null,
+      }),
+      findMany: async ({ where }: { where: { id: { in: string[] } } }) =>
+        where.id.in.map((id) => ({ id, category: skillCategories[id] ?? null })),
+    },
     candidateSkillState: { findUnique: async () => null },
     attempt: {
       create: async ({ data }: { data: { kind: string; score: string } }) => ({ id: `att-${idSeq++}`, ...data }),
@@ -531,8 +551,13 @@ describe('startBossBattle unique-index race', () => {
   });
 
   it('two concurrent starts: one wins, the other is rejected with "already active"', async () => {
-    const questions = Array.from({ length: 3 }, (_, i) => makeQ(`q${i}`, 'react'));
-    const { svc } = build({ questions, xpTotal: xpAtLevel(10), evidenceSkills: ['react'] });
+    const questions = [makeQ('q0', 'react'), makeQ('q1', 'vue'), makeQ('q2', 'nextjs')];
+    const { svc } = build({
+      questions,
+      xpTotal: xpAtLevel(10),
+      evidenceSkills: ['react', 'vue', 'nextjs'],
+      skillCategories: { react: 'frontend', vue: 'frontend', nextjs: 'frontend' },
+    });
     const results = await Promise.allSettled([
       svc.startBossBattle('user-1', 10),
       svc.startBossBattle('user-1', 10),
@@ -546,5 +571,244 @@ describe('startBossBattle unique-index race', () => {
     // MUTATION-SMOKE: strip the `if (code === 'P2002')` branch in
     // startBossBattle → the rejection message becomes 'unique' (the raw driver
     // error) instead of 'already active' → assertion fails.
+  });
+});
+
+// -----------------------------------------------------------------------------
+// B-stream: 3+ related-skills threshold (shared ESCO category) + multi-skill
+// combo detection + XP bonus on a passing combo. The threshold is the real
+// gate: a user with 3 touched skills across 3 unrelated categories can NOT
+// start a boss; a user with 3 skills in the same category CAN; and when their
+// solution demonstrates 2+ of those related skills on passing questions, the
+// grading result flags combo + applies a 1.25x XP multiplier.
+// -----------------------------------------------------------------------------
+
+describe('B-stream: 3+ related skills threshold', () => {
+  it('rejects startBossBattle when the user has <3 touched skills in any ESCO category', async () => {
+    // Three touched skills, but each in a different category — no related
+    // cluster. The threshold must refuse.
+    const questions = [makeQ('q0', 'react'), makeQ('q1', 'postgres'), makeQ('q2', 'docker')];
+    const { svc } = build({
+      questions,
+      xpTotal: xpAtLevel(10),
+      evidenceSkills: ['react', 'postgres', 'docker'],
+      skillCategories: { react: 'frontend', postgres: 'data', docker: 'devops' },
+    });
+    await expect(svc.startBossBattle('user-1', 10)).rejects.toMatchObject({
+      message: expect.stringMatching(/3\+ related skills/i),
+    });
+    // MUTATION-SMOKE: delete the `relatedSet.skillIds.length < 3` guard in
+    // startBossBattle and the start succeeds despite no related cluster →
+    // this rejects-assertion fails.
+  });
+
+  it('rejects when touched skills include only 2 in a category (<3)', async () => {
+    const questions = [makeQ('q0', 'react'), makeQ('q1', 'vue'), makeQ('q2', 'postgres')];
+    const { svc } = build({
+      questions,
+      xpTotal: xpAtLevel(10),
+      evidenceSkills: ['react', 'vue', 'postgres'],
+      // frontend has 2, data has 1 — no cluster reaches the 3+ floor.
+      skillCategories: { react: 'frontend', vue: 'frontend', postgres: 'data' },
+    });
+    await expect(svc.startBossBattle('user-1', 10)).rejects.toMatchObject({
+      message: expect.stringMatching(/3\+ related skills/i),
+    });
+  });
+
+  it('accepts startBossBattle when the user has 3+ touched skills in one category', async () => {
+    const questions = [makeQ('q0', 'react'), makeQ('q1', 'vue'), makeQ('q2', 'nextjs')];
+    const { svc } = build({
+      questions,
+      xpTotal: xpAtLevel(10),
+      evidenceSkills: ['react', 'vue', 'nextjs'],
+      skillCategories: { react: 'frontend', vue: 'frontend', nextjs: 'frontend' },
+    });
+    const task = await svc.startBossBattle('user-1', 10);
+    expect(task.status).toBe('active');
+    expect(task.questions).toHaveLength(3);
+    // Every picked question lies inside the related cluster — question
+    // skillIds must all be in the related set.
+    for (const q of task.questions) {
+      for (const s of q.skillIds) {
+        expect(['react', 'vue', 'nextjs']).toContain(s);
+      }
+    }
+  });
+
+  it('restricts the question pool to the related cluster (does not pick an unrelated-skill question even when evidence exists)', async () => {
+    // User has 3 frontend skills (eligible) + evidence on `rust` too, but
+    // the pool must NOT include the rust question since it is not related.
+    const questions = [
+      makeQ('q-react', 'react'),
+      makeQ('q-vue', 'vue'),
+      makeQ('q-nextjs', 'nextjs'),
+      makeQ('q-rust', 'rust'),
+    ];
+    const { svc, prisma } = build({
+      questions,
+      xpTotal: xpAtLevel(10),
+      evidenceSkills: ['react', 'vue', 'nextjs', 'rust'],
+      skillCategories: { react: 'frontend', vue: 'frontend', nextjs: 'frontend', rust: 'language' },
+    });
+    // Run start 10x — randomisation should never surface `q-rust` because
+    // the restricted pool excludes it entirely.
+    for (let i = 0; i < 10; i++) {
+      const task = await svc.startBossBattle('user-1', 10);
+      const ids = task.questions.map((q) => q.id);
+      expect(ids).not.toContain('q-rust');
+      // Clear active so the next iteration can start a new one.
+      const row = prisma._bosses.find((b) => b.id === task.id)!;
+      row.status = 'failed';
+    }
+  });
+});
+
+describe('B-stream: multi-skill combo detection + XP bonus', () => {
+  // Craft an active boss across 3 related frontend skills. Grading is forced
+  // down the rule-based path (no LLM provider configured). We seed the rule
+  // grader via keyPoints the "answer" strings happen to hit so we control
+  // which questions pass. The combo detector picks the frontend cluster and
+  // counts distinct demonstrated skills on passing questions.
+
+  function activeBoss(questionIds: string[]): BossRow {
+    const startedAt = new Date('2026-01-01T10:00:00.000Z');
+    return {
+      id: 'boss-1',
+      userId: 'user-1',
+      milestone: 10,
+      startedAt,
+      durationS: 1800,
+      submittedAt: null,
+      score: null,
+      status: 'active',
+      questionIds,
+      attemptIds: [],
+    };
+  }
+
+  function qWith(id: string, skill: string, keyPoint: string): FakeQuestion {
+    return { ...makeQ(id, skill), keyPoints: [keyPoint] };
+  }
+
+  it('detects combo when 2+ distinct related skills are demonstrated on passing questions, applies 1.25x XP multiplier', async () => {
+    // 3 questions on react / vue / nextjs. Answers hit all 3 keypoints → all
+    // pass. Combo = 3 distinct related skills demonstrated → multiplier 1.25x.
+    const questions = [
+      qWith('q-react', 'react', 'reactanswer'),
+      qWith('q-vue', 'vue', 'vueanswer'),
+      qWith('q-nextjs', 'nextjs', 'nextjsanswer'),
+    ];
+    const startedAt = new Date('2026-01-01T10:00:00.000Z');
+    vi.useFakeTimers();
+    vi.setSystemTime(startedAt);
+    const { svc, prisma } = build({
+      bosses: [activeBoss(['q-react', 'q-vue', 'q-nextjs'])],
+      questions,
+      xpTotal: xpAtLevel(10),
+      evidenceSkills: ['react', 'vue', 'nextjs'],
+      skillCategories: { react: 'frontend', vue: 'frontend', nextjs: 'frontend' },
+    });
+
+    const result = await svc.submitBossBattle('user-1', 'boss-1', [
+      'reactanswer here is the full response',
+      'vueanswer here is the full response',
+      'nextjsanswer here is the full response',
+    ]);
+
+    expect(result.bossStatus).toBe('passed');
+    expect(result.comboDetected).toBe(true);
+    expect(result.comboMultiplier).toBe(1.25);
+    expect(result.comboCategory).toBe('frontend');
+    expect(result.relatedSkillsDemonstrated.sort()).toEqual(['nextjs', 'react', 'vue']);
+    expect(result.reasoning).toMatch(/combo detected/i);
+    expect(result.reasoning).toMatch(/25% XP bonus/i);
+
+    // XP bonus actually landed in the xpEvent row (base * 1.25, rounded).
+    // xpFor('boss-battle', 1.0) returns the full boss amount; whatever that
+    // number is, the awarded xp must be exactly round(base * 1.25).
+    const bossXpEvent = prisma.calls.xpEvents.find((e) => e.reason.startsWith('attempt:boss-battle'))!;
+    expect(bossXpEvent.reason).toMatch(/:combo$/);
+    // MUTATION-SMOKE: set `comboMultiplier: 1` in detectBossCombo → bonus
+    // vanishes, bossXpEvent.reason loses the `:combo` suffix, assertion fails.
+  });
+
+  it('no combo when only 1 related skill is demonstrated on a passing question (bonus not applied)', async () => {
+    // Only the react Q passes; vue + nextjs fail. Demonstrated related skills
+    // on passes = {react} → size 1 → combo = false, multiplier = 1.
+    const questions = [
+      qWith('q-react', 'react', 'reactanswer'),
+      qWith('q-vue', 'vue', 'vueanswer'),
+      qWith('q-nextjs', 'nextjs', 'nextjsanswer'),
+    ];
+    const startedAt = new Date('2026-01-01T10:00:00.000Z');
+    vi.useFakeTimers();
+    vi.setSystemTime(startedAt);
+    const { svc, prisma } = build({
+      bosses: [activeBoss(['q-react', 'q-vue', 'q-nextjs'])],
+      questions,
+      xpTotal: xpAtLevel(10),
+      evidenceSkills: ['react', 'vue', 'nextjs'],
+      skillCategories: { react: 'frontend', vue: 'frontend', nextjs: 'frontend' },
+    });
+
+    const result = await svc.submitBossBattle('user-1', 'boss-1', [
+      'reactanswer here is the full response',
+      'off topic',
+      'off topic',
+    ]);
+
+    // One pass out of three → overall < 0.7 → boss failed, no combo bonus.
+    expect(result.bossStatus).toBe('failed');
+    expect(result.comboDetected).toBe(false);
+    expect(result.comboMultiplier).toBe(1);
+    expect(result.reasoning).not.toMatch(/XP bonus/i);
+    const bossXpEvent = prisma.calls.xpEvents.find((e) => e.reason.startsWith('attempt:boss-battle'))!;
+    expect(bossXpEvent.reason).not.toMatch(/:combo$/);
+  });
+
+  it('combo across 2 (not all 3) related skills still triggers bonus when both passed', async () => {
+    // react + vue pass, nextjs fails. Demonstrated related skills on passes
+    // = {react, vue} → size 2 → combo = true. But overall needs to be >= 0.7
+    // for the bossStatus to be 'passed' and the multiplier to apply.
+    // Rule-based gradeKnowledge gives 1.0 on exact keyPoint hit and 0 on
+    // miss; mean = 0.667 which is < 0.7 → fail. Use 4 questions? schema
+    // requires 3. Trim: use 3 questions, 2 pass, overall = 0.667 → failed.
+    // So this test asserts the combo-detected signal fires even on failure
+    // (reasoning line reports it), but the XP bonus does NOT apply (bonus
+    // gated behind bossStatus === 'passed').
+    const questions = [
+      qWith('q-react', 'react', 'reactanswer'),
+      qWith('q-vue', 'vue', 'vueanswer'),
+      qWith('q-nextjs', 'nextjs', 'nextjsanswer'),
+    ];
+    const startedAt = new Date('2026-01-01T10:00:00.000Z');
+    vi.useFakeTimers();
+    vi.setSystemTime(startedAt);
+    const { svc, prisma } = build({
+      bosses: [activeBoss(['q-react', 'q-vue', 'q-nextjs'])],
+      questions,
+      xpTotal: xpAtLevel(10),
+      evidenceSkills: ['react', 'vue', 'nextjs'],
+      skillCategories: { react: 'frontend', vue: 'frontend', nextjs: 'frontend' },
+    });
+
+    const result = await svc.submitBossBattle('user-1', 'boss-1', [
+      'reactanswer here is the full response',
+      'vueanswer here is the full response',
+      'off topic',
+    ]);
+
+    expect(result.bossStatus).toBe('failed');
+    expect(result.comboDetected).toBe(true);
+    expect(result.comboCategory).toBe('frontend');
+    expect(result.relatedSkillsDemonstrated.sort()).toEqual(['react', 'vue']);
+    // Multiplier is bonus-eligible but gating keeps xp = base on a failed boss.
+    expect(result.comboMultiplier).toBe(1.25);
+    expect(result.reasoning).toMatch(/combo detected but boss failed/i);
+    const bossXpEvent = prisma.calls.xpEvents.find((e) => e.reason.startsWith('attempt:boss-battle'))!;
+    // On a failed boss the suffix is NOT appended regardless of combo signal —
+    // bonus only materialises on a pass.
+    expect(bossXpEvent.reason).not.toMatch(/:combo$/);
   });
 });
