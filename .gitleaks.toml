@@ -1,0 +1,35 @@
+# Gitleaks config for Career OS.
+# Default ruleset + a small allowlist for files that LOOK like secrets
+# but are intentional test fixtures or docs placeholders.
+#
+# To test locally: `gitleaks detect --source . --config .gitleaks.toml`
+
+title = "career-os gitleaks"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known-safe false positives + fixtures"
+paths = [
+  # Compiled artifacts under /dist are not source; skip to speed up scan.
+  '''.*/dist/.*''',
+  # Env templates document the shape, not real values.
+  '''\.env\.example$''',
+  '''\.env\.local\.example$''',
+  # Prisma migration SQL (no secrets inside; dropdowns catch false hits).
+  '''apps/api/prisma/migrations/.*/migration\.sql$''',
+  # Our own encryption test suite includes example ciphertexts.
+  '''packages/secrets/src/.*\.test\.ts$''',
+  # OAuth-flow docs contain example payload shapes with fake tokens.
+  '''docs/.*-setup\.md$''',
+  # NOTICES contains dep names, which trigger spurious entropy hits.
+  '''NOTICES$''',
+]
+regexes = [
+  # Placeholder keys used in docs + tests. If a real token ever looks
+  # like these something is very wrong already.
+  '''xoxb-test-token''',
+  '''gh[ps]_[A-Za-z0-9]{36,}-test''',
+  '''deepseek-test-key-\d+''',
+]

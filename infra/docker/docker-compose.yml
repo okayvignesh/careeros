@@ -11,11 +11,21 @@ name: careeros
 #       upgrade traceability. Digests captured via `docker buildx imagetools
 #       inspect <ref>` on 2026-09-27 (see scripts/verify-image-pins.sh).
 
+# Default log driver cap. Without this a long-running service can fill the
+# host disk with uncapped JSON logs; `max-size=10m` + `max-file=5` caps
+# total per-container log usage at 50MB. observability.md checklist item.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: '5'
+
 services:
   postgres:
     # postgres:16-alpine (digest via `docker buildx imagetools inspect`, 2026-09-27)
     image: postgres@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     restart: unless-stopped
+    logging: *default-logging
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required (see .env.example)}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required (openssl rand -base64 32)}
@@ -35,6 +45,7 @@ services:
     # redis:7-alpine (digest via `docker buildx imagetools inspect`, 2026-09-27)
     image: redis@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
     restart: unless-stopped
+    logging: *default-logging
     volumes:
       - redisdata:/data
     healthcheck:
@@ -49,6 +60,7 @@ services:
     # qdrant/qdrant:v1.12.4 (digest via `docker buildx imagetools inspect`, 2026-09-27)
     image: qdrant/qdrant@sha256:241edb9d7778327516ef218f8c74e1bd61b5ea42cd4f193cb8d0896199705636
     restart: unless-stopped
+    logging: *default-logging
     volumes:
       - qdrantdata:/qdrant/storage
     healthcheck:
@@ -100,6 +112,7 @@ services:
     # inspect`, 2026-09-27)
     image: ubuntu/squid@sha256:c9f5212b147a766529c7b026e2bebed37b998d33d0066b658596af5eba7cc65c
     restart: unless-stopped
+    logging: *default-logging
     volumes:
       - ./squid/squid.conf:/etc/squid/squid.conf:ro
       # /var/log/squid needs to be writable by the container's `proxy` user
@@ -125,6 +138,7 @@ services:
       context: ../..
       dockerfile: infra/docker/Dockerfile.api
     restart: unless-stopped
+    logging: *default-logging
     environment:
       NODE_ENV: ${NODE_ENV:-development}
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
@@ -177,6 +191,7 @@ services:
       context: ../..
       dockerfile: infra/docker/Dockerfile.worker
     restart: unless-stopped
+    logging: *default-logging
     environment:
       NODE_ENV: ${NODE_ENV:-development}
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
@@ -204,6 +219,7 @@ services:
       context: ../..
       dockerfile: infra/docker/Dockerfile.web
     restart: unless-stopped
+    logging: *default-logging
     environment:
       NODE_ENV: ${NODE_ENV:-development}
       NEXT_TELEMETRY_DISABLED: 1

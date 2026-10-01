@@ -1,0 +1,33 @@
+# security.md item 10: gitleaks secret scan on every push + PR.
+# Full-history scan is slow; on PRs we only diff the PR branch vs base.
+# Scheduled Monday run does a full-history scan as a safety net.
+name: gitleaks
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  schedule:
+    - cron: '0 7 * * 1'
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # PR + push: shallow is fine. Scheduled: fetch full history.
+          fetch-depth: ${{ github.event_name == 'schedule' && '0' || '1' }}
+
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # If/when we add a license, set GITLEAKS_LICENSE for the org-wide
+          # premium rule set. The default ruleset is adequate for a
+          # single-user project.
+        with:
+          config-path: .gitleaks.toml

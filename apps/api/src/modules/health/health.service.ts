@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import Redis from 'ioredis';
 import { QdrantStore } from '@careeros/embeddings';
 import { PrismaService } from '../../prisma/prisma.service';
+import { StorageService } from '../../common/storage.service';
 
 export interface Check {
   ok: boolean;
@@ -26,18 +27,22 @@ export class HealthService {
   private qdrant = new QdrantStore(process.env.QDRANT_URL ?? 'http://qdrant:6333');
   private readonly startedAt = Date.now();
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly storage: StorageService,
+  ) {}
 
   async check(): Promise<HealthResponse> {
     if (cached && Date.now() - cached.at < CACHE_MS) return cached.body;
 
-    const [postgres, redis, qdrant, ai] = await Promise.all([
+    const [postgres, redis, qdrant, minio, ai] = await Promise.all([
       this.checkPostgres(),
       this.checkRedis(),
       this.checkQdrant(),
+      this.checkMinio(),
       this.checkAi(),
     ]);
-    const checks = { postgres, redis, qdrant, ai };
+    const checks = { postgres, redis, qdrant, minio, ai };
     const allOk = Object.values(checks).every((c) => c.ok);
 
     const body: HealthResponse = {
@@ -78,6 +83,21 @@ export class HealthService {
     const t = Date.now();
     try {
       const ok = await Promise.race([this.qdrant.ping(), this.timeout(1500, 'qdrant timeout')]);
+      return ok
+        ? { ok: true, latencyMs: Date.now() - t }
+        : { ok: false, latencyMs: Date.now() - t, error: 'ping failed' };
+    } catch (e) {
+      return { ok: false, latencyMs: Date.now() - t, error: (e as Error).message };
+    }
+  }
+
+  private async checkMinio(): Promise<Check> {
+    const t = Date.now();
+    try {
+      const ok = await Promise.race([
+        this.storage.ping(),
+        this.timeout<boolean>(1500, 'minio timeout'),
+      ]);
       return ok
         ? { ok: true, latencyMs: Date.now() - t }
         : { ok: false, latencyMs: Date.now() - t, error: 'ping failed' };

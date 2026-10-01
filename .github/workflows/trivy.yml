@@ -1,0 +1,55 @@
+# security.md item 10: Trivy image scan.
+# Runs on PR + push + weekly cron. Scans the three built images (api,
+# web, worker) for OS + lang-dep CVEs HIGH or CRITICAL. Uploads SARIF
+# to Code Scanning so findings show up next to CodeQL.
+name: Trivy
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  schedule:
+    - cron: '0 6 * * 1'
+
+jobs:
+  scan:
+    name: Scan ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: api
+            dockerfile: infra/docker/Dockerfile.api
+          - image: web
+            dockerfile: infra/docker/Dockerfile.web
+          - image: worker
+            dockerfile: infra/docker/Dockerfile.worker
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build local tag
+        run: docker build -f ${{ matrix.dockerfile }} -t careeros-${{ matrix.image }}:ci .
+
+      - uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: careeros-${{ matrix.image }}:ci
+          format: sarif
+          output: trivy-${{ matrix.image }}.sarif
+          severity: HIGH,CRITICAL
+          # Ignore unfixed vulns on scheduled scans - they are noise if
+          # upstream has not shipped a patch yet. Keep them on PR runs
+          # so a new high-sev dep introduction is visible.
+          ignore-unfixed: ${{ github.event_name == 'schedule' }}
+          exit-code: '1'
+
+      - name: Upload SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-${{ matrix.image }}.sarif
+          category: trivy-${{ matrix.image }}

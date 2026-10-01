@@ -114,6 +114,20 @@ export class StorageService implements OnModuleInit {
   }
 
   /**
+   * Observability: ping used by HealthService to include MinIO in /health.
+   * Does a cheap bucketExists call; returns false on any error so the
+   * caller can downgrade status to `degraded` without crashing.
+   */
+  async ping(): Promise<boolean> {
+    try {
+      await this.minio.bucketExists(BUCKET);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Put an uploaded resume into MinIO. Key: `resumes/<userId>/<resumeId>/<yyyymmdd>_<filename>`.
    * Verifies magic bytes server-side (A-M5) — client-supplied mimetype is not trusted.
    * Throws {@link InvalidFileTypeError} on magic-byte mismatch; caller is responsible for
