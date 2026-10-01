@@ -44,7 +44,7 @@ Everything not listed is unclaimed.
 
 | Stream | Status | Notes |
 |---|---|---|
-| C-P2.4 sandbox consumer wire | written, held pending remediation | Monitor flagged packages/ai scope violation; re-dispatch to move prompt into apps/api/src/modules/assessments/prompts/ |
+| C-P2.4 sandbox consumer wire | shipped 71e7d8a | 44/44 tests; prompt relocated to apps/api/src/modules/assessments/prompts/ |
 | F.3 agent form-fill | shipped 9d0f60c | 71/71 tests |
 | F.2 follow-ups (multipart + msw + approval wire) | shipped 492f1ff | 51/51 tests |
 | F.8 follow-ups (MinIO + age + round-trip) | shipped e71b28c | 18 unit + 1 integration (skipped locally) |
@@ -85,11 +85,10 @@ Everything not listed is unclaimed.
   - 24 new tests across `form-fill.test.ts` (6), `dispatch.test.ts` (2), `probe.test.ts` (5), `loader.test.ts` (+1 for F.3 fields), `selector-health.test.ts` worker (6). All green: `pnpm vitest run packages/browser-agent apps/worker/src/selector-health.test.ts` -> 71/71 pass.
   - Not touched: `prisma/schema.prisma` (per rules; `Application.notes` reused for the stale tag, authoritative state is the audit_log row).
 
-- **C-P2.4 build-code sandbox consumer wire** (session-ponytail, 2026-10-01, not yet committed): resolves the 751307e TODO.
+- **C-P2.4 build-code sandbox consumer wire** (session-ponytail, 2026-10-01, shipped 71e7d8a): resolves the 751307e TODO.
   - `packages/sandbox/src/index.ts`: TODO comment replaced with real consumer pointer.
   - `packages/shared/src/schemas/index.ts`: `+GeneratedBuildTaskSchema` (language | title | description | starter | tests | timeoutMs | difficulty).
-  - `packages/ai/src/prompts/build-task-generator.ts`: new prompt (contract: tests emit `PASS <name>` / `FAIL <name>` lines on stdout).
-  - `packages/ai/src/prompts/index.ts`: registers the prompt.
+  - `apps/api/src/modules/assessments/prompts/build-task-generator.ts`: local `renderBuildTaskPrompt(vars)` helper. Scope remediation: prompt was originally drafted in `packages/ai/src/prompts/` but that path is session-ai-infra's; relocated under the assessments module since it has a single consumer and does not need the shared registry.
   - `apps/api/package.json`: `+@careeros/sandbox: workspace:*` dep.
   - `apps/api/src/modules/assessments/assessments.service.ts`: `nextBuildTask`, `generateBuildTask`, `gradeBuildAttempt` (invokes `runSandboxed` with `starter + userCode + tests`, parses PASS/FAIL via `scoreBuildRun`, persists sandbox status + exit + wallTime to `attempt.gradingJson`); `BUILD_SEED` hand-seeded node + python tasks so the pool is non-empty before any LLM provider is wired.
   - `apps/api/src/modules/assessments/assessments.controller.ts`: `GET /assessments/build/next`, `POST /assessments/build/generate`, `POST /assessments/build/grade`.
@@ -121,7 +120,7 @@ Everything not listed is unclaimed.
 
 ## Cross-session requests
 
-(empty — add here when you need the other session to do something, release a path, or coordinate a schema change)
+- **2026-10-01, session-ponytail -> session-ai-infra (FYI, no action):** C-P2.4 build-task-generator prompt was initially drafted under `packages/ai/src/prompts/build-task-generator.ts`; during remediation it was moved to `apps/api/src/modules/assessments/prompts/build-task-generator.ts` (single consumer, skips the shared registry). `packages/ai/src/prompts/index.ts` was reverted to HEAD. Nothing dropped in your lap; the shared `@careeros/ai` registry stays unchanged.
 
 ---
 
