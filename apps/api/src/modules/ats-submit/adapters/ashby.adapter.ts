@@ -3,16 +3,14 @@
 // Reference: https://developers.ashbyhq.com/reference/applicationcreate
 // Endpoint: POST https://api.ashbyhq.com/application.create
 // Auth: HTTP Basic with API key as the username (empty password).
+// Content-Type: multipart/form-data when a resume file is attached, with a
+// `json` part carrying the stringified JSON body and a `resumeFile` part
+// carrying the PDF bytes (per Ashby's file-upload convention). We always
+// go multipart because the resume PDF is always attached in our flow.
 // Idempotency: Ashby accepts an `Idempotency-Key` header; a repeat with
 // the same key returns the original 2xx without creating a duplicate.
 // Rate limits: 500 req/5min per org per Ashby docs; well above our
 // single-user volume.
-//
-// We do NOT implement the resume upload (file-handle flow) here - the
-// orchestrator writes an audit entry noting the resume is attached
-// client-side. For MVP we send JSON only; a follow-up slice adds the
-// multipart variant once Ashby's `applicationFile.create` endpoint is
-// wired.
 
 import type {
   AtsCredentials,
@@ -31,7 +29,7 @@ export class AshbyAdapter implements AtsSubmitAdapter {
   ) {}
 
   async submit(creds: AtsCredentials, payload: SubmitPayload): Promise<SubmitResult> {
-    const body = {
+    const jsonBody = {
       jobPostingId: payload.jobBoardId,
       candidate: {
         name: payload.candidate.name,
@@ -46,17 +44,29 @@ export class AshbyAdapter implements AtsSubmitAdapter {
         : {}),
     };
 
+    // Build multipart. Ashby expects a `json` part (stringified body) + file
+    // parts named by field (`resumeFile`, `coverLetterFile`, ...). Node >=18
+    // provides global FormData + Blob; no extra dep.
+    const form = new FormData();
+    form.set('json', JSON.stringify(jsonBody));
+    form.set(
+      'resumeFile',
+      new Blob([bufferToArrayBuffer(payload.resume.bytes)], { type: 'application/pdf' }),
+      payload.resume.filename || 'resume.pdf',
+    );
+
     let response: Response;
     try {
       response = await this.fetchFn(ASHBY_URL, {
         method: 'POST',
         headers: {
           Authorization: 'Basic ' + Buffer.from(`${creds.apiKey}:`).toString('base64'),
-          'Content-Type': 'application/json',
           Accept: 'application/json',
           'Idempotency-Key': payload.idempotencyKey,
+          // Content-Type is set automatically by fetch when body is FormData
+          // (it must include the generated multipart boundary).
         },
-        body: JSON.stringify(body),
+        body: form,
       });
     } catch (err) {
       return {
@@ -136,4 +146,15 @@ function extractAshbyErrorMessage(body: unknown): string | null {
     if (typeof first.message === 'string') return first.message;
   }
   return null;
+}
+
+// Blob's BlobPart demands a plain ArrayBuffer (not SharedArrayBuffer and not
+// a Node Buffer with ArrayBufferLike backing). Copy the bytes into a fresh
+// ArrayBuffer so TS accepts the Blob construction. ponytail: a copy per
+// submit is fine for a single-user MVP; move to a zero-copy path when the
+// resume PDF is big enough to measure (today it's typically < 200 KB).
+function bufferToArrayBuffer(buf: Buffer): ArrayBuffer {
+  const copy = new ArrayBuffer(buf.byteLength);
+  new Uint8Array(copy).set(buf);
+  return copy;
 }

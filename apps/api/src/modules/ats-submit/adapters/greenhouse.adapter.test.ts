@@ -52,6 +52,40 @@ describe('GreenhouseAdapter', () => {
     }
   });
 
+  it('base64-encodes resume PDF into attachments[] when bytes are present', async () => {
+    const fetchFn = makeFetch({
+      ok: true,
+      status: 201,
+      bodyText: JSON.stringify({ id: 1, applications: [{ id: 2 }] }),
+    });
+    const adapter = new GreenhouseAdapter(fetchFn as unknown as typeof globalThis.fetch);
+    const pdfBytes = Buffer.from('%PDF-1.4 fake body');
+    await adapter.submit(CREDS, {
+      ...PAYLOAD,
+      resume: { bytes: pdfBytes, filename: 'tailored.pdf' },
+    });
+    const body = JSON.parse((fetchFn.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.attachments).toHaveLength(1);
+    expect(body.attachments[0]).toEqual({
+      filename: 'tailored.pdf',
+      type: 'resume',
+      content: pdfBytes.toString('base64'),
+      content_type: 'application/pdf',
+    });
+  });
+
+  it('omits attachments[] when resume bytes are empty (back-compat path)', async () => {
+    const fetchFn = makeFetch({
+      ok: true,
+      status: 201,
+      bodyText: JSON.stringify({ id: 1, applications: [{ id: 2 }] }),
+    });
+    const adapter = new GreenhouseAdapter(fetchFn as unknown as typeof globalThis.fetch);
+    await adapter.submit(CREDS, PAYLOAD);
+    const body = JSON.parse((fetchFn.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.attachments).toBeUndefined();
+  });
+
   it('splits a single-word name into first + last (defensive)', async () => {
     const fetchFn = makeFetch({
       ok: true,

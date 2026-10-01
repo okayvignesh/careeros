@@ -15,3 +15,6 @@ export type { A11yOptions } from './axe-checker';
 export * as arbitraries from './fast-check-arbitraries';
 export { resetDb } from './db-reset';
 export type { HasRawSql } from './db-reset';
+// F.2 ATS contract-test fixtures. See src/fixtures/ats/README-style header
+// comments for provenance.
+export * as atsFixtures from './fixtures/ats';

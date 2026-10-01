@@ -4,14 +4,21 @@
 // Endpoint: POST https://harvest.greenhouse.io/v1/candidates
 // Auth: HTTP Basic with API key as the username (empty password).
 // Required header: On-Behalf-Of (Greenhouse user id). Idempotency via
-// candidate dedupe on (external_id, email); we also send `idempotency_key`
-// which Greenhouse rejects as unknown but keeps our client contract
-// uniform; the orchestrator still relies on our own ats_submissions
-// unique constraint for strict idempotency.
+// candidate dedupe on (external_id, email). The orchestrator still relies
+// on our own ats_submissions unique constraint for strict idempotency.
+//
+// Resume upload: Greenhouse Harvest does NOT support multipart/form-data
+// here; the documented path is `attachments: [{ filename, type, content,
+// content_type }]` where `content` is base64 of the file bytes, inline in
+// the JSON body. We send PDFs as a 'resume' attachment this way.
+//
+// ponytail: base64 inline instead of multipart because that's what the API
+// takes. If Greenhouse ever ships a multipart file endpoint, swap to it;
+// the shape of SubmitPayload.resume (bytes + filename) is already right.
 //
 // Rate limits: 50 req/10s burst, 200 req/minute sustained per Greenhouse
-// docs. We let the orchestrator's retry wrapper + ats_submissions
-// composite unique handle 429s.
+// docs. The orchestrator's retry wrapper + ats_submissions composite unique
+// handle 429s.
 
 import type {
   AtsCredentials,
@@ -40,6 +47,18 @@ export class GreenhouseAdapter implements AtsSubmitAdapter {
     }
     const [first, ...rest] = payload.candidate.name.trim().split(/\s+/);
     const last = rest.join(' ') || first || 'Candidate';
+    const resumeAttachment = payload.resume.bytes.byteLength > 0
+      ? {
+          attachments: [
+            {
+              filename: payload.resume.filename || 'resume.pdf',
+              type: 'resume',
+              content: payload.resume.bytes.toString('base64'),
+              content_type: 'application/pdf',
+            },
+          ],
+        }
+      : {};
     const body = {
       first_name: first ?? 'Candidate',
       last_name: last,
@@ -51,6 +70,7 @@ export class GreenhouseAdapter implements AtsSubmitAdapter {
       ...(payload.candidate.linkedinUrl
         ? { social_media_addresses: [{ value: payload.candidate.linkedinUrl }] }
         : {}),
+      ...resumeAttachment,
       applications: [
         {
           job_id: Number(payload.jobBoardId) || payload.jobBoardId,

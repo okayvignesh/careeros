@@ -21,10 +21,17 @@ export class AtsSubmitController {
     private readonly session: SessionService,
   ) {}
 
-  /** POST body: { applicationId, ats, jobBoardId, idempotencyKey? } */
+  /**
+   * POST body: `{ applicationId, ats, jobBoardId, idempotencyKey? }`.
+   *
+   * F.1 wire: this endpoint ENQUEUES an approval item - the actual ATS POST
+   * fires later from the approvals worker once the user approves. The 202
+   * response carries the approval item id; clients poll /me/approvals/:id
+   * or watch the SSE stream to see sent / failed.
+   */
   @Post()
-  @HttpCode(200)
-  async submit(
+  @HttpCode(202)
+  async enqueue(
     @Req() req: Request,
     @Body()
     body: {
@@ -33,21 +40,22 @@ export class AtsSubmitController {
       jobBoardId?: string;
       idempotencyKey?: string;
     },
-  ) {
+  ): Promise<{ approvalItemId: string; state: string; kind: string }> {
     const userId = this.session.requireUserId(req);
     if (!body?.applicationId) throw new BadRequestException('applicationId required');
     if (!body?.ats || !ATS_IDS.has(body.ats as AtsId)) {
       throw new BadRequestException(`ats must be one of ${[...ATS_IDS].join(', ')}`);
     }
     if (!body?.jobBoardId) throw new BadRequestException('jobBoardId required');
-    const input: Parameters<AtsSubmitService['submit']>[0] = {
+    const input: Parameters<AtsSubmitService['enqueue']>[0] = {
       userId,
       applicationId: body.applicationId,
       ats: body.ats as AtsId,
       jobBoardId: body.jobBoardId,
     };
     if (body.idempotencyKey) input.idempotencyKey = body.idempotencyKey;
-    return this.submitter.submit(input);
+    const item = await this.submitter.enqueue(input);
+    return { approvalItemId: item.id, state: item.state, kind: item.kind };
   }
 
   @Get()

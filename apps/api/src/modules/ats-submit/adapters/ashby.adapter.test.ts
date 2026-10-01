@@ -51,12 +51,26 @@ describe('AshbyAdapter', () => {
     const headers = (init as RequestInit).headers as Record<string, string>;
     expect(headers['Authorization']).toBe('Basic ' + Buffer.from('ash-key:').toString('base64'));
     expect(headers['Idempotency-Key']).toBe('ikey-1');
+    // Body is multipart FormData with a `json` part + `resumeFile` part.
+    // No Content-Type header set manually (fetch adds the boundary).
+    expect(headers['Content-Type']).toBeUndefined();
+    const body = (init as RequestInit).body as FormData;
+    expect(body).toBeInstanceOf(FormData);
+    const jsonPart = body.get('json');
+    expect(typeof jsonPart).toBe('string');
+    const parsed = JSON.parse(jsonPart as string);
+    expect(parsed.jobPostingId).toBe('job-xyz');
+    expect(parsed.candidate.email).toBe('jane@example.com');
+    const file = body.get('resumeFile');
+    expect(file).toBeInstanceOf(Blob);
+    expect((file as Blob).type).toBe('application/pdf');
     if (result.ok) {
       expect(result.atsApplicationId).toBe('ash-app-1');
       expect(result.confirmationUrl).toContain('ash-app-1');
     }
     // MUTATION-SMOKE: drop the Idempotency-Key header in the adapter and
-    // the second assertion fails.
+    // the second assertion fails. Drop the resumeFile part and the Blob
+    // assertion fails.
   });
 
   it('marks 429 as retryable', async () => {
