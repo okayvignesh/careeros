@@ -65,6 +65,7 @@ Everything not listed is unclaimed.
 | B. Boss-battle 3+ related-skills + multi-skill combo | shipped e743c20 | 19/19 |
 | C. Test backfill (backup byte-inspection + enc-key exclusion + email fuzz + migration safety) | shipped 88dfc9c | 76/76 |
 | D. Container hardening (non-root + cap-drop + read-only; distroless deferred) + backup RPO/RTO docs | shipped cc914a5 | docker compose config EXIT 0 both modes |
+| Grader agents (debugging + mock-interview + system-design) | shipped 522932d | 6/6 new, 57/57 assessments module; prompts local per C-P2.4 pattern |
 
 ### session-ai-infra
 
@@ -78,6 +79,33 @@ Everything not listed is unclaimed.
 ---
 
 ## Shipped this cross-session batch
+
+- **Remaining assessment grader agents (debugging + mock-interview + system-design)** (session-ponytail, 2026-10-01, not yet committed): resolves the remaining-graders block under `plan/DEFERRED.md` ai-safety.md "Agent boundaries". All three quest kinds exist today (confirmed in `assessments.service.ts`: `kind: 'debugging' | 'mock-interview' | 'system-design'`); nothing was blocked on C-P2.5.
+  - **Local prompts** (new, prompts live in-module per the C-P2.4 remediation):
+    - `apps/api/src/modules/assessments/prompts/debugging-grader.ts` — `renderDebuggingGraderPrompt(vars)` → `{system, user, schema}`; mirrors packages/ai catalog `debugging-task-grader` verbatim.
+    - `apps/api/src/modules/assessments/prompts/mock-interview-grader.ts` — same shape, mirrors catalog `mock-interview-grader`.
+    - `apps/api/src/modules/assessments/prompts/system-design-grader.ts` — same shape, mirrors catalog `system-design-grader`; the caller renders `SYSTEM_DESIGN_RUBRIC` dimensions into `{{rubric}}`.
+    - `UNTRUSTED_SYSTEM_CLAUSE` imported from `@careeros/ai`; schema binds re-use `DebuggingGradeSchema` / `MockInterviewGradeSchema` / `RubricGradeSchema` from `@careeros/shared`.
+  - **Grader agent classes + AgentDef registrations** (new):
+    - `apps/api/src/modules/assessments/agents/debugging-grader.agent.ts` — `DebuggingGraderAgent` class with `async grade(provider: AIProvider, inputs): Promise<DebuggingGrade>`; InputSchema (`.parse` guards bad input before the LLM call); calls `provider.chatStructured({messages, schema, temperature: 0})`. Also exports `AgentDef<DebuggingGraderInput, DebuggingGrade>` + `registerDebuggingGraderAgent(registry)` so the shared `agentRegistry` lists it alongside knowledge + code-review graders. `ponytail:` comment: rubric criteria hardcoded in `DebuggingGradeSchema`; move to per-Question grading-rubric column when a different debugging question wants different criteria.
+    - `apps/api/src/modules/assessments/agents/mock-interview-grader.agent.ts` — same shape, 3-question (`.length(3)`) contract pinned in the shared schema. `ponytail:` comment names the multi-turn upgrade path.
+    - `apps/api/src/modules/assessments/agents/system-design-grader.agent.ts` — same shape, rubric passed in as a pre-rendered string so the agent stays rubric-agnostic. `ponytail:` comment names the per-question-rubric upgrade.
+  - **Service wiring** in `apps/api/src/modules/assessments/assessments.service.ts`:
+    - Added `AIProvider` type import from `@careeros/ai`.
+    - 3 new protected field seams: `debuggingGrader`, `mockInterviewGrader`, `systemDesignGrader` (same `field, not constructor arg` pattern as the existing `runSandbox` seam so no test file needs a widened constructor signature). Each defaults to a `new <Kind>GraderAgent()`.
+    - New private method `runGraderAgentOrFallback<T>(userId, {label, sensitivity, callLlm, fallback})` — agent-based sibling of the existing `runLlmGraderOrFallback`. Same gate chain (usage + provider config + sensitivity + decrypt + non-deepseek bail + per-user concurrency ceiling + rule-based fallback) but the LLM call step is a caller-supplied `callLlm(provider)` closure instead of a prompt-registry id. Knowledge + code-review stay on the old method (out of scope per task rules).
+    - 3 existing `grade<Kind>WithLlmOrFallback` methods swapped to call `runGraderAgentOrFallback(... callLlm: (p) => this.<kind>Grader.grade(p, inputs))`. All surrounding grading (attempt row shape, evidence writes, XP, streak, hits/misses summarisation, dimension clamp for system-design) left exactly as-is per the "do NOT rewrite surrounding grading" rule.
+  - **Module wiring** in `apps/api/src/modules/assessments/assessments.module.ts`: three new `register<Kind>GraderAgent(agentRegistry)` calls in `onModuleInit`, mirroring the shipped knowledge + code-review registrations. Idempotent because `AgentRegistry.register` short-circuits on identical shape.
+  - **Tests** (new, one per grader class, assert-based with a stubbed `AIProvider`):
+    - `apps/api/src/modules/assessments/agents/debugging-grader.agent.test.ts` (2 cases)
+    - `apps/api/src/modules/assessments/agents/mock-interview-grader.agent.test.ts` (2 cases)
+    - `apps/api/src/modules/assessments/agents/system-design-grader.agent.test.ts` (2 cases)
+    - Each file: (a) one happy-path test proves the grader renders the real prompt, calls `provider.chatStructured`, and returns the Zod-valid Grade shape; the fake provider echoes `schema.parse(response)` so the fake cannot drift from the real contract. The test asserts the question + attempt text actually appear in the user message (proof the grader is grading real inputs). (b) one input-rejection test proves the InputSchema is enforced BEFORE the LLM call — `chatStructured` is not called when `fix` / `questions` / `scenario` is empty.
+    - 6/6 new tests pass; 57/57 across the whole assessments module (no pre-existing test broken by the service rewiring).
+  - **Nothing shipped was blocked.** All three quest kinds exist in the Question table with `kind` enum values today; no schema change required; `prisma/schema.prisma` untouched.
+  - **Test command for monitor**: `pnpm vitest run apps/api/src/modules/assessments/`.
+  - **Scope respected**: no changes to `packages/ai/**` (packages/ai prompts for these three graders remain registered in the shared catalog — out of scope), no `prisma/schema.prisma`, no `apps/web/**`, no `apps/api/src/modules/{interview-prep,outreach,slack}/**`, no `apps/worker/**`. `packages/ai/src/prompts/index.ts` unchanged; the three new prompts live local to the assessments module per the C-P2.4 remediation pattern.
+  - **No em dashes** in any user-facing string added (BadRequestException messages + schema validation messages inherit from Zod defaults, unchanged).
 
 - **Stream B: Boss-battle 3+ related-skills threshold + multi-skill combo** (session-ponytail, 2026-10-01, not yet committed): resolves `plan/DEFERRED.md` P2 "Boss-battle 3+ related-skills threshold + multi-skill combo requirement".
   - `apps/api/src/modules/assessments/assessments.service.ts`:
