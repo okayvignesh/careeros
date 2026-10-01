@@ -17,11 +17,23 @@ const KEY = loadMasterKey();
  * middleware left. `resume.service.ts`'s in-transaction manual encrypt is now
  * redundant but harmless (it produces a marker; `encryptRow` no-ops on markers).
  */
-const ENCRYPTED_FIELDS: Record<string, { column: string; kind: 'string' | 'json' }> = {
-  ResumeFact: { column: 'content', kind: 'json' },
+type FieldSpec = { column: string; kind: 'string' | 'json' };
+
+const ENCRYPTED_FIELDS: Record<string, FieldSpec[]> = {
+  ResumeFact: [{ column: 'content', kind: 'json' }],
   // A-M4: raw source excerpts logged for eval review. Row still exposes
   // snippetHash + snippetOffset in cleartext for low-privilege lookups.
-  LlmHallucinationLog: { column: 'snippet', kind: 'string' },
+  LlmHallucinationLog: [{ column: 'snippet', kind: 'string' }],
+  // security.md item 5: user-authored free-text fields that quote PII.
+  // We never query/filter on these columns in the application, so losing
+  // predicate pushdown is fine. The `by` + `status` + `id` columns stay
+  // plaintext for lookup / indexing.
+  Evidence: [{ column: 'detail', kind: 'json' }],
+  Application: [{ column: 'notes', kind: 'string' }],
+  OutreachMessage: [
+    { column: 'body', kind: 'string' },
+    { column: 'subject', kind: 'string' },
+  ],
 };
 
 /**
@@ -36,18 +48,18 @@ export function buildPrismaClient(metrics?: MetricsService) {
     query: {
       $allModels: {
         async $allOperations({ model, operation, args, query }) {
-          const spec = ENCRYPTED_FIELDS[model];
+          const specs = ENCRYPTED_FIELDS[model];
 
           // Write path: encrypt marked columns landing in the request.
-          if (spec && isWrite(operation)) {
+          if (specs && isWrite(operation)) {
             const a = args as { data?: unknown } | undefined;
             if (a?.data) {
               if (Array.isArray(a.data)) {
                 a.data = a.data.map((row) =>
-                  encryptRow(row as Record<string, unknown>, spec),
+                  encryptRow(row as Record<string, unknown>, specs),
                 );
               } else if (typeof a.data === 'object') {
-                a.data = encryptRow(a.data as Record<string, unknown>, spec);
+                a.data = encryptRow(a.data as Record<string, unknown>, specs);
               }
             }
           }
@@ -69,12 +81,12 @@ export function buildPrismaClient(metrics?: MetricsService) {
           }
 
           // Read path: decrypt marked columns on the response side.
-          if (spec && isRead(operation) && result != null) {
+          if (specs && isRead(operation) && result != null) {
             if (Array.isArray(result)) {
-              return result.map((row) => decryptRow(row as Record<string, unknown>, spec));
+              return result.map((row) => decryptRow(row as Record<string, unknown>, specs));
             }
             if (typeof result === 'object') {
-              return decryptRow(result as Record<string, unknown>, spec);
+              return decryptRow(result as Record<string, unknown>, specs);
             }
           }
           return result;
@@ -183,27 +195,32 @@ function isRead(op: string): boolean {
 
 function encryptRow(
   row: Record<string, unknown>,
-  spec: { column: string; kind: 'string' | 'json' },
+  specs: FieldSpec[],
 ): Record<string, unknown> {
-  const raw = row[spec.column];
-  if (raw == null) return row;
-  const asString = spec.kind === 'json' ? JSON.stringify(raw) : String(raw);
-  if (isEncryptedField(asString)) return row; // already marked
-  return { ...row, [spec.column]: encryptField(asString, KEY, spec.column) };
+  let out = row;
+  for (const spec of specs) {
+    const raw = out[spec.column];
+    if (raw == null) continue;
+    const asString = spec.kind === 'json' ? JSON.stringify(raw) : String(raw);
+    if (isEncryptedField(asString)) continue; // already marked
+    out = { ...out, [spec.column]: encryptField(asString, KEY, spec.column) };
+  }
+  return out;
 }
 
 function decryptRow(
   row: Record<string, unknown>,
-  spec: { column: string; kind: 'string' | 'json' },
+  specs: FieldSpec[],
 ): Record<string, unknown> {
-  const raw = row[spec.column];
-  if (raw == null) return row;
-  if (typeof raw !== 'string') return row; // JSON column with unencrypted legacy value
-  if (!isEncryptedField(raw)) {
-    // Pre-encryption legacy row. Return as-is; Prisma already parsed JSON columns.
-    return row;
+  let out = row;
+  for (const spec of specs) {
+    const raw = out[spec.column];
+    if (raw == null) continue;
+    if (typeof raw !== 'string') continue; // JSON column with unencrypted legacy value
+    if (!isEncryptedField(raw)) continue; // Pre-encryption legacy row.
+    const plain = decryptField(raw, KEY, spec.column);
+    const value = spec.kind === 'json' ? JSON.parse(plain) : plain;
+    out = { ...out, [spec.column]: value };
   }
-  const plain = decryptField(raw, KEY, spec.column);
-  const value = spec.kind === 'json' ? JSON.parse(plain) : plain;
-  return { ...row, [spec.column]: value };
+  return out;
 }
