@@ -1,10 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import type { PrismaService } from '../../prisma/prisma.service';
+import type { StorageService } from '../../common/storage.service';
 import {
   EXPORT_SCHEMA_VERSION,
   MeService,
   USER_TABLES,
 } from './me.service';
+
+// Minimal stand-in: these tests exercise exportForUser + deleteUser +
+// assertDeletedForUser, none of which touch MinIO. exportToStorage has its
+// own integration test (me.storage.integration.test.ts) that runs against a
+// real MinIO container.
+function fakeStorage(): StorageService {
+  return {
+    putExport: async () => 'exports/u-1/stub.age',
+    presignExportDownload: async () => 'https://stub/presigned',
+  } as unknown as StorageService;
+}
 
 /**
  * F.8 unit tests. The service is thin (query + hash + delete); the payoff
@@ -64,7 +76,7 @@ function fakePrisma(seed: { rowsPerTable?: number; user?: { id: string; email: s
 describe('MeService.exportForUser', () => {
   it('writes one manifest row per USER_TABLES entry', async () => {
     const { service } = fakePrisma({ rowsPerTable: 2 });
-    const svc = new MeService(service);
+    const svc = new MeService(service, fakeStorage());
     const payload = await svc.exportForUser('u-1');
     expect(payload.manifest.tables).toHaveLength(USER_TABLES.length);
     // MUTATION-SMOKE: drop any entry from USER_TABLES and this count changes.
@@ -72,7 +84,7 @@ describe('MeService.exportForUser', () => {
 
   it('stamps schema version + user email into the manifest', async () => {
     const { service } = fakePrisma({ rowsPerTable: 0, user: { id: 'u-1', email: 'me@example.com' } });
-    const svc = new MeService(service);
+    const svc = new MeService(service, fakeStorage());
     const payload = await svc.exportForUser('u-1');
     expect(payload.manifest.userId).toBe('u-1');
     expect(payload.manifest.email).toBe('me@example.com');
@@ -81,7 +93,7 @@ describe('MeService.exportForUser', () => {
 
   it('manifest rowCount matches the tables map length', async () => {
     const { service } = fakePrisma({ rowsPerTable: 3 });
-    const svc = new MeService(service);
+    const svc = new MeService(service, fakeStorage());
     const payload = await svc.exportForUser('u-1');
     for (const row of payload.manifest.tables) {
       expect(payload.tables[row.name]).toHaveLength(row.rowCount);
@@ -90,7 +102,7 @@ describe('MeService.exportForUser', () => {
 
   it('sha256 is deterministic for the same payload', async () => {
     const { service } = fakePrisma({ rowsPerTable: 2 });
-    const svc = new MeService(service);
+    const svc = new MeService(service, fakeStorage());
     const [p1, p2] = await Promise.all([svc.exportForUser('u-1'), svc.exportForUser('u-1')]);
     // Table hashes are computed off row content; identical fake data means
     // identical hashes. If someone accidentally inserts non-deterministic
@@ -104,7 +116,7 @@ describe('MeService.exportForUser', () => {
 describe('MeService.deleteUser', () => {
   it('calls prisma.user.delete with the userId', async () => {
     const { service, deleteCalls } = fakePrisma({ rowsPerTable: 3 });
-    const svc = new MeService(service);
+    const svc = new MeService(service, fakeStorage());
     const result = await svc.deleteUser('u-1');
     expect(deleteCalls).toHaveLength(1);
     expect(deleteCalls[0]!.where).toEqual({ id: 'u-1' });
@@ -116,7 +128,7 @@ describe('MeService.deleteUser', () => {
 
   it('assertDeletedForUser reports ok when every count is 0', async () => {
     const { service } = fakePrisma({ rowsPerTable: 3 });
-    const svc = new MeService(service);
+    const svc = new MeService(service, fakeStorage());
     await svc.deleteUser('u-1'); // flip the fake to "post-delete" mode
     const parity = await svc.assertDeletedForUser('u-1');
     expect(parity.ok).toBe(true);
@@ -125,7 +137,7 @@ describe('MeService.deleteUser', () => {
 
   it('assertDeletedForUser reports non-zero tables when parity fails', async () => {
     const { service } = fakePrisma({ rowsPerTable: 3 });
-    const svc = new MeService(service);
+    const svc = new MeService(service, fakeStorage());
     // Skip deleteUser call - counts stay at 3 - parity must fail on every table.
     const parity = await svc.assertDeletedForUser('u-1');
     expect(parity.ok).toBe(false);

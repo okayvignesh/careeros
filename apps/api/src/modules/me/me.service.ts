@@ -1,6 +1,8 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import { PrismaService } from '../../prisma/prisma.service';
+import { StorageService } from '../../common/storage.service';
 
 /**
  * F.8: user-owned tables. If a table stores rows keyed to a userId, it lives
@@ -98,20 +100,35 @@ export interface ExportPayload {
  */
 export const EXPORT_SCHEMA_VERSION = 1;
 
+/**
+ * F.8 follow-up: upload result returned by exportToStorage().
+ * `url` is a short-lived (5 min, see StorageService.PRESIGN_TTL_SECONDS)
+ * presigned GET for an age-encrypted artifact. `manifest` is the plaintext
+ * table list + hashes so the client can verify the download byte-for-byte
+ * before decryption.
+ */
+export interface ExportUploadResult {
+  readonly key: string;
+  readonly url: string;
+  readonly manifest: ExportManifest;
+  readonly encryptedBytes: number;
+}
+
 @Injectable()
 export class MeService {
   private readonly logger = new Logger(MeService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly storage: StorageService,
+  ) {}
 
   /**
-   * Build the JSON export payload. MVP: returned inline in the response body
-   * (no MinIO, no age encryption). Rows are queried with `findMany` per
-   * table, hashed for the manifest, and returned.
-   *
-   * ponytail: JSON in-response scales fine for a single-user deployment.
-   * Upgrade path when needed: stream to MinIO + presign the URL + age-encrypt
-   * with the recovery key. See DEFERRED.md F.8 note.
+   * Build the plaintext JSON export payload. Rows are queried with `findMany`
+   * per USER_TABLES entry, hashed for the manifest, and returned as a single
+   * object. Callers should normally use {@link exportToStorage} which handles
+   * age-encryption + MinIO upload + presigned URL; this method is left public
+   * for the test suite + CI parity jobs that need the plaintext structure.
    */
   async exportForUser(userId: string): Promise<ExportPayload> {
     const user = await this.prisma.user.findUnique({
@@ -155,6 +172,51 @@ export class MeService {
   }
 
   /**
+   * F.8 follow-up: serialize the export payload, age-encrypt it with the
+   * operator's public recipient key, upload to MinIO under
+   * `exports/<userId>/<stamp>_export.json.age`, and return a short-lived
+   * presigned GET URL plus the plaintext manifest.
+   *
+   * Why age via child_process: matches scripts/backup.sh exactly, no new npm
+   * cipher dep, and the operator key material (AGE_RECIPIENT public key) is
+   * already provisioned alongside the backup pipeline. See DEFERRED.md F.8.
+   *
+   * ponytail: whole payload is buffered then encrypted in one shot. Fine for
+   * a single-user deployment where even an aggressive dump sits well under
+   * 100 MB. Upgrade path when a dump outgrows memory: stream prisma results
+   * through a Readable → age stdin → minio putObject with the stream variant.
+   */
+  async exportToStorage(userId: string): Promise<ExportUploadResult> {
+    const recipient = process.env.AGE_RECIPIENT;
+    if (!recipient || recipient.length === 0) {
+      throw new Error(
+        'AGE_RECIPIENT is required for /me/export (F.8). Set it to the operator age public key.',
+      );
+    }
+
+    const payload = await this.exportForUser(userId);
+    const plaintext = Buffer.from(JSON.stringify(payload), 'utf8');
+    const encrypted = await ageEncrypt(plaintext, recipient);
+
+    // Byte-check: age v1 ciphertext begins with the literal header
+    // `age-encryption.org/v1\n`. Guard against a silent passthrough (missing
+    // age binary that somehow exits 0 with plaintext on stdout).
+    if (!encrypted.subarray(0, 21).equals(Buffer.from('age-encryption.org/v1'))) {
+      throw new Error('age encryption produced output without the expected header');
+    }
+
+    const key = await this.storage.putExport(userId, encrypted);
+    const url = await this.storage.presignExportDownload(userId, key);
+
+    this.logger.log(
+      `exported userId=${userId} tables=${payload.manifest.tables.length} ` +
+        `encryptedBytes=${encrypted.length} key=${key}`,
+    );
+
+    return { key, url, manifest: payload.manifest, encryptedBytes: encrypted.length };
+  }
+
+  /**
    * Delete the User row. onDelete:Cascade removes all user-owned rows in one
    * txn; onDelete:SetNull nulls the userId on the three audit-adjacent tables
    * (F.6 kept these deliberately - immutable audit is a compliance requirement
@@ -193,4 +255,38 @@ export class MeService {
     }
     return out;
   }
+}
+
+/**
+ * F.8 follow-up: pipe `plaintext` through `age -r <recipient>` and collect
+ * the ciphertext from stdout. Mirrors the invocation in scripts/backup.sh so
+ * the same operator key material decrypts both backups and user exports.
+ *
+ * ponytail: child_process spawn, not an npm cipher. The age binary ships on
+ * every host that already runs backup.sh. Upgrade path if we ever want pure
+ * JS: swap `age-encryption` (official JS port) under this same signature, no
+ * caller changes.
+ */
+function ageEncrypt(plaintext: Buffer, recipient: string): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const bin = process.env.AGE_BIN ?? 'age';
+    const proc = spawn(bin, ['-r', recipient], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+    proc.stdout.on('data', (chunk: Buffer) => stdoutChunks.push(chunk));
+    proc.stderr.on('data', (chunk: Buffer) => stderrChunks.push(chunk));
+    proc.on('error', (err) => reject(new Error(`age spawn failed: ${err.message}`)));
+    proc.on('close', (code) => {
+      if (code !== 0) {
+        const stderr = Buffer.concat(stderrChunks).toString('utf8');
+        reject(new Error(`age exited ${code}: ${stderr || '(no stderr)'}`));
+        return;
+      }
+      resolve(Buffer.concat(stdoutChunks));
+    });
+    proc.stdin.write(plaintext);
+    proc.stdin.end();
+  });
 }

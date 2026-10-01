@@ -70,10 +70,21 @@ export function verifyMagicBytes(
 // to a different user is refused.
 const KEY_RE = /^resumes\/([^/]+)\/([^/]+)\/[^/]+$/;
 
+// F.8 follow-up: data-export keys are scoped `exports/{userId}/{filename}`.
+// Same per-user gate as resumes: the second segment must equal the requester's
+// userId. Any key outside this shape or belonging to another user is refused.
+const EXPORT_KEY_RE = /^exports\/([^/]+)\/[^/]+$/;
+
 export function parseResumeKey(key: string): { userId: string; resumeId: string } {
   const m = KEY_RE.exec(key);
   if (!m) throw new ForbiddenObjectAccessError(key, '');
   return { userId: m[1], resumeId: m[2] };
+}
+
+export function parseExportKey(key: string): { userId: string } {
+  const m = EXPORT_KEY_RE.exec(key);
+  if (!m) throw new ForbiddenObjectAccessError(key, '');
+  return { userId: m[1] };
 }
 
 function requireEnv(name: string): string {
@@ -162,6 +173,36 @@ export class StorageService implements OnModuleInit {
    */
   async presignResumeDownload(requestingUserId: string, key: string): Promise<string> {
     const { userId: keyUserId } = parseResumeKey(key);
+    if (keyUserId !== requestingUserId) {
+      throw new ForbiddenObjectAccessError(key, requestingUserId);
+    }
+    return this.minio.presignedGetObject(BUCKET, key, PRESIGN_TTL_SECONDS);
+  }
+
+  /**
+   * F.8 follow-up: store a user data-export artifact. The buffer is already
+   * `age`-encrypted by the caller (MeService); this method just scopes the key
+   * and PUTs it. Key: `exports/<userId>/<yyyymmddhhmmss>_export.json.age`.
+   * Content-Type is `application/octet-stream` since the on-wire form is
+   * encrypted ciphertext, not JSON.
+   */
+  async putExport(userId: string, encryptedBuffer: Buffer): Promise<string> {
+    const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
+    const key = `exports/${userId}/${stamp}_export.json.age`;
+    await this.minio.putObject(BUCKET, key, encryptedBuffer, encryptedBuffer.length, {
+      'Content-Type': 'application/octet-stream',
+      'x-amz-meta-careeros-kind': 'user-export',
+    });
+    return key;
+  }
+
+  /**
+   * F.8 follow-up: mint a short-lived presigned GET URL for the user's own
+   * export artifact. Same per-user key gate as resumes: user A cannot presign
+   * user B's export. Throws {@link ForbiddenObjectAccessError} on mismatch.
+   */
+  async presignExportDownload(requestingUserId: string, key: string): Promise<string> {
+    const { userId: keyUserId } = parseExportKey(key);
     if (keyUserId !== requestingUserId) {
       throw new ForbiddenObjectAccessError(key, requestingUserId);
     }

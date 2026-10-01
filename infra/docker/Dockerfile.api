@@ -1,7 +1,7 @@
 # Dev-oriented image. Production hardening (distroless, non-root, read-only rootfs) lands later this phase.
 FROM node:20-alpine
 
-RUN apk add --no-cache libc6-compat openssl wget
+RUN apk add --no-cache libc6-compat openssl wget age
 RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
 
 WORKDIR /app

@@ -17,9 +17,11 @@ import { MeService } from './me.service';
  * F.8 (Wave F / P6): data-portability endpoints.
  *
  *   POST /me/export  auth + fresh re-auth (< 5 min)
- *                    Returns the JSON export payload in the response body.
- *                    ponytail: MVP is inline; MinIO upload + age encryption
- *                    upgrade path noted in me.service.ts.
+ *                    Serializes a per-table JSON dump, age-encrypts it with
+ *                    the operator's AGE_RECIPIENT public key, uploads to
+ *                    MinIO under `exports/<userId>/<stamp>_export.json.age`,
+ *                    and returns { url, manifest, encryptedBytes } where
+ *                    `url` is a short-lived presigned GET.
  *
  *   POST /me/delete  auth + fresh re-auth + email confirmation
  *                    Body: { confirmEmail: "<user.email>" }
@@ -49,13 +51,23 @@ export class MeController {
     if (Date.now() - sealed.createdAt > FRESH_REAUTH_MAX_AGE_MS) {
       throw new ForbiddenException('Fresh re-authentication required');
     }
-    const payload = await this.me.exportForUser(sealed.userId);
+    const result = await this.me.exportToStorage(sealed.userId);
     await audit(this.prisma, sealed.userId, req, 'user.data.exported', {
-      tables: payload.manifest.tables.length,
-      totalRows: payload.manifest.tables.reduce((acc, t) => acc + t.rowCount, 0),
-      schemaVersion: payload.manifest.schemaVersion,
+      tables: result.manifest.tables.length,
+      totalRows: result.manifest.tables.reduce((acc, t) => acc + t.rowCount, 0),
+      schemaVersion: result.manifest.schemaVersion,
+      key: result.key,
+      encryptedBytes: result.encryptedBytes,
     });
-    return payload;
+    // The presigned URL expires in 5 min (StorageService.PRESIGN_TTL_SECONDS).
+    // Manifest is returned alongside so the client can verify the download
+    // byte-for-byte before decrypting.
+    return {
+      url: result.url,
+      key: result.key,
+      manifest: result.manifest,
+      encryptedBytes: result.encryptedBytes,
+    };
   }
 
   @Post('delete')
