@@ -18,3 +18,16 @@ export type { HasRawSql } from './db-reset';
 // F.2 ATS contract-test fixtures. See src/fixtures/ats/README-style header
 // comments for provenance.
 export * as atsFixtures from './fixtures/ats';
+// Stream C: migration forward-safety scaffold. One function per migration;
+// see migration-safety.ts header for the per-migration usage pattern.
+export {
+  assertMigrationSafety,
+  scanDestructive,
+  snapshotRowCounts,
+  MigrationSafetyError,
+} from './migration-safety';
+export type {
+  AssertMigrationSafetyOptions,
+  DestructiveFinding,
+  MinimalDb,
+} from './migration-safety';
