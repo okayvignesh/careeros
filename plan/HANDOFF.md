@@ -165,7 +165,7 @@ Wave-C remediation: `Cgamma-next16-{a,b}` `68bc18e`, `68b77c3` (Next 16 async-AP
 | Stream | Ship | Commit(s) |
 |---|---|---|
 | F.1 approval queue + state machine + controller + bulk-threshold + re-auth + tests | shipped | `74e3a4c`, `631a997`, `c7e2c25`, `4326e3d` |
-| F.2 ATS submit adapters (Ashby, Greenhouse, idempotency, backoff) | **not started** | — |
+| F.2 ATS submit adapters (Ashby + Greenhouse + orchestrator + audit + auto-advance) | shipped (multipart + contract tests + approval wire deferred) | `4a1b6f5` |
 | F.3 agent form-fill (allowlist YAML + scripts + probe) | **not started** | — |
 | F.4 interview prep + talk-track (planner + generator prompts + fact-check gate) | shipped (verbal-defense reuse deferred) | `c47c5a8` |
 | F.5 outreach composer (5 templates x 4 variants + prompt + fact-check + business-hour timing) | shipped (Gmail draft + reply tracking deferred) | `971ddd3` |
