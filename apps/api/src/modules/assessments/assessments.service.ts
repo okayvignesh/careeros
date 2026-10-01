@@ -28,7 +28,7 @@ import {
   type RubricGrade,
   type RubricGradeResponse,
 } from '@careeros/shared';
-import { DeepSeekProvider, renderPrompt, wrapUntrusted, type Sensitivity } from '@careeros/ai';
+import { DeepSeekProvider, renderPrompt, wrapUntrusted, type AIProvider, type Sensitivity } from '@careeros/ai';
 import { runSandboxed, type LanguageId, type SandboxResult } from '@careeros/sandbox';
 import { decrypt, loadMasterKey } from '@careeros/secrets';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -38,6 +38,9 @@ import { UsageCache } from '../usage/usage.cache';
 import { SensitivityGateService } from '../../common/sensitivity-gate.service';
 import { makeLlmAuditor } from '../../common/llm-audit';
 import { renderBuildTaskPrompt } from './prompts/build-task-generator';
+import { DebuggingGraderAgent } from './agents/debugging-grader.agent';
+import { MockInterviewGraderAgent } from './agents/mock-interview-grader.agent';
+import { SystemDesignGraderAgent } from './agents/system-design-grader.agent';
 
 const KEY = loadMasterKey();
 
@@ -166,6 +169,17 @@ export class AssessmentsService {
   // and widening it is more churn than reaching in here.
   protected runSandbox: (opts: Parameters<typeof runSandboxed>[0]) => Promise<SandboxResult> =
     runSandboxed;
+
+  // Grader-agent entry seams. Same `field, not constructor arg` reasoning as
+  // runSandbox — every test file that constructs AssessmentsService would need
+  // widening if these were constructor params. Tests overwrite with a stub
+  // whose `grade(...)` returns a canned Zod-valid shape. The service calls
+  // these agents through runGraderAgentOrFallback, which still wraps the
+  // provider construction + usage/sensitivity gates + rule-based fallback the
+  // same way as runLlmGraderOrFallback (knowledge + code-review path).
+  protected debuggingGrader = new DebuggingGraderAgent();
+  protected mockInterviewGrader = new MockInterviewGraderAgent();
+  protected systemDesignGrader = new SystemDesignGraderAgent();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -1022,6 +1036,57 @@ export class AssessmentsService {
   }
 
   /**
+   * Agent-based sibling of `runLlmGraderOrFallback`. Same gate chain (usage +
+   * provider config + sensitivity + decrypt + non-deepseek bail + per-user
+   * concurrency ceiling + rule-based fallback), but the LLM call step is a
+   * caller-supplied `callLlm(provider)` closure instead of a prompt-registry
+   * id. The three in-module grader agents (debugging + mock-interview +
+   * system-design) route through here; the prompt lives local to each agent.
+   * Knowledge + code-review still route through `runLlmGraderOrFallback` so
+   * their packages/ai catalog registration keeps its single consumer.
+   */
+  private async runGraderAgentOrFallback<T extends object>(
+    userId: string,
+    cfg: {
+      label: string;
+      sensitivity: Sensitivity;
+      callLlm: (provider: AIProvider) => Promise<T>;
+      fallback: () => T;
+    },
+  ): Promise<T & { grader: 'llm' | 'rule' }> {
+    const withFallback = (): T & { grader: 'llm' | 'rule' } =>
+      Object.assign(cfg.fallback(), { grader: 'rule' as const });
+    try {
+      await this.usage.assertCallAllowed(userId);
+      const providerCfg = await this.prisma.providerConfig.findFirst({
+        where: { userId, isDefault: true },
+      });
+      if (!providerCfg) return withFallback();
+      await this.sensitivity.assertAllowed(providerCfg.provider, cfg.sensitivity, userId);
+
+      const secret = await this.prisma.encryptedSecret.findUnique({
+        where: { id: providerCfg.apiKeySecretId },
+      });
+      if (!secret) return withFallback();
+      const apiKey = decrypt(secret.ciphertext, KEY, `provider:${providerCfg.provider}:apiKey`);
+      if (providerCfg.provider !== 'deepseek') return withFallback();
+
+      const provider = new DeepSeekProvider({
+        apiKey,
+        baseUrl: providerCfg.baseUrl ?? undefined,
+        chatModel: providerCfg.chatModel,
+        onCall: makeLlmAuditor(this.prisma, userId, this.logger as never, this.usageCache),
+      });
+      // A-M9: per-user LLM concurrency ceiling.
+      const result = await this.usage.runWithUserLimit(userId, () => cfg.callLlm(provider));
+      return Object.assign(result, { grader: 'llm' as const });
+    } catch (err) {
+      this.logger.warn(`grader agent ${cfg.label} failed, using rule fallback: ${(err as Error).message}`);
+      return withFallback();
+    }
+  }
+
+  /**
    * LLM rubric grader with rule-based fallback. Same shape as the other two
    * (knowledge / code-review) — bail to `gradeAgainstRubric` on any failure.
    */
@@ -1040,15 +1105,16 @@ export class AssessmentsService {
         return `- ${d.id} (${d.name}):\n${levels}`;
       })
       .join('\n');
-    const raw = await this.runLlmGraderOrFallback<RubricGradeResponse>(userId, {
-      promptId: 'system-design-grader',
-      vars: {
-        scenario,
-        constraints: constraints.map((c) => `- ${c}`).join('\n') || '- (none)',
-        rubric: rubricRendered,
-        design: wrapped.content,
-      },
+    const raw = await this.runGraderAgentOrFallback<RubricGradeResponse>(userId, {
+      label: this.systemDesignGrader.id,
       sensitivity: 'personal',
+      callLlm: (provider) =>
+        this.systemDesignGrader.grade(provider, {
+          scenario,
+          constraints: constraints.map((c) => `- ${c}`).join('\n') || '- (none)',
+          rubric: rubricRendered,
+          design: wrapped.content,
+        }),
       fallback: () => gradeAgainstRubric(design, SYSTEM_DESIGN_RUBRIC) as unknown as RubricGradeResponse,
     });
     // Coerce integer schema level back into the RubricLevel union.
@@ -1296,10 +1362,16 @@ export class AssessmentsService {
     description: string,
   ): Promise<DebuggingGrade & { grader: 'llm' | 'rule' }> {
     const wrapped = wrapUntrusted(fix, 'user-input');
-    return this.runLlmGraderOrFallback<DebuggingGrade>(userId, {
-      promptId: 'debugging-task-grader',
-      vars: { description, brokenCode, rootCause, fix: wrapped.content },
+    return this.runGraderAgentOrFallback<DebuggingGrade>(userId, {
+      label: this.debuggingGrader.id,
       sensitivity: 'personal',
+      callLlm: (provider) =>
+        this.debuggingGrader.grade(provider, {
+          description,
+          brokenCode,
+          rootCause,
+          fix: wrapped.content,
+        }),
       fallback: () => gradeDebugging(brokenCode, fix, rootCause),
     });
   }
@@ -2290,10 +2362,15 @@ export class AssessmentsService {
     const renderedQuestions = questions
       .map((q, i) => `${i + 1}. [${q.kind}] ${q.prompt}\n   Key points: ${q.keyPoints.join(', ')}`)
       .join('\n\n');
-    return this.runLlmGraderOrFallback<MockInterviewGrade>(userId, {
-      promptId: 'mock-interview-grader',
-      vars: { scenario, questions: renderedQuestions, answers: wrappedAnswers.content },
+    return this.runGraderAgentOrFallback<MockInterviewGrade>(userId, {
+      label: this.mockInterviewGrader.id,
       sensitivity: 'personal',
+      callLlm: (provider) =>
+        this.mockInterviewGrader.grade(provider, {
+          scenario,
+          questions: renderedQuestions,
+          answers: wrappedAnswers.content,
+        }),
       fallback: () => gradeMockInterview(answers, questions),
     });
   }
