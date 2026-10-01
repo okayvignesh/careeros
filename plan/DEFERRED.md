@@ -147,7 +147,7 @@ Last refreshed: 2026-09-28. Baseline commit for the wave: `b519769`. HEAD: `c921
 - ~~E.9 packages/messaging Channel interface + Web channel + stubs for WhatsApp/Discord.~~ SHIPPED `cbd6dcd` 2026-09-28. Slack HTTP wire deferred until parallel session releases slack module.
 
 ### P6 (controlled execution)
-- F.2 ATS submit adapters (Ashby, Greenhouse).
+- ~~F.2 ATS submit adapters (Ashby, Greenhouse).~~ SHIPPED `4a1b6f5` 2026-10-01. Deferred: multipart resume upload per-ATS (file-handle flow), msw-mocked contract tests against recorded fixtures, approval-queue integration with F.1, submission UI (screen 48 web-blocked).
 - F.3 agent form-fill (allowlist YAML + scripts + probe).
 - ~~F.4 interview prep + talk-track + fact-check.~~ SHIPPED `c47c5a8` 2026-09-29. Deferred: reuse P2 verbal-defense runner (needs C-P2.5), mock-interview schedule sub-plan, per-prompt evals (packages/ai/src/evals/interview-prep-planner + talk-track-generator).
 - ~~F.5 outreach composer + templates + timing + Gmail drafts.~~ SHIPPED `971ddd3` 2026-09-29. Deferred: actual Gmail draft creation (needs `gmail.compose` scope expansion + Google verification), reply tracking (needs E.5 wire), per-prompt evals for outreach-composer, approval-queue integration with F.1.
