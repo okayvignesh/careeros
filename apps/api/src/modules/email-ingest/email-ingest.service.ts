@@ -33,6 +33,7 @@ import { google } from 'googleapis';
 import type { OAuth2Client } from 'google-auth-library';
 import { decrypt, loadMasterKey } from '@careeros/secrets';
 import { InjectionBlockedError, wrapUntrusted } from '@careeros/ai';
+import { classifyEmailHeuristic } from '@careeros/shared';
 import { parseEmail, matchSender } from '@careeros/email-parsers';
 import type { EmailJob, EmailSource } from '@careeros/email-parsers';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -54,6 +55,8 @@ export interface IngestResult {
   source?: EmailSource;
   jobsInserted?: number;
   reason?: string;
+  /** E.5b: heuristic classifier output (null when no rule fired above threshold). */
+  classification?: { class: string; confidence: number; evidence?: string | undefined };
 }
 
 @Injectable()
@@ -134,6 +137,24 @@ export class EmailIngestService implements OnModuleDestroy {
       throw err;
     }
 
+    // E.5b: classify every email with the heuristic (no LLM in the worker;
+    // no provider plumbing to resolve here). Classification is written to
+    // audit_log so downstream analytics + the F.9 security-stats dashboard
+    // can slice it, and the InboxItem row (future wire) can seed off it.
+    // Returning null is honest: callers that need high-confidence routing
+    // can run the LLM stage out of band.
+    const classification = classifyEmailHeuristic({
+      from: fetched.from,
+      subject: fetched.subject,
+      snippet: fetched.html.replace(/<[^>]+>/g, ' ').slice(0, 400),
+    });
+    await this.audit(userId, 'email.ingest.classified', {
+      messageId,
+      class: classification?.class ?? 'other',
+      confidence: classification?.confidence ?? 0,
+      method: classification ? 'heuristic' : 'fallback',
+    });
+
     // Gate 2 — sender allowlist. matchSender handles display-name +
     // angle-brackets and is case-insensitive.
     const source = matchSender(fetched.from);
@@ -142,7 +163,9 @@ export class EmailIngestService implements OnModuleDestroy {
         messageId,
         from: fetched.from,
       });
-      return { status: 'dropped-sender', reason: fetched.from };
+      const r: IngestResult = { status: 'dropped-sender', reason: fetched.from };
+      if (classification) r.classification = classification;
+      return r;
     }
 
     // Parse + persist. parseEmail returns null only on unknown sender (we
@@ -169,7 +192,9 @@ export class EmailIngestService implements OnModuleDestroy {
       jobsExtracted: parsed.jobs.length,
       jobsInserted: inserted,
     });
-    return { status: 'parsed', source, jobsInserted: inserted };
+    const r: IngestResult = { status: 'parsed', source, jobsInserted: inserted };
+    if (classification) r.classification = classification;
+    return r;
   }
 
   private async insertJobs(source: EmailSource, jobs: EmailJob[]): Promise<number> {
