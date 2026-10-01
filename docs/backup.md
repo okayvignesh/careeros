@@ -152,10 +152,39 @@ system.
 
 ## RPO and RTO
 
-- RPO (recovery point objective): 24 hours. Cron runs nightly.
-- RTO (recovery time objective): 2 hours. For a full stack on a fresh VPS,
-  restore times dominate on Postgres (linear in DB size). A 5 GB compressed
-  dump restores in a few minutes on modern hardware.
+Career OS targets a 24 hour Recovery Point Objective and a 2 hour Recovery
+Time Objective, measured end to end from the operator typing the restore
+command to the API answering `setup_state=complete` on a fresh host.
+
+- **RPO = 24h.** `scripts/backup-cron.sh` runs once per day (cron slot
+  `17 3 * * *` in the sample above). Every run writes a full snapshot of
+  Postgres plus MinIO plus Qdrant, encrypted with `age` before leaving the
+  host. Worst case data loss between runs is one calendar day; recovery
+  always lands on a daily artifact, never a partial.
+- **RTO = 2h.** `scripts/restore.sh` is the single command path: decrypt,
+  `pg_restore -c`, `mc mirror`, Qdrant snapshot upload, parity check. On a
+  5 GB compressed dump the Postgres restore dominates and finishes in minutes
+  on modern hardware; the two hour budget covers VPS provisioning, image
+  pulls, env wiring, and the parity check.
+- **Retention keeps both honest.** The 7 daily / 4 weekly / 12 monthly
+  symlink tiers in `$BACKUP_DIR` mean the operator always has at least one
+  artifact younger than 24h, four artifacts spanning a month, and twelve
+  spanning a year; a corrupt or truncated nightly does not become the only
+  restore source.
+- **Drill cadence.**
+  - Automated: `.github/workflows/restore-test.yml` runs weekly (Mondays
+    03:00 UTC) on fresh Docker volumes, restores the latest artifacts,
+    boots the API, and asserts `setup_state=complete` plus row-count
+    parity via `scripts/verify-restore-parity.sh`. A red run opens a
+    tracking issue via the test-failure-autofile workflow.
+  - Manual: quarterly, run the "Verifying backups" recipe below on a
+    throwaway host. Record the measured restore wall-clock in the ops log;
+    if it ever exceeds the 2h RTO, open a `G-Ops` ticket to shrink the
+    dataset or move to a faster destination.
+- **What breaks the budget.** `ENCRYPTION_KEY` is deliberately NOT in the
+  backup (security.md item 8). Lose the operator's `age` private key and
+  the backup is unrecoverable; the RTO assumes the key is already in a
+  password manager or hardware token per "Where to store the key" above.
 
 ## Off-site copy (sample, not implemented)
 

@@ -6,6 +6,11 @@ services:
   api:
     ports:
       - '3001:3001'
+    # Dev needs a writable rootfs (pnpm dev writes .turbo + nest build cache
+    # under /app) and root UID so bind-mounted source owned by the host user
+    # is readable; prod hardening lives in docker-compose.yml.
+    read_only: false
+    user: root
     volumes:
       - ../../apps/api:/app/apps/api
       - ../../packages:/app/packages

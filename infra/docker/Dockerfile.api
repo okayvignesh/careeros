@@ -1,21 +1,39 @@
-# Dev-oriented image. Production hardening (distroless, non-root, read-only rootfs) lands later this phase.
+# Dev-oriented image, hardened to satisfy security.md item 10 for prod runs.
+# ponytail: single-stage alpine kept (not distroless) because the dev
+# compose override calls `pnpm dev` which needs a shell + pnpm; distroless
+# has neither. Non-root UID + read-only rootfs + cap-drop land in compose
+# where they can be toggled off by the dev override without rebuilding.
+# Upgrade path: a second `FROM gcr.io/distroless/nodejs20-debian12` runtime
+# stage for prod images when we split dev and prod Dockerfiles.
 FROM node:20-alpine
 
 RUN apk add --no-cache libc6-compat openssl wget age
+
+# Non-root UID 1001:1001 (matches the convention we already use for MinIO's
+# bitnami user). Owns /app so install + prisma generate run as the same user
+# that the container boots as. ponytail: fixed UID (not dynamic from host)
+# because dev bind-mounts are reconciled by the compose override which flips
+# USER back to root; prod uses only this UID.
+RUN addgroup -g 1001 -S careeros \
+ && adduser -u 1001 -S careeros -G careeros -h /app -s /sbin/nologin
+
 RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
 
 WORKDIR /app
+RUN chown -R careeros:careeros /app
 
-COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml turbo.json tsconfig.base.json ./
-COPY apps/api/package.json apps/api/
-COPY packages/shared/package.json packages/shared/
-COPY packages/secrets/package.json packages/secrets/
-COPY packages/auth/package.json packages/auth/
-COPY packages/ai/package.json packages/ai/
+USER careeros
+
+COPY --chown=careeros:careeros package.json pnpm-lock.yaml* pnpm-workspace.yaml turbo.json tsconfig.base.json ./
+COPY --chown=careeros:careeros apps/api/package.json apps/api/
+COPY --chown=careeros:careeros packages/shared/package.json packages/shared/
+COPY --chown=careeros:careeros packages/secrets/package.json packages/secrets/
+COPY --chown=careeros:careeros packages/auth/package.json packages/auth/
+COPY --chown=careeros:careeros packages/ai/package.json packages/ai/
 
 RUN pnpm install --frozen-lockfile || pnpm install
 
-COPY . .
+COPY --chown=careeros:careeros . .
 
 RUN pnpm --filter @careeros/api prisma generate
 

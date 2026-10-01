@@ -181,6 +181,23 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    # security.md item 10: non-root UID (set in Dockerfile.api), read-only
+    # rootfs with tmpfs for the dirs the node runtime needs to write, drop
+    # ALL Linux caps (api never binds <1024 or raises priority), seccomp
+    # default profile + no-new-privileges. Dev compose override flips
+    # read_only off because `pnpm dev` writes .next/.turbo/node_modules
+    # caches under /app.
+    # ponytail: seccomp uses docker's default profile (empty security_opt
+    # entry is implicit); a custom profile at infra/docker/seccomp/api.json
+    # lands when a real syscall needs blocking that the default allows.
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+      - /app/.cache:size=64m,mode=0755
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     networks:
       # api needs `internal` to reach datastores AND `egress` to reach squid.
       - internal
