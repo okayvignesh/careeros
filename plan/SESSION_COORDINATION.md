@@ -61,10 +61,10 @@ Everything not listed is unclaimed.
 | F.3 agent form-fill | shipped 9d0f60c | 71/71 tests |
 | F.2 follow-ups (multipart + msw + approval wire) | shipped 492f1ff | 51/51 tests |
 | F.8 follow-ups (MinIO + age + round-trip) | shipped e71b28c | 18 unit + 1 integration (skipped locally) |
-| A. P3 market debt (N+1 + what-changed + weekly cron) | in_progress | plan/DEFERRED.md P3 block |
-| B. Boss-battle 3+ related-skills + multi-skill combo | in_progress | plan/DEFERRED.md P2 block |
-| C. Test backfill (backup byte-inspection + enc-key exclusion + email fuzz + migration safety) | in_progress | plan/DEFERRED.md testing block |
-| D. Container hardening (distroless + non-root + cap-drop) + backup RPO/RTO docs | in_progress | plan/DEFERRED.md security item 10 + item 8 |
+| A. P3 market debt (weekly cron + what-changed diff; N+1 was already shipped at 24f436b) | shipped 24999e6 | 65/67 (2 pre-existing failures from cbacad2 unchanged) |
+| B. Boss-battle 3+ related-skills + multi-skill combo | shipped e743c20 | 19/19 |
+| C. Test backfill (backup byte-inspection + enc-key exclusion + email fuzz + migration safety) | shipped 88dfc9c | 76/76 |
+| D. Container hardening (non-root + cap-drop + read-only; distroless deferred) + backup RPO/RTO docs | shipped cc914a5 | docker compose config EXIT 0 both modes |
 
 ### session-ai-infra
 
