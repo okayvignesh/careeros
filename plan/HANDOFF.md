@@ -215,17 +215,33 @@ Each of these can spawn a fresh implementer immediately. No apps/web collision.
 | F.3 agent form-fill | plan/phase-6:35-43 | D.4 Electron |
 | F.11b rate-limit remaining Slack webhooks (events/interactive/commands/oauth) | plan/phase-6:64-67 | dirty slack module in parallel session |
 
-### 3b. Web-blocked streams (waiting on parallel session)
+### 3b. UI pages needed for shipped backend features
 
-The parallel Claude session owns `apps/web/**`. Do not dispatch these until they release the surface:
+The parallel design-revamp session shipped the visual pass on existing
+pages + G-UX-1/G-UX-2/G-A11y/G-Meta (error.tsx, global-error.tsx,
+tooltip/help affordances, design system). Net-new feature UIs for the
+backend endpoints we shipped this session still need frontend pages.
 
-| Stream | Web surface it touches |
-|---|---|
-| D.3 downloads page + Settings→Devices panel | apps/web/src/app/(app)/settings/devices, /downloads |
-| C-P4.5 application detail + timeline UI | apps/web/src/app/(app)/applications/[id] |
-| C-P4.6 screens 36–44 UI | many pages under apps/web/src/app/(app) |
-| F.10 screens 45/46/47/48/57/59/60/63/64 | ditto |
-| G-UX-1 / G-UX-2 / G-A11y / G-Notif | frontend-design + apps/web |
+| Stream | Needs page under `apps/web/src/app/(app)/` | Backend ready |
+|---|---|---|
+| E.3 daily-brief preferences UI | `/settings/daily-brief` (or `/brief/settings`) | `/brief/preferences` + `/brief/enable` + `/brief/snooze` + `/brief/preview` + `/brief/latest` |
+| E.7 inbox triage (screen 50) | `/inbox` | `/inbox` + `/inbox/:id/link` + `/inbox/:id/unlink` + `/inbox/:id/dismiss` |
+| F.2 ATS submit (screen 48) | `/applications/[id]/submit` | `/ats-submit` (POST + GET) |
+| F.4 interview prep + talk-track viewer | `/applications/[id]/interview-prep` | `/interview-prep/:applicationId` (GET + POST) + `/talk-tracks` |
+| F.5 outreach composer + draft list | `/outreach` + `/outreach/new` | `/outreach` CRUD + state transitions |
+| F.8 data portability page | `/settings/data` (export + delete UI) | `/me/export` + `/me/delete` |
+| F.9 Advanced Usage dashboard | `/settings/usage/advanced` | `/me/usage/{cost-projection,latency-histogram,security-stats,anomaly,export}` |
+| D.3 downloads + Settings→Devices | `/settings/devices` + `/downloads` | `/agent/devices` + `/agent/pair/*` |
+| C-P4.3 resume/cover-letter diff | `/resume-variants/[id]/diff` + `/cover-letters/[id]/diff` | `diff-match-patch` client-side |
+| C-P4.5 application detail + timeline | `/applications/[id]` | existing Application + ApplicationEvent reads |
+| C-P4.6 screens 36-44 | per-screen pages (resume editor, cover letter editor, dossier viewer...) | existing endpoints |
+| F.10 screens 45/46/47/48/57/59/60/63/64 | approval queue UI, outreach UI, session list, downloads... | mostly existing endpoints |
+| G-Auth session list + revoke | `/settings/sessions` | `active_sessions` reads + delete |
+| G-Notif notification center | shell-level drawer | audit_events reads |
+| G-Cost cost UX surfaces | 429 banner + pre-flight cost card | `/me/usage/*` reads |
+| G-Feedback thumbs-up/down | per-artifact widget | needs new `artifact_feedback` table |
+| G-Release in-app release banner | shell-level | GitHub Releases API or static manifest |
+| G-UX-1 wizard first-run failure recovery | setup wizard | existing `/setup/*` endpoints |
 
 ### 3c. External blockers (user must resolve)
 

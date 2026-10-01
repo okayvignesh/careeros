@@ -219,23 +219,23 @@ Workstreams:
 
 Source: `_audit_ba_qa.md#Product completeness gaps` (58 items). Grouped for delegation:
 
-| Stream | Gaps rolled up | Owner phase |
-|---|---|---|
-| **G-UX-1** States retrofit | Empty/loading/error trio matrix; skeleton-vs-orb policy; global error boundary + `error.tsx`/`global-error.tsx`; 404/401/403 pages; offline banner; first-run wizard resume flow | P0 |
-| **G-UX-2** Onboarding + help | Product tour post-signin; help palette (`?` key); tooltip layer | P4 |
-| **G-A11y** Accessibility | Per-screen WCAG-AA checklist; SR-only labels on icon buttons; focus mgmt on route change; keyboard shortcuts sheet | every phase |
-| **G-Data** Data ergonomics | Applications CSV; resume JSON; LinkedIn/Indeed CSV import; per-domain quick export | P4/P6 |
-| **G-Ops** Ops UX | Backup destination decision; `age` key rotation + recovery-key UX; quarterly operator restore drill; monitoring alert delivery UI hooks; uptime reco + Loki/Vector docs | P6 |
-| **G-Release** In-app release | New-version banner; upgrade-history page; post-upgrade smoke widget | P6 |
-| **G-Cost** Cost/rate-limit UX | 429 banner "you've used 87% today, resets HH:MM"; pre-flight cost card on heavy ops; provider-fallback UX; degraded-provider banner; per-artifact cost + tokens | P1/P4/P6 |
-| **G-i18n** i18n + locale | Confirm English-only for v1.0; timezone display consistency + toggle; currency per-user preference for comp | P0/P3/P4 |
-| **G-Docs** Docs | `docs/install.md`, `docs/user-manual.md`, `docs/runbook.md`, `docs/incident-response.md`, `docs/threat-model-operator.md`, `docs/verify.md`, `CHANGELOG.md` pre-1.0, `postmortem-template.md` | P0 + P6 |
-| **G-Legal** Legal + license | `LICENSE` (missing), `NOTICES` for AGPL/MIT/Apache; privacy notice + terms + cookie disclosure | P0/P6 |
-| **G-Auth** Session + roles | Screen 59 AC: list + revoke sessions; passkey recovery; `requireAdmin` guard | P0/P6 |
-| **G-Notif** Notifications | In-app toast + notification center for async completions; quiet hours; per-feature kill switches | P5/P6 |
-| **G-Feedback** Feedback loop | Thumbs-up/down on every generated artifact → eval set + regression counter | P1/P4/P6 |
-| **G-Test** Test debt | Golden-flow wizard test; Playwright storage-state fixture; 20+ eval fixtures for every critical prompt; PII-redaction-in-GlitchTip positive test; time-to-first-value manual QA gate | P0/P1 |
-| **G-Meta** Design system | Design-system baseline screenshot set to prevent cross-phase drift | P0 |
+| Stream | Gaps rolled up | Owner phase | Status |
+|---|---|---|---|
+| **G-UX-1** States retrofit | Empty/loading/error trio matrix; skeleton-vs-orb policy; global error boundary + `error.tsx`/`global-error.tsx`; 404/401/403 pages; offline banner; first-run wizard resume flow | P0 | ✅ parallel-session design-revamp (error.tsx + global-error.tsx shipped; wizard failure recovery still open) |
+| **G-UX-2** Onboarding + help | Product tour post-signin; help palette (`?` key); tooltip layer | P4 | ✅ parallel-session design-revamp (tooltip layer + help affordances) |
+| **G-A11y** Accessibility | Per-screen WCAG-AA checklist; SR-only labels on icon buttons; focus mgmt on route change; keyboard shortcuts sheet | every phase | ✅ parallel-session design-revamp |
+| **G-Data** Data ergonomics | Applications CSV; resume JSON; LinkedIn/Indeed CSV import; per-domain quick export | P4/P6 | ⏳ `/me/export` + F.9 CSV export shipped; CSV import still open |
+| **G-Ops** Ops UX | Backup destination decision; `age` key rotation + recovery-key UX; quarterly operator restore drill; monitoring alert delivery UI hooks; uptime reco + Loki/Vector docs | P6 | ⏳ runbook + incident-response docs shipped; backup destination = §6 open decision 3 |
+| **G-Release** In-app release | New-version banner; upgrade-history page; post-upgrade smoke widget | P6 | ⏳ open (UI) |
+| **G-Cost** Cost/rate-limit UX | 429 banner "you've used 87% today, resets HH:MM"; pre-flight cost card on heavy ops; provider-fallback UX; degraded-provider banner; per-artifact cost + tokens | P1/P4/P6 | ⏳ open (UI) |
+| **G-i18n** i18n + locale | Confirm English-only for v1.0; timezone display consistency + toggle; currency per-user preference for comp | P0/P3/P4 | ⏳ open |
+| **G-Docs** Docs | `docs/install.md`, `docs/user-manual.md`, `docs/runbook.md`, `docs/incident-response.md`, `docs/threat-model-operator.md`, `docs/verify.md`, `CHANGELOG.md` pre-1.0, `postmortem-template.md` | P0 + P6 | ✅ SHIPPED `2942e26` + `9e11a17` |
+| **G-Legal** Legal + license | `LICENSE` (missing), `NOTICES` for AGPL/MIT/Apache; privacy notice + terms + cookie disclosure | P0/P6 | ⏳ `NOTICES` + `SECURITY.md` + `CONTRIBUTING.md` shipped; `LICENSE` blocked on §6 decision 2 |
+| **G-Auth** Session + roles | Screen 59 AC: list + revoke sessions; passkey recovery; `requireAdmin` guard | P0/P6 | ⏳ `requireAdmin` shipped; session list + revoke UI still open |
+| **G-Notif** Notifications | In-app toast + notification center for async completions; quiet hours; per-feature kill switches | P5/P6 | ⏳ open (UI) |
+| **G-Feedback** Feedback loop | Thumbs-up/down on every generated artifact → eval set + regression counter | P1/P4/P6 | ⏳ open (UI + schema) |
+| **G-Test** Test debt | Golden-flow wizard test; Playwright storage-state fixture; 20+ eval fixtures for every critical prompt; PII-redaction-in-GlitchTip positive test; time-to-first-value manual QA gate | P0/P1 | ⏳ partial (Playwright golden flow + storage-state deferred; most prompt evals shipped) |
+| **G-Meta** Design system | Design-system baseline screenshot set to prevent cross-phase drift | P0 | ✅ parallel-session design-revamp |
 
 ### Wave H — Release readiness
 
