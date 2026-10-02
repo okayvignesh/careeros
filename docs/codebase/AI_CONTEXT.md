@@ -1,12 +1,12 @@
 ---
-commit: 47be31a
+commit: dead1a4
 generated: 2026-10-02
 scope: compact AI context brief
 ---
 
 # Career OS — AI Context Brief
 
-> Compact, self-contained brief for injecting Career OS knowledge into any AI/agent context. Generated from commit `47be31a` (2026-10-02). For detail, follow the pointers to `docs/codebase/*.md`. `[TODO]` = not determinable from source; `[ASK USER]` = needs team intent.
+> Compact, self-contained brief for injecting Career OS knowledge into any AI/agent context. Generated from commit `dead1a4` (2026-10-02, cleanup waves 1-14). For detail, follow the pointers to `docs/codebase/*.md`. `[TODO]` = not determinable from source; `[ASK USER]` = needs team intent.
 
 ## What it is
 
@@ -25,21 +25,21 @@ Career OS is a **self-hosted, provider-agnostic Personal AI Career Operating Sys
 
 - **Language/runtime:** TypeScript, Node >= 20, pnpm 9.12, Turborepo.
 - **Web:** Next.js 16.3.6 + React 19.3 (App Router, Tailwind, custom `packages/ui` primitives).
-- **API:** NestJS 10 (`@nestjs/platform-express`), 38 feature modules, Prisma 6.19 (`apps/api/prisma/schema.prisma`, 55 models, 38 migrations, no Prisma enums), Zod at all trust boundaries, `helmet` + Redis-backed `@nestjs/throttler`, `iron-session` cookies, Argon2id, WebAuthn passkeys.
+- **API:** NestJS 10 (`@nestjs/platform-express`), 38 feature modules, Prisma 6.19 (`apps/api/prisma/schema.prisma`, 55 models, 39 migrations, no Prisma enums), Zod at all trust boundaries, `helmet` + Redis-backed `@nestjs/throttler`, `iron-session` cookies, Argon2id, WebAuthn passkeys, OpenAPI JSON + Swagger UI (`@nestjs/swagger` + `zod-to-openapi`).
 - **Workers:** Node + BullMQ on Redis.
 - **Data:** Postgres (system of record), Redis (queues/cache), Qdrant (vectors), MinIO (files).
 - **AI:** `packages/ai` provider abstraction; **only a DeepSeek adapter exists**; `chatStructured<T>({schema})` + Zod; versioned prompts; grounding/injection/sensitivity modules; evals via Vitest.
 - **Desktop:** Electron 31 + Playwright (user's installed Chrome) + `keytar`; WSS pairing.
 - **Deployment:** Docker Compose, Squid deny-by-default egress proxy, private datastore network.
 
-**Reality checks:** embeddings are a SHA-256 placeholder (not `bge-small-en`); no `@nestjs/swagger`; nginx/TLS/GlitchTip/whisper are documented but absent from compose; api uses Prisma 6 while worker uses Prisma 5.
+**Reality checks:** embeddings are still a SHA-256 placeholder (not `bge-small-en`); only the DeepSeek LLM adapter exists; nginx/TLS, GlitchTip, and whisper are documented but absent from compose; `@careeros/messaging` is orphaned; Prisma is aligned on 6.x across api/worker/aggregator; Swagger/OpenAPI and `undici`-enforced egress are now real.
 
 ## Structure
 
 ```
 apps/      web (Next.js) · api (NestJS) · worker (BullMQ) · desktop (Electron)
-packages/  ai · shared · job-pipeline · embeddings · auth · secrets · browser-agent ·
-           email-parsers · resume-render · sandbox · messaging · ui · testing
+packages/  ai · shared · job-pipeline · aggregator · firecrawl · embeddings · auth · secrets ·
+           browser-agent · email-parsers · resume-render · sandbox · messaging · ui · testing
 infra/     docker · postgres · slack
 plan/      PLAN.md + phase-N-*.md + security/ai-safety/testing/observability/release specs
 docs/      architecture.md + operator docs + blueprint .docx
@@ -50,7 +50,7 @@ Entry points: API `apps/api/src/main.ts`; web `apps/web/src/app/layout.tsx`; wor
 
 ## Architecture in one paragraph
 
-Layered + feature-modular monolith. Browser → Next.js middleware setup-gate → NestJS controllers → domain services → `packages/*` capabilities → Postgres/Qdrant/Redis/MinIO. Async work is BullMQ jobs in `apps/worker`. The desktop agent executes Playwright locally and talks to the API over WSS. LLM calls are built from versioned prompts, pass a sensitivity gate, return schema-validated output, are logged to `llm_calls`, and (for generated content) pass a fact-check gate before rendering. Job ingestion is source-agnostic: `normalize → dedupe → cross-source dedupe → freshness → skill-extract → verify → relevance → match`, with `JobRejectLog` on every reject.
+Layered + feature-modular monolith. Browser → Next.js middleware setup-gate → NestJS controllers → domain services → `packages/*` capabilities → Postgres/Qdrant/Redis/MinIO. Async work is BullMQ jobs registered by a shared `registerWorker` helper in `apps/worker`. The desktop agent executes Playwright locally and talks to the API over WSS. LLM calls are built from versioned prompts, loaded through `ProviderLoaderService` (budget → config → single `SensitivityGateService` → decrypt), return schema-validated output, are audited to `llm_calls`, and (for generated content) pass a fact-check gate before rendering. Job ingestion is source-agnostic: `normalize → dedupe → cross-source dedupe → freshness → skill-extract → verify → relevance → match`, with `JobRejectLog` on every reject. The match scorer is canonical in `packages/job-pipeline/src/stages/match.ts` (list and detail agree); skill-state sync is `@careeros/aggregator`; approvals fail loud on an unhandled kind.
 
 ## Key commands
 
@@ -91,4 +91,4 @@ pnpm test:evals  # LLM evals (EVAL_MOCK=1 default)
 
 ## Top risks to keep in mind
 
-Embedding placeholder; docs describe infra not present; missing `packages/ui/src/motion.ts`; Prisma major mismatch; no global auth guard (per-controller `requireUserId`); root ESLint chain inactive; several `docs/dev-setup.md` scripts don't exist. Full list and the 8 `[ASK USER]` decisions are in `CONCERNS.md`.
+Embedding placeholder; only a DeepSeek LLM adapter; docs describe infra still absent from compose (nginx/TLS, GlitchTip, whisper); `@careeros/messaging` orphaned; no global auth guard (per-controller `requireUserId`); `AppConfig` not user-scoped (multitenant TODO); live Docker egress smoke not yet run; T29 web fetch-on-mount warnings. Prisma alignment, egress enforcement, Swagger, build blockers, container hardening, and CI pinning are resolved. Full list and the `[ASK USER]` decisions are in `CONCERNS.md`.

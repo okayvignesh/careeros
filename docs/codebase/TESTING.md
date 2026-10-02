@@ -1,5 +1,5 @@
 ---
-commit: 47be31a
+commit: dead1a4
 generated: 2026-10-02
 scope: test stack, layout, mocking and CI gates
 ---
@@ -32,17 +32,17 @@ pnpm test:evals           # @careeros/ai evals (EVAL_MOCK=1 default); real run n
 - **Placement pattern:** unit tests are **co-located** next to source (`apps/api/src/modules/skills/skills.service.test.ts`); integration tests are `*.integration.test.ts`; e2e specs live in `apps/web/e2e/`; LLM evals live in `packages/ai/src/evals/<prompt>/`; contract tests are `*.contract.test.ts` in `packages/job-pipeline/src/adapters/`.
 - **Naming convention:** `foo.ts` + `foo.test.ts`; integration `foo.integration.test.ts`; e2e `*.spec.ts`; evals `*.eval.ts`; contracts `*.contract.test.ts`.
 - **Setup files:** root `vitest.setup.ts` seeds `ENCRYPTION_KEY` (64 hex), `DATABASE_URL`, `REDIS_URL`, `QDRANT_URL`; included via `vitest.config.ts` `setupFiles`. Playwright config lives only at `apps/web/playwright.config.ts`.
-- **Counts in the tree:** 192 `*.test.ts(x)`, 4 `*.integration.test.ts`, 3 `*.spec.ts` (e2e), 7 `*.contract.test.ts`, 2 `*.eval.ts` (typed sources via `git ls-files`).
+- **Counts in the tree:** 229 `*.test.ts(x)`, 7 `*.integration.test.ts`, 3 `*.spec.ts` (e2e), 14 `*.contract.test.ts`, 2 `*.eval.ts` (tracked sources via `git ls-files`). The cleanup's central gate recorded 1609+ Vitest tests passing / 0 failed with web lint clean (`plan/CLEANUP_TASKS.md` progress log).
 
 ### 3) Test Scope Matrix
 
 | Scope | Covered? | Typical target | Notes |
 |-------|----------|----------------|-------|
 | Unit | Yes | Services, parsers, aggregators, crypto, schemas, priority/XP math | Vitest; colocated; `pnpm test:unit` |
-| Integration | Yes (partial) | Prisma queries, storage, worker jobs | Testcontainers gated behind `TESTCONTAINERS_E2E=1` + `isDockerAvailable`; 4 files today |
+| Integration | Yes (partial) | Prisma queries, encrypted-field opacity, append-only audit, storage, job ingestion, approvals, skill-state sync | Testcontainers gated behind `TESTCONTAINERS_E2E=1` + `isDockerAvailable`; 7 files today |
 | E2E | Yes (partial) | Setup wizard, post-setup widgets, connect-repo golden flow | `pr.yml` runs `pre-setup` on a fresh DB and mints an `E2E_STORAGE_STATE` for `post-setup`; `golden-connect-repo` still skips (needs `E2E_STUB_MODE=1` + server-side stubs) |
 | LLM evals | Yes (partial) | skill-extract, knowledge-grader, question-generator, fact-check, email-classifier | `EVAL_MOCK=1` by default; nightly workflow exists but runner registration is deferred |
-| Contract | Yes | 5 job adapters (`ashby`, `greenhouse`, `arbeitnow`, `remotive`, `adzuna` MSW) | Weekly live revalidation via `adapter-contract.yml` |
+| Contract | Yes | 12 job adapters (`ashby`, `greenhouse`, `adzuna` MSW, `arbeitnow`, `remotive`, `firecrawl`, `workday`, `lever`, `smartrecruiters`, `workable`, `icims`, `successfactors`) + 2 ATS-submit adapters | 14 files; weekly live revalidation via `adapter-contract.yml` |
 | Sandbox security | Yes | Memory/network/fork/wallclock/fs limits | Real Docker (`packages/sandbox/src/security.test.ts`) |
 | Backup/restore | Partial | Weekly restore round-trip | Workflow exists (`.github/workflows/restore-test.yml`); round-trip body gated on seed/manifest wiring |
 | A11y | Yes | Dashboard, skills, evidence, facts, arena, settings | axe WCAG 2.1 AA; color-contrast disabled in the post-setup spec |
@@ -59,15 +59,16 @@ pnpm test:evals           # @careeros/ai evals (EVAL_MOCK=1 default); real run n
 
 - **Coverage tool + threshold:** none. **No coverage percentage target** (`plan/testing.md` §10). Behavior coverage is the bar: each phase checkbox needs at least one verifying test.
 - **Current reported coverage:** `[TODO]` not measured/committed.
-- **Quality gates in CI:** lint (`apps/web` eslint 9; `@careeros/api`'s lint script is inactive until it gains a flat config), typecheck, `pnpm audit --prod --audit-level=high`, image-pin check, prompt-version check, unit tests, integration tests, Playwright (pre-setup + post-setup), Trivy, CodeQL, gitleaks, adapter contracts (weekly), evals (nightly), restore test (weekly).
-- **Known gaps/flaky areas:** `golden-connect-repo` e2e skips without stub mode + server-side stubs; `@careeros/api` has no working eslint config; only 4 integration files; no visual baselines; embedder is a placeholder so semantic tests assert shape, not quality.
+- **Quality gates in CI:** `pr.yml` has dedicated jobs for **lint** (`apps/web` eslint 9 is the real gate; `@careeros/api` is excluded because it has no flat config), typecheck (`pnpm -r typecheck` after an explicit `prisma generate`), unit tests, integration tests (Testcontainers, `TESTCONTAINERS_E2E=1`), and **Playwright** (pre-setup on a fresh migrated DB, then `pnpm seed:test` + minted storage state for the authenticated suite). Plus `pnpm audit --prod --audit-level=high`, image-pin check, prompt-version check, Trivy, CodeQL, gitleaks, adapter contracts (weekly), evals (nightly), restore test (weekly).
+- **Known gaps/flaky areas:** `golden-connect-repo` e2e self-skips without stub mode + server-side stubs; `@careeros/api` still has no working eslint flat config (its `lint` script is excluded from CI); only 7 integration files; no visual baselines; embedder is a placeholder so semantic tests assert shape, not quality; the live Docker egress smoke (`scripts/smoke/egress.sh`) is not in CI and remains unrun; T29 (migrate web fetch-on-mount to a data hook) leaves 21 `react-hooks/set-state-in-effect` warnings in `apps/web`.
 
 ### 6) Evidence
 
 - `vitest.config.ts`, `vitest.setup.ts`, `apps/web/playwright.config.ts`, `apps/web/e2e/*.spec.ts`
 - `packages/testing/src/index.ts` (Testcontainers, MSW handlers, axe, arbitraries, migration-safety)
 - `.github/workflows/pr.yml`, `nightly-evals.yml`, `adapter-contract.yml`, `restore-test.yml`
-- `plan/testing.md`, `CONTRIBUTING.md` §Testing conventions
+- `packages/job-pipeline/src/adapters/**/*.contract.test.ts`, `apps/api/src/**/*.integration.test.ts`
+- `plan/testing.md`, `CONTRIBUTING.md` §Testing conventions, `plan/CLEANUP_TASKS.md` (verified gate counts)
 - `docs/codebase/.codebase-scan.txt` (CI/CD PIPELINES, GIT RECENT COMMITS)
 
 ## Extended Sections
@@ -76,7 +77,7 @@ pnpm test:evals           # @careeros/ai evals (EVAL_MOCK=1 default); real run n
 
 | Workflow | Trigger | Gates |
 |----------|---------|-------|
-| `pr.yml` | PR + push main/master | lint (`@careeros/web`), vitest, `pnpm -r typecheck`, `pnpm audit`, Testcontainers integration, Playwright (pre-setup + post-setup), image pins, prompt versions |
+| `pr.yml` | PR + push main/master | lint (`@careeros/web` only), vitest, `pnpm -r typecheck` (after explicit `prisma generate`), `pnpm audit`, Testcontainers integration, **Playwright e2e (pre-setup + seeded post-setup + axe)**, image pins, prompt versions |
 | `trivy.yml` | PR + push + Mon 06:00 | HIGH/CRITICAL image CVEs → SARIF |
 | `codeql.yml` | PR + push + Mon 05:00 | JS/TS security-extended SAST |
 | `gitleaks.yml` | PR + push + Mon 07:00 | secret scanning |

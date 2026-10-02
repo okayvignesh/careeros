@@ -1,5 +1,5 @@
 ---
-commit: 47be31a
+commit: dead1a4
 generated: 2026-10-02
 scope: system flow, layers, patterns and risks
 ---
@@ -13,7 +13,8 @@ Career OS is a layered, modular monolith plus async workers and a local desktop 
 ### 1) Architectural Style
 
 - **Primary style:** layered + feature-modular monolith (`apps/api` NestJS modules over a Prisma data layer), with an event/queue side-car (`apps/worker` + BullMQ) and an out-of-process agent (`apps/desktop`).
-- **Why this classification (evidence):** `apps/api/src/app.module.ts:14-124` registers 38 feature modules plus infra modules (`PrismaModule`, `StorageModule`, `QueueModule`, `SensitivityGateModule`, `MetricsModule`); each module owns controller + service + Prisma access. `apps/worker/src/main.ts` boots independent queue consumers. `packages/*` hold capability interfaces consumed by both.
+- **Why this classification (evidence):** `apps/api/src/app.module.ts:14-124` registers 38 feature modules plus infra modules (`PrismaModule`, `StorageModule`, `QueueModule`, `SensitivityGateModule`, `ProviderLoaderModule`, `MetricsModule`); each module owns controller + service + Prisma access. `apps/worker/src/main.ts` boots independent queue consumers via the shared `registerWorker` helper. `packages/*` hold capability interfaces consumed by both.
+- **Single sources of truth (post-cleanup):** job-match scoring lives once in `packages/job-pipeline/src/stages/match.ts` (`computeMatch` for detail, `computeMatchResult` for the jobs list); provider construction goes through `ProviderLoaderService` (`apps/api/src/common/provider-loader.service.ts`); sensitivity policy has one authority, `SensitivityGateService` (`apps/api/src/common/sensitivity-gate.service.ts`) over the pure rank primitives in `@careeros/ai`; skill-state sync is `@careeros/aggregator`. Approval dispatch for an unhandled kind fails loud (audit + `markFailed`) rather than dropping the item.
 - **Primary constraints (evidence):**
   1. **Evidence over claims** — Postgres evidence graph is authoritative; LLMs interpret only (`AGENTS.md` §1, §11).
   2. **Privacy/egress control** — server scraping of LinkedIn/Indeed/Naukri/Glassdoor is prohibited; only partner APIs, the user's own agent session, or parsed email alerts (`AGENTS.md` §3.4, §15).
@@ -43,14 +44,18 @@ An LLM call (`docs/architecture.md` §5.3): build versioned prompt → sensitivi
 | `apps/worker` | Queue processors, cron jobs, external sync | HTTP handling | `apps/worker/src/*.worker.ts`, `main.ts` |
 | `apps/desktop` | Local Playwright, keychain, WSS, OS integration | Server business logic, server-side scraping | `apps/desktop/src/main.ts`, `task-runner.ts` |
 | `packages/ai` | Provider abstraction, prompts, grounding, injection/sensitivity | DB writes | `packages/ai/src/provider.ts`, `providers/deepseek.ts` |
-| `packages/job-pipeline` | Source-agnostic ingestion stages + adapters | Persistence (caller writes) | `packages/job-pipeline/src/stages/`, `adapters/` |
-| `packages/shared` | Zod schemas, constants, knowledge rules, retry, redact, SSRF guard | Feature-specific logic | `packages/shared/src/` |
+| `packages/job-pipeline` | Source-agnostic ingestion stages + adapters; the canonical weighted match scorer (`computeMatch`/`computeMatchResult`) | Persistence (caller writes) | `packages/job-pipeline/src/stages/`, `stages/match.ts`, `adapters/` |
+| `packages/aggregator` | Skill-state aggregation + `skill_state_event` audit (type-only Prisma) | HTTP / domain rules | `packages/aggregator/src/index.ts` |
+| `packages/firecrawl` | Firecrawl search/scrape/crawl client (Zod-validated, typed errors) | Job-source policy (lives in `docs/job-sources.md`) | `packages/firecrawl/src/client.ts` |
+| `packages/shared` | Zod schemas, constants, knowledge rules, retry, redact, SSRF guard, egress proxy | Feature-specific logic | `packages/shared/src/` |
 
 ### 4) Reused Patterns
 
 | Pattern | Where found | Why it exists |
 |---------|-------------|---------------|
 | Provider/Adapter (Strategy) | `packages/ai/src/provider.ts` + `registry.ts`; `packages/job-pipeline/src/adapters/`; `packages/embeddings/src/qdrant.ts` | Swap LLM/job source without touching domain code |
+| Single-loader / single-authority | `ProviderLoaderService` (budget → config → sensitivity → decrypt → construct provider), `SensitivityGateService` (one egress decision per provider) | Remove near-duplicate call-site logic and divergent policy |
+| Canonical pure scorer | `packages/job-pipeline/src/stages/match.ts` — same `computeMatch` backs list + detail | One score per job/candidate pair |
 | Registry (explicit, no FS scan) | `ProviderRegistry`, prompt registry `packages/ai/src/prompts/index.ts`, adapter registry | Predictable boot; unknown ID = hard fail |
 | Repository/Service via DI | All `apps/api/src/modules/*.service.ts` + PrismaService | Keep invariant enforcement in one layer |
 | State machine | `apps/api/src/modules/approvals/state-machine.ts`; `packages/shared/src/applications.ts` (`canTransition`) | Guard irreversible transitions |
@@ -65,17 +70,18 @@ An LLM call (`docs/architecture.md` §5.3): build versioned prompt → sensitivi
 
 - **Multi-user not enforced by default.** Most modules call `SessionService.requireUserId`, but there is no global session guard; global `AppConfig` writes are explicitly blocked when a second user exists (`UsageService.assertSingleUserForGlobalConfig`, `plan/security.md` item 1). A missed `requireUserId` could expose data before multi-tenant work lands. See `CONCERNS.md`.
 - **Schema is string-typed, not enum-enforced.** 55 Prisma models, 0 `enum` blocks — states are `String` with documented unions (`Application.state`, `Evidence.kind`, `NormalizedJob.state`). Invalid states are only prevented by app code.
-- **Placeholder embedding + single LLM provider** mean semantic search and provider-agnosticism are not yet real (`packages/embeddings/src/local.ts`, `packages/ai/src/providers/`).
-- **Two Prisma major versions across workspaces** (`@prisma/client ^6.19.3` in api vs `^5.20.0` in worker) risk schema/client drift.
-- **N+1 / pagination ceiling** already identified by the team: `plan/PLAN.md:69` parks N+1 in `JobsService.sync` and a match-score pagination pool ceiling as debt.
-- **Deferred phase slices** (see `plan/DEFERRED.md`) mean several documented flows are partial; `[TODO]` surfaces referenced in docs may not exist.
+- **Placeholder embedding + single LLM provider** mean semantic search and provider-agnosticism are not yet real (`packages/embeddings/src/local.ts`, `packages/ai/src/providers/` still holds only `deepseek.ts`).
+- **N+1 / pagination ceiling** already identified by the team: `plan/PLAN.md:69` parks N+1 in `JobsService.sync` and a match-score pagination pool ceiling as debt. Skill extraction and adapter fetch/persist still run inline in the API request path rather than on a `jobs` BullMQ queue.
+- **Deferred phase slices** (see `plan/DEFERRED.md`) mean several documented flows are partial. Most formerly-missing paths now resolve (`packages/ui/src/motion.ts`, `scripts/dev-host.sh`, `scripts/seed-test.ts`, `infra/docker/docker-compose.host-dev.yml`); only `infra/nginx/` is still absent.
+- **Resolved during cleanup (no longer risks):** Prisma is aligned on 6.x across api/worker/aggregator; egress for Node global `fetch` is enforced via `undici`; Swagger/OpenAPI is implemented; api/worker/web containers are hardened; GitHub Actions are SHA-pinned.
 
 ### 6) Evidence
 
 - `docs/architecture.md` (system topology, golden paths, data lifecycles, failure modes)
 - `AGENTS.md` §1-§14, `plan/PLAN.md` (locked decisions, status board)
 - `apps/api/src/main.ts`, `apps/api/src/app.module.ts`, `apps/api/src/modules/`
-- `apps/worker/src/main.ts`, `packages/ai/src/{provider,registry,grounded,wrap}.ts`
+- `apps/api/src/common/{provider-loader.service.ts,sensitivity-gate.service.ts}`, `packages/job-pipeline/src/stages/match.ts`, `packages/aggregator/src/index.ts`, `apps/api/src/modules/approvals/{approvals.service.ts,state-machine.ts}`
+- `apps/worker/src/main.ts`, `apps/worker/src/register-worker.ts`, `packages/ai/src/{provider,registry,grounded,wrap}.ts`
 - `apps/api/prisma/schema.prisma`
 
 ## Extended Sections

@@ -1,0 +1,15 @@
+# Docker build-context filter.
+# The repo is developed on an exFAT volume that drops AppleDouble `._*` sidecars;
+# their xattrs make Docker's context sender fail, so exclude them before it
+# stats/xattrs them.
+._*
+**/._*
+node_modules
+**/node_modules
+.git
+.turbo
+**/.turbo
+**/.next
+**/dist
+careeros-screens
+*.log

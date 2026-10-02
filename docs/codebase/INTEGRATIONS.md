@@ -1,5 +1,5 @@
 ---
-commit: 47be31a
+commit: dead1a4
 generated: 2026-10-02
 scope: external APIs, data stores, secrets and observability
 ---
@@ -18,6 +18,8 @@ Career OS integrates with LLM, code-host, job-source, messaging, and email syste
 | GitHub | REST (Octokit) | Repo list + sync, commit analysis for skill evidence | PAT (OAuth optional); scope-gated to `repo`/`public_repo`/`read:user`/`user:email` | High | `apps/worker/src/github-sync.ts`, `apps/api/src/modules/integrations/github/github.service.ts` |
 | GitLab | REST | Public + self-hosted repo sync (PAT) | PAT + per-user host allowlist via `assertPublicUrl` | Medium | `apps/worker/src/gitlab-sync.ts`, `packages/shared/src/net/assert-public-url.ts` |
 | Ashby / Greenhouse | ATS REST | Verified job source (highest trust tier) + ATS submission | Public boards (no auth); submission via API later | High | `packages/job-pipeline/src/adapters/`, `apps/api/src/modules/ats-submit/adapters/` |
+| Workday / Lever / SmartRecruiters / Workable / iCIMS / SuccessFactors | ATS/career-site adapters | Direct crawl of public company career sites and ATS boards (owner decision U6) | Public boards; config/credentials per source (env) | Medium–High | `packages/job-pipeline/src/adapters/{workday,lever,smartrecruiters,workable,icims,successfactors}/` |
+| Firecrawl | Managed scrape/search/crawl (`api.firecrawl.dev/v1`) | Public career-site / ATS discovery, preferred over direct crawl | `FIRECRAWL_API_KEY` (optional; encrypted at rest) | Medium | `packages/firecrawl/src/client.ts`, `packages/job-pipeline/src/adapters/firecrawl/`, `docs/job-sources.md` |
 | Adzuna / Remotive / Arbeitnow | Aggregator REST | Aggregator job sources (tier 2) | API key (Adzuna) / none | Medium | `packages/job-pipeline/src/adapters/`; `plan/PLAN.md:20` |
 | JSearch / Serpapi (optional) | Paid partner API | LinkedIn/Indeed via legitimate partners | API key | Low (optional) | `plan/PLAN.md:20`, `docs/architecture.md` §2 |
 | Slack | Web API + Events API | Daily brief, slash commands, interactive approvals | OAuth bot token + request signing (HMAC) | Medium | `apps/api/src/modules/slack/`, `infra/slack/manifest.yml` |
@@ -32,7 +34,7 @@ Career OS integrates with LLM, code-host, job-source, messaging, and email syste
 
 | Store | Role | Access layer | Key risk | Evidence |
 |-------|------|--------------|----------|----------|
-| Postgres 16 | System of record (55 models, 38 migrations, append-only `jobs_raw`/`audit_events`/`llm_calls`) | Prisma (`apps/api`, `apps/worker`) | Two Prisma majors across workspaces; AppConfig not yet user-scoped | `apps/api/prisma/schema.prisma`, `apps/api/package.json`, `apps/worker/package.json` |
+| Postgres 16 | System of record (55 models, 39 migrations, append-only `jobs_raw`/`audit_events`/`llm_calls`) | Prisma 6 (`apps/api`, `apps/worker`, `@careeros/aggregator`) | AppConfig not yet user-scoped (multitenant TODO) | `apps/api/prisma/schema.prisma`, `apps/api/package.json`, `apps/worker/package.json`, `packages/aggregator/package.json` |
 | Redis 7 | BullMQ queues, throttler store, cache | `ioredis`, BullMQ | Queue loss if Redis down (documented degradation) | `apps/worker/src/main.ts`, `apps/api/src/modules/auth/auth.module.ts` |
 | Qdrant | Vector index (semantic content) | `@qdrant/js-client-rest` via `QdrantStore` | Embeddings are a placeholder today | `packages/embeddings/src/local.ts`, `src/qdrant.ts` |
 | MinIO | Files (resumes, PDFs, screenshots) | `minio` SDK wrapped in `StorageService` | Credentials must be strong; presign TTL 5 min | `apps/api/src/common/storage.service.ts` |
@@ -49,22 +51,22 @@ Career OS integrates with LLM, code-host, job-source, messaging, and email syste
 - **Retry/backoff:** shared `packages/shared/retry.ts` — exponential with full jitter, base 500ms, factor 2, max 30s, 3 attempts; `429` honours `Retry-After`; non-429 `4xx` fails fast; circuit breaker at 5 consecutive failures per (provider, endpoint), 60s open, half-open probe (`AGENTS.md` §6).
 - **Timeout policy:** DeepSeek provider enforces `max_tokens` (default 4096) and SSRF-guarded fetches; health checks use 500ms per dependency with a 5s cache (`plan/observability.md`); agent navigation timeout 30s (`apps/desktop/src/task-runner.ts`).
 - **Circuit-breaker/fallback:** documented in `docs/architecture.md` §8 (DeepSeek → fallback provider → Ollama last-resort). `[TODO]` Only DeepSeek adapter exists, so the real fallback path is not implemented.
-- **Egress control:** api/worker force `HTTP(S)_PROXY=http://squid:3128` with `NO_PROXY` for datastores; Squid denies by default and allows only deepseek/openai/anthropic/openrouter/github/githubusercontent/gitlab/npmjs/github-releases; denies non-80/443, CONNECT≠443, and local IPs (`infra/docker/squid/squid.conf`). Because Node global `fetch` ignores proxy env vars, `installEgressProxy()` (`packages/shared/src/net/proxy-dispatcher.ts`) installs an undici `EnvHttpProxyAgent` at api/worker boot and fails closed if the proxy is configured but cannot be built (`docs/egress.md`).
+- **Egress control:** api/worker force `HTTP(S)_PROXY=http://squid:3128` with `NO_PROXY` for datastores; Squid denies by default and allows only deepseek/openai/anthropic/openrouter/github/githubusercontent/gitlab/npmjs/github-releases plus **`api.firecrawl.dev`**; denies non-80/443, CONNECT≠443, and local IPs (`infra/docker/squid/squid.conf`). Direct ATS/career-site crawl hosts are deliberately **not** wildcarded — each reviewed host needs an explicit `allowed_dsts` line (`docs/job-sources.md`). Because Node global `fetch` ignores proxy env vars, `installEgressProxy()` (`packages/shared/src/net/proxy-dispatcher.ts`) installs an undici `EnvHttpProxyAgent` at api/worker boot (`apps/api/src/main.ts:97`, `apps/worker/src/main.ts:120`) and fails closed if the proxy is configured but cannot be built (`docs/egress.md`). A manual operator smoke lives at `scripts/smoke/egress.sh` (not run in CI; the live Docker egress smoke is still outstanding).
 - **SSRF gate:** `assertPublicUrl` (DNS-resolved, redirect-revalidated, host allowlist) applies to user-supplied provider/embedding base URLs and self-hosted GitLab (`packages/shared/src/net/assert-public-url.ts`).
 
 ### 5) Observability for Integrations
 
 - **Logging around external calls:** yes — `pino`, with `provider`/`model`/`prompt_id`/`prompt_hash`/`job_id`/`duration_ms` context (`plan/observability.md`).
 - **Metrics:** `prom-client` `/metrics` on api + worker, including `llm_*`, `queue_*`, `jobs_*`, `agent_*`, and auth counters. `[TODO]` worker `/metrics` wiring and GlitchTip service are not yet present in `docker-compose.yml`.
-- **Missing visibility gaps:** no tracing in MVP (interface reserved); no GlitchTip compose service; `llm_calls` middleware is only partially done (per-call caps shipped, full table/middleware deferred per `plan/ai-safety.md` item 9).
+- **Per-call LLM audit is now wired:** `makeLlmAuditor` (`apps/api/src/common/llm-audit.ts`) is passed into `DeepSeekProvider` via `ProviderLoaderService`, so each provider call writes one `llm_calls` row (tokens, cost estimate, latency) and emits metrics; ledger-write failures log a warn rather than disappearing. Remaining gaps: no tracing in MVP (interface reserved); no GlitchTip compose service; tokenizer/pricing coverage still maturing (`plan/ai-safety.md` item 9).
 
 ### 6) Evidence
 
-- `packages/ai/src/providers/deepseek.ts`, `packages/ai/src/pricing.ts`
-- `packages/job-pipeline/src/adapters/`, `packages/email-parsers/src/senders/allowlist.ts`
+- `packages/ai/src/providers/deepseek.ts`, `packages/ai/src/pricing.ts`, `apps/api/src/common/llm-audit.ts`
+- `packages/job-pipeline/src/adapters/`, `packages/firecrawl/src/client.ts`, `packages/email-parsers/src/senders/allowlist.ts`, `docs/job-sources.md`
 - `apps/api/src/modules/integrations/`, `apps/api/src/modules/{slack,gmail,agent}/`
-- `infra/docker/docker-compose.yml`, `infra/docker/squid/squid.conf`, `infra/slack/manifest.yml`
-- `.env.example`, `packages/secrets/src/`, `packages/shared/src/net/assert-public-url.ts`
+- `infra/docker/docker-compose.yml`, `infra/docker/squid/squid.conf`, `scripts/smoke/egress.sh`, `infra/slack/manifest.yml`
+- `.env.example`, `packages/secrets/src/`, `packages/shared/src/net/{assert-public-url,proxy-dispatcher}.ts`
 - `plan/security.md` items 4, 6, 8, 10; `plan/observability.md`; `docs/architecture.md` §2, §7, §8
 
 ## Extended Sections
@@ -117,4 +119,4 @@ sequenceDiagram
 
 ### Integration contract tests
 
-Every job-source adapter has a recorded-fixture contract test (`packages/job-pipeline/src/adapters/*.contract.test.ts`) and a weekly live revalidation workflow (`.github/workflows/adapter-contract.yml`). Adzuna is fully MSW-mocked because its upstream requires paid credentials.
+Every job-source adapter has a recorded-fixture contract test (14 `*.contract.test.ts` across `packages/job-pipeline/src/adapters/**` and `apps/api/src/modules/ats-submit/adapters/**`) and a weekly live revalidation workflow (`.github/workflows/adapter-contract.yml`). The ATS set now includes `firecrawl`, `workday`, `lever`, `smartrecruiters`, `workable`, `icims`, and `successfactors` alongside `ashby`, `greenhouse`, `adzuna`, `arbeitnow`, and `remotive`. Adzuna is fully MSW-mocked because its upstream requires paid credentials; several ATS adapters are live-validated in the weekly run.

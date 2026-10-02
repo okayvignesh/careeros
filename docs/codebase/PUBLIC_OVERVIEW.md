@@ -1,5 +1,5 @@
 ---
-commit: 47be31a
+commit: dead1a4
 generated: 2026-10-02
 scope: plain-language product overview
 ---
@@ -24,7 +24,7 @@ It is not a public website, not a recruiting product, and not something your emp
 
 - **Builds a digital twin of you.** It gathers your resume, your public code, your practice results, and what you have done in past applications, then keeps a continuously updated picture of your skills. Each skill is shown with how strong it is, how confident the system is, and how recently you used it.
 - **Practices with you.** It offers a range of exercises and assessments, tracks your progress, and suggests what to learn next based on what the job market actually wants.
-- **Watches the job market.** It collects job listings from reputable sources, cleans and de-duplicates them, checks how fresh they are, and matches them to your real skills, so you see the roles that genuinely fit.
+- **Watches the job market.** It collects job listings from reputable sources, cleans and de-duplicates them, checks how fresh they are, and matches them to your real skills, so you see the roles that genuinely fit. It can also discover postings on public company career sites and job boards (including Workday and other major applicant-tracking systems) using a managed web-crawling service, always respecting each site's published rules and only for public pages.
 - **Helps you apply.** It can prepare resumes and cover letters tailored to a specific job, but only by rephrasing facts you have already confirmed. Anything it cannot back up is blocked before you ever see it.
 - **Keeps you organized.** It tracks each application through every stage, reminds you what needs doing, and follows up on replies.
 - **Reaches you where you are.** It can send a daily summary and take simple commands through Slack, and it reads job-related email to keep your application tracker up to date.
@@ -40,7 +40,7 @@ It is not a public website, not a recruiting product, and not something your emp
 
 ## How it is built (in general terms)
 
-Career OS is a self-contained application. You run a web interface that you open in your browser, backed by a secure database that stores your information, plus background helpers that fetch and organize job data. A small companion program you install on your own computer can, with your permission, browse job sites using your own logged-in session, which avoids the legal and ethical problems of mass-scraping those sites from a server.
+Career OS is a self-contained application. You run a web interface that you open in your browser, backed by a secure database that stores your information, plus background helpers that fetch and organize job data. For public company career pages and job boards, it uses a managed crawling service and direct adapters that honor each site's rules and rate limits; sites that forbid automated access are not crawled. A small companion program you install on your own computer can, with your permission, browse job sites using your own logged-in session, which avoids the legal and ethical problems of mass-scraping those sites from a server.
 
 It is designed to be provider-agnostic for artificial intelligence: the intelligence layer is a replaceable component, so the system can work with different AI providers instead of being tied to one.
 

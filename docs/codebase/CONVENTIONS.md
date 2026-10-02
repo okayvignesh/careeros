@@ -1,5 +1,5 @@
 ---
-commit: 47be31a
+commit: dead1a4
 generated: 2026-10-02
 scope: naming, formatting, imports, errors and logging
 ---
@@ -17,7 +17,7 @@ Conventions below are stated in `AGENTS.md`, `CONTRIBUTING.md`, and enforced (or
 | Files (non-React) | kebab-case (dot-separated "type" suffix for Nest components) | `zod-validation.pipe.ts`, `market-snapshot.worker.ts`, `assert-public-url.ts` | `apps/api/src/common/pipes/zod-validation.pipe.ts`; `apps/worker/src/market-snapshot.worker.ts` |
 | React components | PascalCase `.tsx`, one component per file | `SkillTree.tsx`, `ApprovalQueue.tsx` | `apps/web/src/components/skills/SkillTree.tsx` |
 | Hooks / utilities | camelCase | `useDrafts.ts`, `api-client.ts`, `chart-geometry.ts` | `packages/ui/src/useDrafts.ts`; `apps/web/src/lib/api-client.ts` |
-| Functions/methods | camelCase, verb-first | `syncSkillState`, `encryptField`, `computeMatch` | `apps/worker/src/aggregator.ts`; `packages/secrets/src/field.ts`; `packages/job-pipeline/src/stages/match.ts` |
+| Functions/methods | camelCase, verb-first | `syncSkillState`, `encryptField`, `computeMatch` | `packages/aggregator/src/index.ts`; `packages/secrets/src/field.ts`; `packages/job-pipeline/src/stages/match.ts` |
 | Types/interfaces | PascalCase; Zod schemas suffixed `Schema` | `NormalizedJob`, `SkillExtractSchema` | `packages/shared/src/schemas/index.ts` |
 | Constants | UPPER_SNAKE_CASE | `QUEUE_GITHUB`, `EMBED_DIM`, `SENSITIVITY_LEVELS` | `packages/shared/src/queues.ts`, `packages/embeddings/src/local.ts` |
 | Env vars | UPPER_SNAKE_CASE | `ENCRYPTION_KEY`, `TRUSTED_ORIGINS` | `.env.example` |
@@ -27,7 +27,7 @@ Conventions below are stated in `AGENTS.md`, `CONTRIBUTING.md`, and enforced (or
 ### 2) Formatting and Linting
 
 - **Formatter:** Prettier 3 configured in `.prettierrc` — `semi: true`, `singleQuote: true`, `trailingComma: "all"`, `printWidth: 100`, `tabWidth: 2`, `arrowParens: "always"`, plugin `prettier-plugin-tailwindcss`. Run with `pnpm format`.
-- **Linter:** Two layers. `apps/web` uses `next lint` (`eslint-config-next`). A **root `.eslintrc.cjs` is a reference config that is not installed and not active** until a workspace adds ESLint + `extends: ["../../.eslintrc.cjs"]` (`.eslintrc.cjs:10-18`).
+- **Linter:** Two layers. `apps/web` runs **ESLint 9** via a flat config (`apps/web/eslint.config.mjs`, `eslint-config-next@16`); Next 16 removed `next lint`, so `pnpm lint` calls the ESLint CLI directly. A **root `.eslintrc.cjs` is a reference config that is not installed and not active** until a workspace adds ESLint + `extends: ["../../.eslintrc.cjs"]` (`.eslintrc.cjs:10-18`); `@careeros/api` has no working flat config and is excluded from the CI lint job. CI also runs the API typecheck, unit/integration tests, and Playwright (`.github/workflows/pr.yml`).
 - **Most relevant enforced rules (root chain, when adopted):**
   1. `no-console: error` in production code (allow `warn`/`error`; tests/scripts/seeds exempt) — observability spec.
   2. `no-restricted-syntax` on `CallExpression[callee.property.name='chat']` — raw `provider.chat()` is forbidden outside `packages/ai`; use `chatStructured()` with a Zod schema per `plan/ai-safety.md` item 2.
@@ -79,6 +79,7 @@ Conventions below are stated in `AGENTS.md`, `CONTRIBUTING.md`, and enforced (or
 
 ### Known convention violations / drift
 
-- The root ESLint chain is **not active** in any workspace that hasn't opted in (`.eslintrc.cjs:10-13`), so the three cross-cutting rules are not universally enforced today.
+- The root ESLint chain is **still not active** in any workspace that hasn't opted in (`.eslintrc.cjs:10-13`), so the three cross-cutting rules are not universally enforced today. `apps/web` ships its own eslint 9 flat config and is the only workspace gated in CI.
+- `apps/web` has T29 work outstanding: `react-hooks/set-state-in-effect` is downgraded to `warn` (21 fetch-on-mount warnings) pending a data-hook migration (`apps/web/eslint.config.mjs`).
 - `AGENTS.md` §5 lists a `packages/storage` and `packages/github` that do not exist as packages; storage lives at `apps/api/src/common/storage.service.ts` and GitHub logic lives in `apps/api/src/modules/integrations/github/` plus `apps/worker/src/github-sync.ts`.
-- `docs/dev-setup.md` references commands (`pnpm check`, `pnpm prisma`, `pnpm erd`, `pnpm ai:probe`, `pnpm seed:dev`, `pnpm eval:ai`, `pnpm test:visual`, `pnpm fixtures:record`) that are **not** all present in the root `package.json`. Verify before trusting. See `CONCERNS.md`.
+- `docs/dev-setup.md` now labels the remaining unwired commands (`pnpm seed:dev`, `pnpm ai:probe`) as "planned" rather than presenting them as available. See `CONCERNS.md`.

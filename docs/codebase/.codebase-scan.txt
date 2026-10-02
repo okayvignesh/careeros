@@ -42,6 +42,7 @@ apps/api/src/common
 apps/api/src/main.test.ts
 apps/api/src/main.ts
 apps/api/src/modules
+apps/api/src/openapi
 apps/api/src/prisma
 apps/api/src/seed
 apps/api/src/startup-check.test.ts
@@ -83,6 +84,8 @@ apps/web/e2e/README.md
 apps/web/e2e/golden-connect-repo.spec.ts
 apps/web/e2e/post-setup.spec.ts
 apps/web/e2e/pre-setup.spec.ts
+apps/web/e2e/seed-storage-state.mjs
+apps/web/eslint.config.mjs
 apps/web/next-env.d.ts
 apps/web/next.config.mjs
 apps/web/package.json
@@ -94,16 +97,20 @@ apps/web/src/components
 apps/web/src/lib
 apps/web/src/middleware.test.ts
 apps/web/src/middleware.ts
+apps/web/src/no-analytics-sdk.test.ts
 apps/web/tailwind.config.ts
 apps/web/tsconfig.json
 apps/worker
 apps/worker/package.json
 apps/worker/src
-apps/worker/src/aggregator.ts
 apps/worker/src/audit-log-retention.test.ts
 apps/worker/src/audit-log-retention.worker.ts
 apps/worker/src/corpus
 apps/worker/src/embedding-job.ts
+apps/worker/src/firecrawl-budget.ts
+apps/worker/src/firecrawl-crawl.ts
+apps/worker/src/firecrawl-search.worker.test.ts
+apps/worker/src/firecrawl-search.worker.ts
 apps/worker/src/github-sync.ts
 apps/worker/src/gitlab-sync.test.ts
 apps/worker/src/gitlab-sync.ts
@@ -114,10 +121,13 @@ apps/worker/src/hallucination-log-retention.worker.ts
 apps/worker/src/main.ts
 apps/worker/src/market-snapshot.worker.test.ts
 apps/worker/src/market-snapshot.worker.ts
+apps/worker/src/register-worker.test.ts
+apps/worker/src/register-worker.ts
 apps/worker/src/selector-health.test.ts
 apps/worker/src/selector-health.worker.ts
 apps/worker/src/skills-seed.ts
 apps/worker/tsconfig.json
+apps/worker/tsconfig.tsbuildinfo
 careeros-screens
 careeros-screens/README.txt
 careeros-screens/index.html
@@ -190,16 +200,6 @@ careeros-screens/phase-6-controlled-execution/47-interview-prep.html
 careeros-screens/phase-6-controlled-execution/48-outreach-composer.html
 careeros-screens/phase-6-controlled-execution/57-storage.html
 careeros-screens/phase-6-controlled-execution/59-security.html
-careeros-screens/phase-6-controlled-execution/60-data-and-privacy.html
-careeros-screens/phase-6-controlled-execution/63-backup-and-recovery.html
-careeros-screens/phase-6-controlled-execution/64-audit-log.html
-careeros-screens/phase-6-controlled-execution/index.html
-docs
-docs/._codebase
-docs/architecture.md
-docs/audit-log.md
-docs/backup.md
-docs/codebase
 
 === STACK DETECTION (manifest files) ===
 
@@ -280,7 +280,8 @@ clean:
     "dev:host": "bash scripts/dev-host.sh",
     "migrate": "pnpm --filter @careeros/api prisma migrate deploy",
     "migrate:dev": "pnpm --filter @careeros/api prisma migrate dev",
-    "db:reset": "pnpm --filter @careeros/api prisma migrate reset --force"
+    "db:reset": "pnpm --filter @careeros/api prisma migrate reset --force",
+    "seed:test": "pnpm --filter @careeros/api exec ts-node --project tsconfig.json --transpile-only ../../scripts/seed-test.ts"
   },
   "devDependencies": {
     "cheerio": "^1.0.0",
@@ -316,9 +317,6 @@ importers:
 
   .:
     devDependencies:
-      '@types/node':
-        specifier: ^22.7.5
-        version: 22.20.4
       cheerio:
         specifier: ^1.0.0
         version: 1.2.0
@@ -345,10 +343,16 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^5.0.1
-        version: 5.0.1(@opentelemetry/api@1.9.1)(@types/node@22.20.4)(jsdom@25.0.1)(msw@2.15.0(@types/node@22.20.4)(typescript@5.9.3))(vite@8.3.0(@types/node@22.20.4)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
+        version: 5.0.1(@opentelemetry/api@1.9.1)(@types/node@25.9.8)(jsdom@25.0.1)(msw@2.15.0(@types/node@25.9.8)(typescript@5.9.3))(vite@8.3.0(@types/node@25.9.8)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
 
   apps/api:
     dependencies:
+      '@asteasolutions/zod-to-openapi':
+        specifier: ^7.3.4
+        version: 7.3.4(zod@3.25.76)
+      '@careeros/aggregator':
+        specifier: workspace:*
+        version: link:../../packages/aggregator
       '@careeros/ai':
         specifier: workspace:*
         version: link:../../packages/ai
@@ -379,11 +383,8 @@ importers:
       '@nest-lab/throttler-storage-redis':
         specifier: ^1.2.0
         version: 1.2.0(@nestjs/common@10.4.22(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@10.4.22)(@nestjs/throttler@6.7.1(@nestjs/common@10.4.22(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@10.4.22)(reflect-metadata@0.2.2))(ioredis@5.11.1)(reflect-metadata@0.2.2)
-      '@nestjs/common':
-        specifier: ^10.4.4
-        version: 10.4.22(reflect-metadata@0.2.2)(rxjs@7.8.2)
 
-[TRUNCATED] Showing first 80 of 14421 lines.
+[TRUNCATED] Showing first 80 of 14642 lines.
 
 === ENTRY POINTS ===
 No common entry points found. Check 'main' or 'scripts.start' in manifest files above.
@@ -446,6 +447,11 @@ SESSION_TTL_HOURS=168
 # ─── AI (wizard captures at runtime; no key needed at boot) ─
 # DEEPSEEK_API_KEY=  # optional; otherwise entered in setup wizard
 
+# ─── Job sources (optional; no key needed at boot) ─────────
+# FIRECRAWL_API_KEY=  # optional; enables Firecrawl search/scrape/crawl of
+#                     # public career sites + ATS boards. Without it the source
+#                     # is reported unavailable; boot does not fail.
+
 # ─── Logging ────────────────────────────────────────────────
 LOG_LEVEL=info
 LOG_DEBUG=
@@ -455,27 +461,38 @@ NEXT_TELEMETRY_DISABLED=1
 
 
 === TODO / FIXME / HACK (production code only, test dirs excluded) ===
-apps/api/src/modules/agent/agent.controller.ts:33: * be < 5 min old (mirrors recovery.controller.ts pattern). TODO(C-P0.3):
-apps/api/src/modules/assessments/assessments.service.ts:1739: * The sandbox call is the real wire from C-P2.4 (replaces the previous TODO).
-apps/api/src/modules/auth/recovery.controller.ts:17: * TODO(C-P0.3): replace with the shared guard once C-P0.3 lands.
-apps/api/src/modules/auth/recovery.controller.ts:35: // TODO(C-P0.3): swap for shared hasFreshReauth() when it lands.
+apps/api/src/modules/agent/agent.controller.ts:34: * be < 5 min old (mirrors recovery.controller.ts pattern). TODO(C-P0.3):
+apps/api/src/modules/assessments/assessments.service.ts:1480: * The sandbox call is the real wire from C-P2.4 (replaces the previous TODO).
+apps/api/src/modules/auth/recovery.controller.ts:18: * TODO(C-P0.3): replace with the shared guard once C-P0.3 lands.
+apps/api/src/modules/auth/recovery.controller.ts:36: // TODO(C-P0.3): swap for shared hasFreshReauth() when it lands.
 apps/api/src/modules/dossier/dossier.service.test.ts:460: // Employer-confidential redaction (TODO for C-P0.3 sensitivity-gate)
-apps/api/src/modules/dossier/dossier.service.ts:631: // TODO(C-P0.3): the sensitivity-gate + `User.currentEmployerCompanyId` flag
-apps/api/src/modules/me/me.controller.ts:33: * TODO(C-P0.3): swap for shared hasFreshReauth() when it lands.
+apps/api/src/modules/dossier/dossier.service.ts:630: // TODO(C-P0.3): the sensitivity-gate + `User.currentEmployerCompanyId` flag
+apps/api/src/modules/me/me.controller.ts:34: * TODO(C-P0.3): swap for shared hasFreshReauth() when it lands.
 apps/api/src/modules/usage/usage.controller.ts:96: // A-M6: TODO(multitenant): scope AppConfig by userId once multi-user lands.
 apps/api/src/modules/usage/usage.controller.ts:116: // A-M6: TODO(multitenant): scope AppConfig by userId once multi-user lands.
 apps/api/src/modules/usage/usage.controller.ts:137: // A-M6: TODO(multitenant): scope AppConfig by userId once multi-user lands.
 apps/api/src/modules/usage/usage.service.ts:122: * TODO(multitenant): scope AppConfig by userId; drop this guard.
-apps/web/src/components/market-demand/SkillDemandTable.tsx:12: * TODO(api): implement GET /api/market/skill-demand?window=<days>
-apps/web/src/components/market-demand/SkillDemandTable.tsx:85: // ponytail: endpoint missing (see TODO above). Fall back to fixture so
-apps/web/src/components/market-demand/TrendSignalsPanel.tsx:9: * TODO(api): implement GET /api/market/trends
-apps/web/src/components/search-providers/SearchProvidersPanel.tsx:9: * TODO(api): implement GET /api/search-providers
+apps/web/src/components/market-demand/SkillDemandTable.tsx:13: * TODO(api): implement GET /api/market/skill-demand?window=<days>
+apps/web/src/components/market-demand/SkillDemandTable.tsx:38: // Endpoint missing (see TODO above): a failure must not resolve to data,
+apps/web/src/components/market-demand/TrendSignalsPanel.tsx:10: * TODO(api): implement GET /api/market/trends
+apps/web/src/components/market-demand/TrendSignalsPanel.tsx:45: // Endpoint missing (see TODO above): a failure must not resolve to data,
+apps/web/src/components/search-providers/SearchProvidersPanel.tsx:10: * TODO(api): implement GET /api/search-providers (and .../workloads)
+apps/web/src/components/search-providers/SearchProvidersPanel.tsx:57: // Endpoints missing (see TODO above): a failure must not resolve to
+docs/codebase/codebase.index.json:255: "usage": "Load this file first to discover the knowledge base, then read documents in readingOrder or by topic. Every non-trivial claim cites committed file paths; [TODO] = unknown from source, [ASK USER] = needs team intent. Docs are Markdown by design so any AI/agent can read them."
 packages/ai/src/evals/skill-extract.ts:4: // TODO(slice 7b+): grow to 20+ cases (blueprint target) with a mix of clean and
 scripts/browser-agent/linkedin-discover.ts:42: // TODO(D.1): swap in RateLimiter when @careeros/browser-agent ships
 scripts/browser-agent/probe-linkedin-selectors.ts:22: * TODO(D.1): replace the inline `selectorHealth` shim with the real one
 scripts/browser-agent/probe-linkedin-selectors.ts:34: // TODO(D.1): swap in selectorHealth from @careeros/browser-agent
 
 === GIT RECENT COMMITS (last 20) ===
+dead1a4 cleanup: Swagger, integration tests, testcontainers fixes (Wave 13-14)
+cd222c9 cleanup: more ATS adapters, assessment outcome, candidate search (Waves 11-12)
+73dcce1 cleanup: unified match + Firecrawl/Workday adapters + CI gates (Waves 9-10)
+9af620a cleanup: architecture refactors + Firecrawl foundation (Waves 7-8)
+dc79ed9 docs: refresh knowledge-base artifacts
+7ceb66d cleanup: egress enforcement, prisma-generate wiring, lint migration (Waves 5-6)
+85ed76b docs: add AI-readable codebase knowledge base (llms.txt, AI_CONTEXT.md, index, HTML)
+63ebb81 cleanup: security + build health remediation (Waves 1-4)
 47be31a plan: comprehensive pending snapshot (2026-10-02)
 d5f6f7d plan-sync: J1 task-runner real wire shipped e6ec584
 e6ec584 J1: desktop task-runner real Playwright wire (replaces H2 stub)
@@ -488,36 +505,28 @@ ca93a9c H1: no-analytics-in-web guard test (direct + transitive via lockfile)
 c879c2a plan-sync: flip G1 + G2 + G3 status rows to shipped SHAs
 49292e9 plan-sync: G1 + G2 + G3 shipped
 5f6f76d G3: lefthook + eslint rules + verify-esco script
-4fe6c0f G2: ATS-lint per-rule tests (packages/resume-render)
-2cb812c G1: USAGE_STATS opt-in env stub + startup-check negative-case full grid
-0074e43 plan-sync: grader agents shipped 522932d
-522932d assessments: ship debugging + mock-interview + system-design grader agents
-a413a5a plan-sync: flip batch 2 status rows to shipped SHAs
-11814f9 plan-sync: batch 2 shipped (A, B, C, D)
-cc914a5 D: api container hardening + backup RPO/RTO docs
-88dfc9c C: backup byte-inspection + email-parser fuzz + migration-safety scaffold
 
 === HIGH-CHURN FILES (last 90 days, top 20) ===
-  21 pnpm-lock.yaml
-  18 apps/api/src/app.module.ts
+  27 pnpm-lock.yaml
+  19 apps/api/src/app.module.ts
+  18 apps/api/package.json
+  17 plan/security.md
   17 plan/COMPLETION_PLAN.md
   17 apps/api/prisma/schema.prisma
-  15 plan/security.md
-  14 apps/api/package.json
+  14 packages/ai/src/index.ts
   14 plan/HANDOFF.md
   13 plan/DEFERRED.md
-  13 packages/ai/src/index.ts
   11 plan/SESSION_COORDINATION.md
-   8 package.json
-   8 infra/docker/docker-compose.yml
-   7 apps/api/src/modules/me/me.service.ts
-   7 apps/worker/src/main.ts
-   7 packages/shared/src/index.ts
-   7 apps/api/src/modules/jobs/jobs.service.ts
-   7 packages/job-pipeline/src/index.ts
-   6 apps/api/src/modules/market-brief/market-brief.service.ts
-   6 apps/web/next.config.mjs
-   5 apps/api/src/modules/assessments/assessments.service.ts
+  10 apps/api/src/modules/jobs/jobs.service.ts
+  10 apps/worker/src/main.ts
+   9 packages/job-pipeline/src/index.ts
+   9 infra/docker/docker-compose.yml
+   9 package.json
+   8 .github/workflows/pr.yml
+   8 apps/api/src/modules/jobs/jobs.service.test.ts
+   8 packages/shared/src/index.ts
+   7 apps/api/src/modules/assessments/assessments.service.ts
+   7 apps/worker/package.json
 
 === MONOREPO SIGNALS ===
 Monorepo tool detected: pnpm-workspace.yaml
@@ -526,26 +535,26 @@ Sub-package directory found: packages/
 Sub-package directory found: apps/
 
 === CODE METRICS ===
-Total files scanned: 1107
-Total lines of code: 91231
+Total files scanned: 1214
+Total lines of code: 101447
 
 Files by language:
-  TypeScript: 622
-  Other: 360
-  TypeScript/React: 124
+  TypeScript: 687
+  Other: 401
+  TypeScript/React: 125
   JavaScript: 1
 
 Top 10 largest files:
 docs/personal_ai_career_os_blueprint_v1_2_self_hosted_provider_agnostic.docx: 1646.7KB
 docs/personal_ai_career_os_blueprint_rendered_diagrams.docx: 1391.8KB
-pnpm-lock.yaml: 458.3KB
+pnpm-lock.yaml: 465.9KB
 careeros-screens/phase-0-install-and-first-run/index.html: 410.1KB
 careeros-screens/phase-1-personal-intelligence/index.html: 405.6KB
 careeros-screens/phase-6-controlled-execution/index.html: 395.8KB
+apps/worker/tsconfig.tsbuildinfo: 391.4KB
 careeros-screens/phase-2-assessment-arena/22-assessment-arena.html: 384.7KB
 careeros-screens/phase-6-controlled-execution/64-audit-log.html: 383.7KB
 careeros-screens/phase-6-controlled-execution/46-approval-queue.html: 383.2KB
-careeros-screens/phase-4-the-hunt/38-company-dossier.html: 382.7KB
 
 === CI/CD PIPELINES ===
 CI/CD: GitHub Actions

@@ -1,5 +1,5 @@
 ---
-commit: 47be31a
+commit: dead1a4
 generated: 2026-10-02
 scope: languages, dependencies, toolchain, environment
 ---
@@ -16,12 +16,12 @@ Career OS is a self-hosted, provider-agnostic Personal AI Career Operating Syste
 
 | Area | Value | Evidence |
 |------|-------|----------|
-| Primary language | TypeScript (`.ts`/`.tsx`; 746 source files; ~91k LOC) | `docs/codebase/.codebase-scan.txt` (CODE METRICS); `tsconfig.base.json` |
+| Primary language | TypeScript (`.ts`/`.tsx`; 812 source files — 687 `.ts` + 125 `.tsx`; ~101k LOC) | `docs/codebase/.codebase-scan.txt` (CODE METRICS); `tsconfig.base.json` |
 | Runtime + version | Node.js >= 20 (see `.nvmrc`; root `engines.node`) | `package.json:6-8`, `.nvmrc` |
 | Package manager | pnpm 9.12.0 (workspaces) | `package.json:5`, `pnpm-workspace.yaml:1-3` |
 | Module/build system | Turborepo 2 (`turbo run build/typecheck/lint`), per-workspace `tsc`/`nest build`/`next build` | `turbo.json:1-21`, `package.json:11-14` |
 | Module format | ESM-ish `module: ESNext` + `moduleResolution: Bundler`; API compiled by Nest CLI, worker run with `tsx` | `tsconfig.base.json:4-5`, `apps/worker/package.json:6` |
-| Workspace layout | `apps/*` + `packages/*` (4 apps, 13 packages) | `pnpm-workspace.yaml:1-3` |
+| Workspace layout | `apps/*` + `packages/*` (4 apps, 15 packages) | `pnpm-workspace.yaml:1-3`; `packages/*/package.json` |
 
 ### 2) Production Frameworks and Dependencies
 
@@ -32,7 +32,9 @@ Career OS is a self-hosted, provider-agnostic Personal AI Career Operating Syste
 | NestJS (`@nestjs/common`/`core`) | ^10.4.4 | HTTP API, modules, DI, WebSockets gateway | `apps/api/package.json` |
 | `@nestjs/platform-express` | ^10.4.22 | Express HTTP adapter (raw body for Slack HMAC) | `apps/api/package.json`, `apps/api/src/main.ts:88` |
 | `@nestjs/platform-socket.io` + `socket.io` | ^10.4.4 / ^4.8.1 | Desktop-agent WSS pairing/task channel | `apps/api/package.json`, `apps/api/src/modules/agent/agent.gateway.ts` |
-| Prisma + `@prisma/client` | ^6.19.3 | ORM + migrations (55 models, 0 enums, 38 migrations) | `apps/api/package.json`, `apps/api/prisma/schema.prisma` |
+| Prisma + `@prisma/client` | ^6.19.3 (**aligned** across api, worker, and `@careeros/aggregator`) | ORM + migrations (55 models, 0 enums, 39 migrations) | `apps/api/package.json`, `apps/worker/package.json`, `packages/aggregator/package.json`, `apps/api/prisma/schema.prisma` |
+| `@nestjs/swagger` + `@asteasolutions/zod-to-openapi` | ^7.4.2 / ^7.3.4 | OpenAPI JSON at `/api/openapi.json` + Swagger UI at `/api/docs`, generated from the shared Zod schemas | `apps/api/package.json`, `apps/api/src/main.ts:125-142`, `apps/api/src/openapi/openapi.ts` |
+| `undici` | ^6 | Egress enforcement: installs an `EnvHttpProxyAgent` as the process-global `fetch` dispatcher at api/worker boot so Squid actually gates Node global `fetch` | `packages/shared/package.json`, `packages/shared/src/net/proxy-dispatcher.ts`, `apps/api/src/main.ts:97`, `apps/worker/src/main.ts:120` |
 | PostgreSQL | 16-alpine (digest-pinned) | System of record | `infra/docker/docker-compose.yml` |
 | Redis + BullMQ | redis:7-alpine / `bullmq ^5.13.0` | Queues, cache, rate-limit store | `infra/docker/docker-compose.yml`, `apps/worker/package.json` |
 | Qdrant client | `@qdrant/js-client-rest ^1.12.0` | Vector store for semantic content | `packages/embeddings/package.json` |
@@ -55,8 +57,9 @@ Career OS is a self-hosted, provider-agnostic Personal AI Career Operating Syste
 **Notable production choices and reality checks**
 
 - **Only one LLM adapter ships today:** `packages/ai/src/providers/deepseek.ts`. The `AIProvider` abstraction and `ProviderRegistry` exist, but no OpenAI/Anthropic/Ollama adapter exists in the tree. DeepSeek is chat-only (structured output yes, streaming/tools/embeddings no). See `packages/ai/src/provider.ts`, `packages/ai/src/registry.ts`, `packages/ai/src/providers/`.
-- **Embeddings are a placeholder:** `packages/embeddings/src/local.ts` returns a SHA-256-seeded, L2-normalised 384-d vector, not the `bge-small-en` / `@xenova/transformers` model promised in `AGENTS.md` §4 and `plan/PLAN.md`. No transformers dependency exists. See `CONCERNS.md`.
-- **No `@nestjs/swagger` dependency exists**, despite `AGENTS.md` §6 requiring decorators and `/api/docs`; `docs/dev-setup.md:46` still points users at `http://localhost:3001/api/docs`.
+- **Embeddings are still a placeholder:** `packages/embeddings/src/local.ts` returns a SHA-256-seeded, L2-normalised 384-d vector, not the `bge-small-en` / `@xenova/transformers` model promised in `AGENTS.md` §4 and `plan/PLAN.md`. No transformers dependency exists. See `CONCERNS.md`.
+- **Swagger/OpenAPI is now real** (cleanup task U1): `@nestjs/swagger` + `zod-to-openapi` are declared and `apps/api/src/main.ts` serves the OpenAPI document at `/api/openapi.json` and Swagger UI at `/api/docs` (behind an auth gate in production). The old "no swagger dependency" caveat no longer applies.
+- **Prisma is one major across the workspace** (cleanup T11): api, worker, and `@careeros/aggregator` all use `@prisma/client`/`prisma` `^6.19.3`. `apps/api` wires `postinstall: prisma generate` (plus `prebuild`) so a clean install generates the client.
 
 ### 3) Development Toolchain
 
@@ -65,7 +68,7 @@ Career OS is a self-hosted, provider-agnostic Personal AI Career Operating Syste
 | Turborepo 2.11.2 | Task orchestration + cache | `package.json`, `turbo.json` |
 | TypeScript 5.9.3 (^5.6.3) | Strict compilation (`strict`, `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`) | `tsconfig.base.json` |
 | Prettier 3.9.8 + `prettier-plugin-tailwindcss` | Formatting | `.prettierrc` |
-| ESLint 8 (`next lint` in web; root `.eslintrc.cjs` is a reference config) | Lint: no `console.log`, no raw `provider.chat(`, literal `data-testid` | `.eslintrc.cjs`, `apps/web/package.json` |
+| **ESLint 9** in `apps/web` (`eslint.config.mjs`, `eslint-config-next@16`); root `.eslintrc.cjs` is still a dormant reference config | Web lint: Next core-web-vitals + TypeScript rules; cross-cutting `no-console`/raw-`chat()`/literal-`data-testid` rules live in the root config, not yet adopted by workspaces | `.eslintrc.cjs`, `apps/web/package.json`, `apps/web/eslint.config.mjs` |
 | Vitest 5 | Unit + integration runner | `vitest.config.ts`, `package.json` |
 | Testcontainers 10.28 | Real Postgres/Redis/Qdrant/MinIO for integration tests | `packages/testing/package.json`, `packages/testing/src/index.ts` |
 | Playwright 1.63 | E2E, a11y, visual | `apps/web/playwright.config.ts`, `apps/web/e2e/` |
@@ -98,13 +101,14 @@ make help                          # shortcut help (Makefile)
 - **Config sources:** `.env` (copied from `.env.example`), `apps/api/prisma/schema.prisma`, `apps/web/next.config.mjs`, `apps/web/tailwind.config.ts`, `infra/docker/docker-compose.yml`, per-workspace `tsconfig.json`, `packages/ui/src/tokens.css`.
 - **Required env vars** (from `.env.example`): `POSTGRES_USER`, `POSTGRES_DB`, `POSTGRES_PASSWORD`, `DATABASE_URL`, `REDIS_URL`, `QDRANT_URL`, `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`, `MINIO_BUCKET`, `ENCRYPTION_KEY`, `SESSION_SECRET`, `API_PORT`, `WEB_PORT`, `WEB_URL`, `API_URL`, `TRUSTED_ORIGINS`, `SESSION_TTL_HOURS`. Optional/gated: `DEEPSEEK_API_KEY`, `LOG_LEVEL`, `LOG_DEBUG`, `NEXT_TELEMETRY_DISABLED`.
 - **Boot-time enforcement:** `apps/api/src/startup-check.ts` refuses to start on missing/weak `ENCRYPTION_KEY`, `SESSION_SECRET`, or datastore credentials (<24 bytes or known-weak). Compose interpolates `${VAR:?...}` so a missing password aborts the stack.
-- **Deployment/runtime constraints:** Docker Compose on a VPS; api/worker reach the internet only through an allowlisting Squid proxy; datastores on an `internal: true` network; api container runs `read_only`, `cap_drop: ALL`, `no-new-privileges`. `[TODO]` TLS/reverse-proxy (nginx) is planned but no `infra/nginx/` directory exists in the tree.
+- **Deployment/runtime constraints:** Docker Compose on a VPS; api/worker reach the internet only through an allowlisting Squid proxy; datastores on an `internal: true` network. All three app containers (api, worker, web) run `read_only` with a `tmpfs` scratch area, `cap_drop: ALL` (worker/web hold no caps), and `no-new-privileges:true` (`infra/docker/docker-compose.yml`; cleanup T8). `undici`/`EnvHttpProxyAgent` now enforces the proxy for Node global `fetch` (`apps/api/src/main.ts:97`, `apps/worker/src/main.ts:120`; cleanup T6). `[TODO]` TLS/reverse-proxy (nginx) is still planned but no `infra/nginx/` directory exists in the tree.
 
 ### 6) Evidence
 
 - `package.json`, `pnpm-workspace.yaml`, `pnpm-lock.yaml`, `turbo.json`, `tsconfig.base.json`, `.nvmrc`
-- `apps/*/package.json`, `packages/*/package.json`
+- `apps/*/package.json`, `packages/*/package.json` (including new `packages/aggregator/`, `packages/firecrawl/`)
 - `.env.example`, `infra/docker/docker-compose.yml`, `apps/api/src/startup-check.ts`
+- `apps/api/src/main.ts` (Swagger + egress boot), `apps/worker/src/main.ts` (egress boot), `packages/shared/src/net/proxy-dispatcher.ts`
 - `docs/codebase/.codebase-scan.txt` (DIRECTORY TREE, STACK DETECTION, CODE METRICS)
 
 ## Extended Sections
@@ -115,4 +119,4 @@ make help                          # shortcut help (Makefile)
 
 ### Shared-package dependency graph (production deps only)
 
-`@careeros/shared` (zod) is the base; `@careeros/ai`, `@careeros/job-pipeline`, `@careeros/email-parsers`, `@careeros/browser-agent` depend on it; `@careeros/embeddings` (Qdrant) and `@careeros/resume-render` (React-PDF/docx) are leaf capabilities; `@careeros/messaging`, `@careeros/secrets`, `@careeros/auth`, `@careeros/sandbox`, `@careeros/ui`, `@careeros/testing` are independent. `apps/api` and `apps/worker` compose all of the above. See `STRUCTURE.md` for the diagram.
+`@careeros/shared` (zod) is the base; `@careeros/ai`, `@careeros/job-pipeline`, `@careeros/email-parsers`, `@careeros/browser-agent`, `@careeros/firecrawl`, and `@careeros/aggregator` depend on it; `@careeros/embeddings` (Qdrant) and `@careeros/resume-render` (React-PDF/docx) are leaf capabilities; `@careeros/messaging`, `@careeros/secrets`, `@careeros/auth`, `@careeros/sandbox`, `@careeros/ui`, `@careeros/testing` are independent. `@careeros/aggregator` (skill-state sync; type-only Prisma import) is consumed by both `apps/api` and `apps/worker`; `@careeros/firecrawl` (Firecrawl search/scrape/crawl client) is consumed by the worker and the job-pipeline adapter. `apps/api` and `apps/worker` compose all of the above. See `STRUCTURE.md` for the diagram.

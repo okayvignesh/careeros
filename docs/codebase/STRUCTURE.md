@@ -1,12 +1,12 @@
 ---
-commit: 47be31a
+commit: dead1a4
 generated: 2026-10-02
 scope: directory layout, entry points, module boundaries
 ---
 
 # Codebase Structure
 
-Career OS is a pnpm + Turborepo monorepo with four applications and thirteen shared packages. There is no path-alias indirection: cross-workspace imports use the `@careeros/*` package names declared in each `package.json`; within a workspace imports are relative.
+Career OS is a pnpm + Turborepo monorepo with four applications and fifteen shared packages. There is no path-alias indirection: cross-workspace imports use the `@careeros/*` package names declared in each `package.json`; within a workspace imports are relative.
 
 ## Core Sections (Required)
 
@@ -20,7 +20,9 @@ Career OS is a pnpm + Turborepo monorepo with four applications and thirteen sha
 | `apps/desktop/` | Electron desktop companion agent (Playwright + user's Chrome, WSS pairing) | `apps/desktop/src/main.ts`; `apps/desktop/package.json` |
 | `packages/ai/` | `AIProvider` abstraction, DeepSeek adapter, versioned prompts, grounding/injection/sensitivity, evals | `packages/ai/src/` |
 | `packages/shared/` | Zod schemas, constants, knowledge rules, queues, retry, redact, git-analysis, SSRF guard | `packages/shared/src/` |
-| `packages/job-pipeline/` | Source-agnostic job ingestion funnel (adapters + stages) | `packages/job-pipeline/src/` |
+| `packages/job-pipeline/` | Source-agnostic job ingestion funnel: stages + adapters (`ashby`, `greenhouse`, `adzuna`, `arbeitnow`, `remotive`, `firecrawl`, `workday`, `lever`, `smartrecruiters`, `workable`, `icims`, `successfactors`) | `packages/job-pipeline/src/stages/`, `packages/job-pipeline/src/adapters/` |
+| `packages/aggregator/` | Single skill-state write path: evidence → `candidate_skill_state` + `skill_state_event` (type-only Prisma import); used by api + worker | `packages/aggregator/src/index.ts` |
+| `packages/firecrawl/` | Firecrawl API client (search/scrape/crawl), Zod-validated, typed errors, retry | `packages/firecrawl/src/` |
 | `packages/embeddings/` | Qdrant store wrapper + local (placeholder) embedder | `packages/embeddings/src/` |
 | `packages/auth/` | Argon2id hashing + sealed session cookie helpers | `packages/auth/src/` |
 | `packages/secrets/` | AES-256-GCM field encryption + master-key validation | `packages/secrets/src/` |
@@ -41,7 +43,7 @@ Career OS is a pnpm + Turborepo monorepo with four applications and thirteen sha
 
 ### 2) Entry Points
 
-- **Main runtime entry (API):** `apps/api/src/main.ts` — boots after `startup-check.ts`, registers global `LockoutExceptionFilter`, helmet security middleware, Swagger-less OpenAPI `[TODO]`.
+- **Main runtime entry (API):** `apps/api/src/main.ts` — boots after `startup-check.ts`, installs the egress proxy (`installEgressProxy()`), registers global `LockoutExceptionFilter`, helmet security middleware, and serves Swagger UI at `/api/docs` + OpenAPI JSON at `/api/openapi.json` (`apps/api/src/openapi/`).
 - **Web entry:** `apps/web/src/app/layout.tsx` + `apps/web/src/middleware.ts` (setup-state gate).
 - **Worker entry:** `apps/worker/src/main.ts` — pino + Prisma + heartbeat + Qdrant + seed skills + register workers.
 - **Desktop entry:** `apps/desktop/src/main.ts` (Electron main process, tray + pairing window).
@@ -71,8 +73,9 @@ Rule from `AGENTS.md` §5: never import an adapter from `apps/web` directly; go 
 
 ### 5) Evidence
 
-- `apps/api/src/app.module.ts`, `apps/api/src/main.ts`, `apps/api/src/modules/`
-- `apps/web/src/app/`, `apps/web/src/components/`, `packages/ui/src/index.ts`
+- `apps/api/src/app.module.ts`, `apps/api/src/main.ts`, `apps/api/src/modules/`, `apps/api/src/openapi/`
+- `apps/web/src/app/`, `apps/web/src/components/`, `packages/ui/src/index.ts`, `packages/ui/src/motion.ts`
+- `packages/job-pipeline/src/adapters/index.ts` (all registered adapters), `packages/aggregator/src/index.ts`, `packages/firecrawl/src/index.ts`
 - `pnpm-workspace.yaml`, `turbo.json`, `packages/*/package.json`, `docs/codebase/.codebase-scan.txt` (DIRECTORY TREE)
 
 ## Extended Sections
@@ -93,6 +96,8 @@ flowchart TB
         AI["@careeros/ai"]
         EMB["@careeros/embeddings"]
         PIPE["@careeros/job-pipeline"]
+        AGG["@careeros/aggregator"]
+        FIRE["@careeros/firecrawl"]
         BROWSER["@careeros/browser-agent"]
         EMAIL["@careeros/email-parsers"]
         RENDER["@careeros/resume-render"]
@@ -112,6 +117,7 @@ flowchart TB
     API --> SECRETS
     API --> EMB
     API --> PIPE
+    API --> AGG
     API --> RENDER
     API --> SANDBOX
     API --> MSG
@@ -119,10 +125,15 @@ flowchart TB
     WORKER --> EMB
     WORKER --> SECRETS
     WORKER --> BROWSER
+    WORKER --> AGG
+    WORKER --> FIRE
     DESKTOP --> BROWSER
 
     AI --> SHARED
     PIPE --> SHARED
+    PIPE --> FIRE
+    AGG --> SHARED
+    FIRE --> SHARED
     BROWSER --> SHARED
     EMAIL --> SHARED
 
@@ -139,9 +150,9 @@ flowchart TB
 ### Generated vs source boundaries
 
 - Do not document or edit generated output: `dist/`, `.next/`, `apps/*/dist`, `packages/*/dist`, `prisma/generated/`, coverage. `.gitignore` and `.eslintrc.cjs:29-38` both exclude them.
-- `apps/api/prisma/migrations/` **is** committed source (38 migration directories) and must be treated as reviewable code (`AGENTS.md` §6).
+- `apps/api/prisma/migrations/` **is** committed source (39 migration directories) and must be treated as reviewable code (`AGENTS.md` §6).
 - The product blueprint `docs/*.docx` is the authoritative *product* spec; `docs/architecture.md` is the maintained integration narrative.
 
 ### Empty / not-yet-created paths referenced by config
 
-`[TODO]` Several paths are referenced by scripts, CI, or docs but do not exist in the tree: `infra/nginx/`, `infra/docker/docker-compose.host-dev.yml`, `scripts/dev-host.sh`, `scripts/seed-test.ts`, `packages/ui/src/motion.ts` (re-exported by `packages/ui/src/index.ts`). See `CONCERNS.md`.
+`[TODO]` `infra/nginx/` is still referenced by the deployment narrative but does not exist in the tree (cleanup task T3 did not cover it). The previously-dangling paths — `packages/ui/src/motion.ts`, `scripts/dev-host.sh`, `scripts/seed-test.ts`, and `infra/docker/docker-compose.host-dev.yml` — now exist and resolve (`pnpm dev:host`, `pnpm seed:test`, `pnpm docker:infra` all point at real files). See `CONCERNS.md`.

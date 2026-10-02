@@ -1,16 +1,16 @@
 ---
-commit: 47be31a
+commit: dead1a4
 generated: 2026-10-02
 scope: knowledge-base index, executive summary, divergences
 ---
 
 # Career OS — Knowledge Base
 
-An evidence-based reference for engineers working on **Career OS** — a self-hosted, provider-agnostic Personal AI Career Operating System. Built from the repository at revision `47be31a` (2026-10-02).
+An evidence-based reference for engineers working on **Career OS** — a self-hosted, provider-agnostic Personal AI Career Operating System. Built from the repository at revision `dead1a4` (2026-10-02), after the health-review cleanup waves.
 
 ## Executive summary
 
-Career OS is a single-user-by-default, multi-user-ready **pnpm + Turborepo monorepo** (~91k lines of TypeScript across 4 apps and 13 packages). A Next.js 16 web app and a NestJS 10 API sit in front of **Postgres (system of record), Redis (queues), Qdrant (vectors), and MinIO (files)**; BullMQ workers do asynchronous ingestion/sync; an Electron + Playwright agent runs job-site discovery on the user's own machine. The AI layer is a `packages/ai` provider abstraction whose only shipped adapter is DeepSeek; every LLM call is meant to pass a sensitivity gate, produce schema-validated output, be grounded in the Postgres evidence graph, and be audit-logged.
+Career OS is a single-user-by-default, multi-user-ready **pnpm + Turborepo monorepo** (~101k lines of TypeScript across 4 apps and 15 packages). A Next.js 16 web app and a NestJS 10 API sit in front of **Postgres (system of record), Redis (queues), Qdrant (vectors), and MinIO (files)**; BullMQ workers do asynchronous ingestion/sync; an Electron + Playwright agent runs job-site discovery on the user's own machine. The AI layer is a `packages/ai` provider abstraction whose only shipped adapter is DeepSeek; every LLM call is meant to pass a sensitivity gate, produce schema-validated output, be grounded in the Postgres evidence graph, and be audit-logged. Job discovery now also includes the `@careeros/firecrawl` client and Workday/Lever/SmartRecruiters/Workable/iCIMS/SuccessFactors adapters for public career sites and ATS boards.
 
 The product's non-negotiable invariants (`AGENTS.md` §3): evidence (not LLM claims) is truth; generated content may only rephrase verified facts; every outbound action needs approval + audit; server-side scraping of LinkedIn/Indeed/Naukri/Glassdoor is prohibited; every job flows through one ingestion pipeline; and data carries sensitivity labels.
 
@@ -75,23 +75,26 @@ flowchart LR
 
 The team's docs are unusually explicit, but several describe the *target*, not the tree. These are the material divergences found while building this KB (full detail in `CONCERNS.md`).
 
-| Area | Docs say | Reality | Evidence |
-|------|----------|---------|----------|
-| Frontend framework | Next.js 15 | Next.js **16.3.6** pinned + React 19 | `AGENTS.md` §4 vs `apps/web/package.json` |
-| Embeddings | Local `bge-small-en` via `@xenova/transformers` | SHA-256 placeholder vector; no transformers dep | `plan/PLAN.md:11` vs `packages/embeddings/src/local.ts` |
-| LLM providers | Provider-agnostic with fallback | Only a DeepSeek adapter exists | `AGENTS.md` §4 vs `packages/ai/src/providers/` |
-| API docs | Swagger at `/api/docs` + `@nestjs/swagger` decorators | Dependency and code absent | `AGENTS.md` §6, `docs/dev-setup.md:46` vs no `@nestjs/swagger` |
-| Deployment | nginx + TLS + certbot, GlitchTip, whisper.cpp, embedding/scheduler/backup services | None of these are in `docker-compose.yml`; no `infra/nginx/` | `docs/architecture.md` §2/§7 vs `infra/docker/docker-compose.yml` |
-| ORM version | One Prisma client | api uses Prisma **6**, worker uses Prisma **5** | `apps/api/package.json` vs `apps/worker/package.json` |
-| Root lint rules | `no-console`, no raw `chat()`, literal `data-testid` enforced | Root ESLint chain is a non-installed reference config | `.eslintrc.cjs:10-18` |
-| UI re-export | `@careeros/ui` barrel exports motion helpers | `packages/ui/src/motion.ts` does not exist | `packages/ui/src/index.ts` |
-| Dev commands | `pnpm check`, `pnpm seed:dev`, `pnpm erd`, `pnpm eval:ai`, `pnpm test:visual`, `pnpm fixtures:record`, `pnpm ai:probe` | Not all present in root `package.json` | `docs/dev-setup.md` vs `package.json` |
-| Analytics guard | Web ships a no-analytics test | Referenced `apps/web/src/no-analytics-sdk.test.ts` is absent | `scripts/__tests__/no-analytics-in-web.test.ts`, `plan/PENDING_2026-10-02.md` |
+| Area | Docs say | Reality | Status | Evidence |
+|------|----------|---------|--------|----------|
+| Frontend framework | Next.js 15 | Next.js **16.3.6** pinned + React 19 | Open | `AGENTS.md` §4 vs `apps/web/package.json` |
+| Embeddings | Local `bge-small-en` via `@xenova/transformers` | SHA-256 placeholder vector; no transformers dep | Open | `plan/PLAN.md:11` vs `packages/embeddings/src/local.ts` |
+| LLM providers | Provider-agnostic with fallback | Only a DeepSeek adapter exists | Open | `AGENTS.md` §4 vs `packages/ai/src/providers/` |
+| API docs | Swagger at `/api/docs` + `@nestjs/swagger` decorators | Implemented: OpenAPI JSON + Swagger UI generated from Zod schemas | **Resolved (U1/T2)** | `apps/api/src/main.ts:125-142`, `apps/api/src/openapi/` |
+| Deployment | nginx + TLS + certbot, GlitchTip, whisper.cpp, embedding/scheduler/backup services | nginx/TLS + GlitchTip + whisper still absent from compose | Open (narrowed) | `docs/architecture.md` §2/§7 vs `infra/docker/docker-compose.yml` |
+| ORM version | One Prisma client | api, worker, and aggregator all use Prisma **6.19.3** | **Resolved (T11)** | `apps/api/package.json`, `apps/worker/package.json`, `packages/aggregator/package.json` |
+| Container hardening | api hardened; worker/web too | all three app containers `read_only` + `cap_drop: ALL` + `no-new-privileges` | **Resolved (T8)** | `infra/docker/docker-compose.yml` |
+| Egress for `fetch` | Squid allowlist gates api/worker traffic | `undici` `EnvHttpProxyAgent` installed at boot, fails closed | **Resolved (T6)** | `packages/shared/src/net/proxy-dispatcher.ts`, `apps/api/src/main.ts:97` |
+| CI actions | Pinned supply chain | all `uses:` pinned to full commit SHAs | **Resolved (T9)** | `.github/workflows/*.yml` |
+| Root lint rules | `no-console`, no raw `chat()`, literal `data-testid` enforced | `apps/web` runs eslint 9; root chain still dormant and api has no flat config | Partial | `.eslintrc.cjs:10-18`, `apps/web/eslint.config.mjs` |
+| UI re-export | `@careeros/ui` barrel exports motion helpers | `packages/ui/src/motion.ts` exists | **Resolved (T1)** | `packages/ui/src/motion.ts`, `packages/ui/src/index.ts` |
+| Dev commands | `pnpm check`, `pnpm seed:dev`, `pnpm erd`, `pnpm eval:ai`, `pnpm test:visual`, `pnpm fixtures:record`, `pnpm ai:probe` | Reconciled: `dev:host`/`seed:test`/`docker:infra` wired; unwired scripts marked "planned" | **Resolved (T3/D2)** | `docs/dev-setup.md` vs `package.json` |
+| Analytics guard | Web ships a no-analytics test | `apps/web/src/no-analytics-sdk.test.ts` exists | **Resolved (T4)** | `apps/web/src/no-analytics-sdk.test.ts` |
 
 ## Coverage and confidence
 
-- **Built from:** committed source at `47be31a`, config, the team's own specs, and a full file scan (`docs/codebase/.codebase-scan.txt`).
-- **Not verified by running:** the stack was **not** booted (no `.env`, no Docker run). Behavioural claims come from the team's tests and docs, cited inline.
+- **Built from:** committed source at `dead1a4` (cleanup waves 1-14), config, the team's own specs, and a full file scan (`docs/codebase/.codebase-scan.txt`).
+- **Not verified by running:** the stack was **not** booted during this KB refresh (no `.env`, no Docker run). Behavioural claims come from the team's committed tests, the cleanup verification log (`plan/CLEANUP_TASKS.md`), and docs, cited inline. In particular, the live Docker egress smoke has not been executed.
 - **Diagrams:** three Mermaid diagrams (system overview here, component + data-flow in `ARCHITECTURE.md`, workspace graph in `STRUCTURE.md`, deployment + auth sequence in `INTEGRATIONS.md`). Validate rendering before print.
 
 ## Open questions
