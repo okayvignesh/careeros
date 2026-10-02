@@ -8,17 +8,23 @@
     "build": "tsc && node scripts/copy-renderer.mjs",
     "dev": "pnpm build && electron ./dist/main.js",
     "typecheck": "tsc --noEmit",
-    "start": "electron ./dist/main.js"
+    "start": "electron ./dist/main.js",
+    "pack": "pnpm build && electron-builder --config electron-builder.yml",
+    "dist:mac": "pnpm build && electron-builder --config electron-builder.yml --mac --publish never",
+    "dist:win": "pnpm build && electron-builder --config electron-builder.yml --win --publish never",
+    "dist:linux": "pnpm build && electron-builder --config electron-builder.yml --linux --publish never",
+    "release": "pnpm build && electron-builder --config electron-builder.yml --publish always"
   },
   "dependencies": {
     "@careeros/browser-agent": "workspace:*",
+    "electron-updater": "^6.3.9",
     "keytar": "^7.9.0",
     "socket.io-client": "^4.7.5"
   },
   "devDependencies": {
     "@types/node": "^22.7.5",
     "electron": "^31.3.1",
-    "electron-updater": "^6.3.9",
+    "electron-builder": "^25.1.8",
     "typescript": "^5.6.3"
   }
 }

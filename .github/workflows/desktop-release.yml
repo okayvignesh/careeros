@@ -1,0 +1,48 @@
+# D.6 desktop release. Triggered on `desktop-v*` tag push. Builds the
+# Electron installer on each host OS (dmg on mac, nsis on win, AppImage on
+# linux) and attaches artifacts to the GitHub Release. electron-updater on
+# installed clients reads from the same release.
+#
+# ponytail: unsigned MVP. Secrets for notarization (APPLE_ID,
+# APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID) and Windows EV cert (CSC_LINK,
+# CSC_KEY_PASSWORD) are deliberately NOT referenced here. When they land,
+# add them to the matrix `env:` block and set `--publish always` to upload.
+
+name: Desktop Release
+
+on:
+  push:
+    tags:
+      - 'desktop-v*'
+
+permissions:
+  contents: write # create release + upload assets
+
+jobs:
+  release:
+    name: build + publish (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build desktop package
+        env:
+          # electron-builder uses GH_TOKEN to upload release artifacts.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: pnpm --filter @careeros/desktop release

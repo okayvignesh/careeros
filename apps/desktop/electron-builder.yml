@@ -1,0 +1,54 @@
+# D.6 packaging config. Produces an unsigned MVP installer per OS:
+#   mac    -> dmg
+#   win    -> nsis (installer .exe)
+#   linux  -> AppImage
+#
+# ponytail: unsigned MVP. Mac notarization needs APPLE_ID /
+# APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID + a `notarize: true` block.
+# Windows EV cert needs CSC_LINK + CSC_KEY_PASSWORD. Phase-3.5 non-goal; see
+# docs/install.md Gatekeeper / SmartScreen workaround until the certs land.
+#
+# ponytail: `electron-updater` reads this `publish` block at install time so
+# the installed app knows where to look for updates. GitHub Releases owner
+# derives from the git remote at build time; CI overrides via env.
+
+appId: com.careeros.desktop
+productName: Career OS Agent
+# Avoid a hard build-time asar / signing step; the scaffold is a tray app
+# and the renderer is already in dist/.
+directories:
+  buildResources: build
+  output: release
+files:
+  - dist/**/*
+  - package.json
+  - '!**/*.map'
+  - '!**/*.test.*'
+asar: true
+
+mac:
+  category: public.app-category.productivity
+  target:
+    - dmg
+  # ponytail: no hardened runtime / entitlements yet. Add when notarization
+  # ships; the shape is `hardenedRuntime: true` + `entitlements: build/entitlements.mac.plist`.
+
+win:
+  target:
+    - nsis
+
+linux:
+  target:
+    - AppImage
+  category: Office
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+
+publish:
+  provider: github
+  # Owner + repo derived at CI build time via GH_TOKEN + GITHUB_REPOSITORY.
+  # No static value here to keep forks working without edits.
+  releaseType: release

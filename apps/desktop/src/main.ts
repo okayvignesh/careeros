@@ -17,7 +17,7 @@
  * app menu (tray is the whole UI). Each belongs on its own stream.
  */
 
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, Tray } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, nativeImage, session, Tray } from 'electron';
 import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { hostname, platform } from 'node:os';
@@ -31,6 +31,10 @@ import {
 import { ApiClient } from './api-client';
 import { loadConfig } from './config';
 import { createKeychain, type Keychain } from './keychain';
+import { applyProxy } from './proxy';
+import { startCleanupScheduler } from './screenshot-cleanup';
+import { startRotationScheduler } from './log-rotation';
+import { startUpdater } from './updater';
 import { TaskRunner } from './task-runner';
 import { WssClient, type WssStatus } from './wss-client';
 
@@ -178,6 +182,21 @@ ipcMain.handle('agent:revoke', async () => {
 app.whenReady().then(async () => {
   // On macOS keep the app running when the pair window closes.
   if (process.platform === 'darwin') app.dock?.hide?.();
+  // D.8: corporate proxy from HTTP_PROXY / HTTPS_PROXY / NO_PROXY env.
+  // Programmatic setter is `applyProxy(session.defaultSession, override)` once
+  // a Settings UI exists (apps/web stream owns the UI; this is the hook).
+  try {
+    await applyProxy(session.defaultSession);
+  } catch (err) {
+    console.warn(`proxy: setProxy failed (${(err as Error).message})`);
+  }
+  // D.8: daily screenshot retention + hourly log rotation check. Both tick
+  // without unref so Electron's main loop stays alive for them.
+  startCleanupScheduler({ dir: join(app.getPath('userData'), 'screenshots') });
+  startRotationScheduler({ dir: app.getPath('logs') });
+  // D.6: check GitHub Releases on start + every 6h. Prompts user to install
+  // via native notification when a newer version downloads.
+  startUpdater();
   tray = new Tray(trayIcon());
   refreshTray();
   tray.on('click', () => createPairWindow());
