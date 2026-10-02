@@ -74,6 +74,7 @@ Everything not listed is unclaimed.
 | H1 no-analytics-in-web guard (direct + transitive via lockfile) | shipped ca93a9c | 3/3; 35-item blocklist; 0 new deps |
 | H2 D.4 Electron scaffold minimal (apps/desktop) | shipped f65cd96 | 10/10; builds + typecheck clean; D.6/D.8/task-runner wire still deferred |
 | I1 D.6 packaging + D.8 ops (electron-builder + updater + proxy + cleanup + rotation) | shipped 4746494 | 38/38; CI release workflow mac/win/linux matrix; non-goals (notarization + EV cert) ponytail-tagged |
+| J1 desktop task-runner real Playwright wire (replaces H2 stub) | shipped e6ec584 | 44/44; playwright-core + user Chrome; allowlist spoof-protection; kill-switch at arrival + mid-flight |
 
 ### session-ai-infra
 
@@ -87,6 +88,51 @@ Everything not listed is unclaimed.
 ---
 
 ## Shipped this cross-session batch
+
+- **Stream J1: desktop agent task-runner real wire** (session-ponytail, 2026-10-02, not yet committed): replaces the H2 `TaskRunner` stub with a real `playwright-core` runner that dispatches to the F.3 form-fill scripts using the user's installed Chrome.
+  - **Files**:
+    - EDITED `apps/desktop/src/task-runner.ts`: full rewrite. Validates `AgentTask`, honours kill-switch at arrival + mid-flight (`killMidTask()`), enforces one-task-at-a-time (`busy` short-circuit returns `failed/busy`), parses `params.url` -> hostname -> allowlist lookup via exact/suffix/wildcard matcher (rejects `domain-not-allowlisted`), picks script via `pickFormFillScript(task.kind)` (rejects `unknown-task-kind`), launches persistent Chrome via `playwright-core` channel `chrome`, navigates with `waitUntil: 'domcontentloaded'`, invokes the script with mode `dry-run` by default (flips to `live` only if `params.mode === 'live'`), writes screenshots to `userData/screenshots/YYYY-MM/<task-id>.png` so I1 cleanup sweeps them at 30d, posts a `TaskResult {taskId, status, screenshot?, failureReason?, durationMs}` back through the injected `postResult` fn. Payload merged: `opts.payload` as default, `task.params.payload` overrides per-task so the desktop keeps zero PII at rest. Every deferred piece has an inline `ponytail:` comment: concurrency = one-at-a-time with upgrade to FIFO queue, retry policy = none with upgrade to 2-attempt backoff, LinkedIn/Indeed/Naukri still F.3 stubs, allowlist loaded once at pair-time, single shared Chrome profile.
+    - NEW `apps/desktop/src/playwright-launcher.ts`: `launchPersistentChrome({userDataDir, headless?, launcher?})` wraps `playwright-core`'s `chromium.launchPersistentContext` with `channel: 'chrome'`. Structural `LaunchedContext` + `PlaywrightPage` interfaces (not a full Playwright type import) so unit tests can inject fakes without pulling the browser runtime. `defaultUserDataDir(baseUserData)` returns `<baseUserData>/playwright-profile` (dedicated subdir so the agent doesn't trample the user's main Chrome profile). `ponytail:` comments name the multi-identity + Chrome-missing fallback paths.
+    - NEW `apps/desktop/src/task-runner.test.ts`: 6 cases, no real browser, zero network. Covers unknown kind, non-allowlisted domain, happy-path dispatch (asserts launcher called with Chrome channel + script called with matched entry + dry-run mode + screenshot path shape + browser close), mid-flight `killMidTask()` -> `killed` before `page.goto` ever fires (deferred-promise trick), kill-switch sentinel active at arrival -> `killed`, and a 4-case `matchAllowlist` block that locks the exact / suffix / wildcard / spoof-prevention semantics. Uses real tmpdir for userData.
+    - EDITED `apps/desktop/src/main.ts`: surgical. Added imports: `defaultAllowlistDir`, `loadAllowlistDir`, `AllowlistEntry`, `FormFillPayload` from browser-agent + `TaskResult` type. Added module-level `activeRunner`, `allowlistCache` + `getAllowlist()` helper (loads once, warns + empty-map on load failure), `defaultPayload = {}` (empty by default; server embeds), `mapResultStatus()` (TaskResult.status -> api-client's 3-value enum). `startWssIfPaired()` now passes `userDataDir`, `allowlist`, `payload`, and the postResult now receives a `TaskResult` and remaps to the API shape. Pause tray click + `app.on('before-quit')` + `agent:revoke` IPC all now call `activeRunner?.killMidTask()` so an in-flight task aborts cleanly. All existing H2 + I1 wiring preserved verbatim (proxy, cleanup scheduler, rotation scheduler, updater, tray, pair flow).
+    - EDITED `apps/desktop/package.json`: + `playwright-core ^1.47.2` (runtime dep, apps/desktop-scoped only). Zero other dep changes.
+    - EDITED `apps/desktop/README.md`: flipped "Playwright invocation inside the task runner" from Deferred to shipped (one line in the "What this scaffold ships" bullet list expanded to name the Chrome/playwright-core wire + the TaskResult shape). Replaced the one row with newer deferred rows: MinIO screenshot upload, LinkedIn/Indeed/Naukri real selectors, candidate payload from /me cache, multi-identity profiles, retry policy. Added `playwright-core` to the Dep notes. Added `src/task-runner.test.ts` to the test list.
+  - **Design calls**:
+    - `playwright-core` (not `playwright`): ~5MB with zero bundled browsers. `channel: 'chrome'` picks up the user's installed Chrome. Launch fails loudly if Chrome absent; runner surfaces as `failed/chrome-launch-failed:<err>`.
+    - **Persistent context, not fresh**: `launchPersistentContext` preserves logged-in cookies between runs. This is the whole reason for the companion agent (per phase-3.5 "run from the user's real session + IP"). Profile dir is `<userData>/playwright-profile` so we don't touch the user's day-to-day Chrome state.
+    - **Dry-run default**: `params.mode === 'live'` is the only way to flip. Server-side F.1 approvals queue sets `params.mode='live'` only after an approver signs off on the dry-run diff. The spec referenced `requireApprovalId` but that field is not in the AgentTask schema today; the simpler `params.mode` gate matches what's already shippable without a schema change.
+    - **Screenshot path**: `userData/screenshots/YYYY-MM/<task-id>.png` matches I1's cleanup glob exactly (verified: `screenshot-cleanup.ts` recurses YYYY-MM/ and `fs.unlink`s on mtime > 30d). Dir is `mkdirSync({recursive:true})` right before the script runs so missing-month dirs auto-create.
+    - **Allowlist matcher**: exact hostname -> suffix (hostname ends with `.${domain}`) -> wildcard `*` entry -> null. Suffix check rejects spoofs like `fakeashbyhq.com` (doesn't end with `.ashbyhq.com`). Test locks this.
+    - **TaskResult shape maps to api-client**: `ok -> completed`, everything else (`failed | selector-broken | killed`) -> `failed` on the Prisma status column. The finer-grained `failureReason` + `screenshot` + `durationMs` ride along in `resultJson` so the server operator view keeps full fidelity.
+    - **Payload sourcing**: `opts.payload` is empty by default in main.ts; `task.params.payload` overrides per-task. Keeps PII off the desktop at rest. Noted in README deferred list with the "candidate payload from /me cache" upgrade path.
+    - **Concurrency**: `busy: boolean` + reject with `failed/busy`. Simpler than a queue; for a single-user desktop with a human in the loop a backlog is unlikely. `ponytail:` comment names the FIFO upgrade.
+  - **Deps added (apps/desktop/ ONLY, zero at root)**:
+    - `playwright-core ^1.47.2` runtime dep.
+    - `pnpm install` ran clean (already-cached deps; nothing downloaded).
+  - **Build + typecheck + tests all GREEN**:
+    - `pnpm --filter @careeros/desktop typecheck` clean (one `exactOptionalPropertyTypes` fix in `task-runner.ts` where the launcher opt is conditionally assigned).
+    - `pnpm --filter @careeros/desktop build` clean (tsc + copy-renderer).
+    - `pnpm vitest run apps/desktop` -> **44/44 pass in 231ms** (38 pre-existing + 6 new in `task-runner.test.ts`).
+    - Real-browser smoke NOT run in this session (same CI-env policy as H2/I1; operator loop is `pnpm --filter @careeros/desktop dev` + a pair + a server-dispatched task).
+  - **Scope cuts honoured** (all have `ponytail:` comments):
+    - One-task-at-a-time (not a queue).
+    - No retry on transient launch/navigate failures.
+    - LinkedIn / Indeed / Naukri scripts still F.3 stubs; dispatcher routes but they return `error`.
+    - Allowlist loaded once; no hot-reload.
+    - Single shared Chrome profile; no multi-identity.
+    - Screenshots stay local; no MinIO upload yet.
+    - Candidate payload defaults empty; server embeds per task.
+  - **Rules followed**:
+    - No em dashes in any added or edited file (one slipped in `playwright-launcher.ts:9` during drafting; replaced with `:` and reverified via `grep -rnP '[\x{2014}\x{2013}]' apps/desktop/src apps/desktop/README.md` returns zero hits).
+    - No `git` commands run.
+    - OFF-LIMITS respected: no `apps/web/**`, no `packages/ui/**`, no `infra/docker/**`, no `prisma/**`, no `packages/ai/**`, no `packages/browser-agent/**` edits (consumed as workspace dep only; no cross-session request needed), no `apps/api/src/modules/agent/**` edits (read only to understand WSS result enum), no `.github/workflows/**` edits.
+    - Trust-boundary validation preserved (`AgentTask.safeParse` on inbound; keeps H2 behaviour).
+    - Kill-switch enforced at arrival AND mid-flight.
+    - Allowlist enforced before any browser launch.
+  - **Files touched**:
+    - NEW: `apps/desktop/src/task-runner.test.ts`, `apps/desktop/src/playwright-launcher.ts`.
+    - EDITED: `apps/desktop/src/task-runner.ts` (full rewrite replacing stub), `apps/desktop/src/main.ts` (surgical wire update), `apps/desktop/package.json` (+1 dep), `apps/desktop/README.md` (deferred table + ships-list + dep notes + test list).
+  - **Test command for monitor**: `pnpm vitest run apps/desktop` -> 44/44 pass. Also `pnpm --filter @careeros/desktop typecheck` + `pnpm --filter @careeros/desktop build` both clean.
 
 - **Stream I1: D.6 packaging + D.8 ops (combined, apps/desktop/-scoped)** (session-ponytail, 2026-10-02, not yet committed): closes `plan/phase-3.5-desktop-agent.md:65-68` (D.6) + `:116-118` (D.8) + `plan/DEFERRED.md` P3.5 "D.6 packaging" + "D.8 proxy config + screenshot cleanup + log rotation" lines at MVP level on the H2 scaffold.
   - **D.6 shipped**:
