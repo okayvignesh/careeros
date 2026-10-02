@@ -66,6 +66,9 @@ Everything not listed is unclaimed.
 | C. Test backfill (backup byte-inspection + enc-key exclusion + email fuzz + migration safety) | shipped 88dfc9c | 76/76 |
 | D. Container hardening (non-root + cap-drop + read-only; distroless deferred) + backup RPO/RTO docs | shipped cc914a5 | docker compose config EXIT 0 both modes |
 | Grader agents (debugging + mock-interview + system-design) | shipped 522932d | 6/6 new, 57/57 assessments module; prompts local per C-P2.4 pattern |
+| G1 apps/api grab-bag (USAGE_STATS + startup-check grid; 3 already-shipped, 1 blocked) | shipped 2cb812c | 37/37; career_goals encryption needs schema (cross-session request filed) |
+| G2 ATS-lint per-rule tests | shipped 4fe6c0f | 5/5 new, 28/28 package |
+| G3 lefthook + eslint rules + verify-esco (5 new, 3 already-shipped) | shipped 5f6f76d | 0 new deps; root package.json surgically staged |
 
 ### session-ai-infra
 
