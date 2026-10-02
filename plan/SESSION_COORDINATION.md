@@ -46,6 +46,7 @@ Live file for parallel Claude Code sessions to see who owns what. Update **befor
 | `scripts/__tests__/**` + `scripts/smoke/**` | session-ponytail (next batch) | Stream C backup byte-inspection + encryption-key exclusion |
 | `infra/docker/Dockerfile.api` | session-ponytail (next batch) | Stream D distroless + non-root + cap-drop |
 | `docs/backup.md` | session-ponytail (next batch) | Stream D RPO/RTO paragraph |
+| `apps/desktop/**` | session-ponytail | H2 D.4 Electron scaffold shipped |
 
 Everything not listed is unclaimed.
 
@@ -82,6 +83,54 @@ Everything not listed is unclaimed.
 ---
 
 ## Shipped this cross-session batch
+
+- **Stream H2: D.4 Electron scaffold (MINIMAL)** (session-ponytail, 2026-10-02, not yet committed): closes the `plan/DEFERRED.md` P3.5 line "D.4 Electron scaffold + tray + pairing window + keytar + wss-client + task-runner" at MVP level. The scaffold compiles, the renderer HTML lands in dist, 10/10 unit tests pass. Window-open was not launched (CI env; `pnpm --filter @careeros/desktop dev` is the operator one-liner).
+  - **New package**: `apps/desktop/` (chose `apps/*` over `packages/*` because this is an Electron application, mirroring `apps/api` / `apps/web` / `apps/worker`; `pnpm-workspace.yaml` already covers `apps/*` so no workspace edit required).
+  - **Files (new)**: `apps/desktop/package.json`, `apps/desktop/tsconfig.json`, `apps/desktop/README.md`, `apps/desktop/src/config.ts`, `apps/desktop/src/keychain.ts`, `apps/desktop/src/api-client.ts`, `apps/desktop/src/wss-client.ts`, `apps/desktop/src/task-runner.ts`, `apps/desktop/src/preload.ts`, `apps/desktop/src/main.ts`, `apps/desktop/src/renderer/pair.ts`, `apps/desktop/renderer/pair.html`, `apps/desktop/scripts/copy-renderer.mjs`, `apps/desktop/src/keychain.test.ts`, `apps/desktop/src/wss-client.test.ts`. No existing files touched (no root `package.json`, no `pnpm-workspace.yaml`, no `turbo.json` edits needed; workspace glob + turbo wildcard pipelines pick the new package up for free).
+  - **Deps added (all under `apps/desktop/`, zero at root)**:
+    - `electron` ^31.3.1 (dev) - Electron runtime for the main process. Required.
+    - `socket.io-client` ^4.7.5 (runtime) - matches the API's `AgentGateway` which is socket.io over `/agent/ws`, NOT plain ws (verified in `apps/api/src/modules/agent/agent.gateway.ts:30-34`).
+    - `keytar` ^7.9.0 (runtime) - OS keychain binding for `{deviceId, jwt, refreshToken}`. Native prebuilt binary installs cleanly on this machine; postinstall ran without a C compile.
+    - `electron-updater` ^6.3.9 (dev) - installed for the type surface only; wire is deferred to D.6 (packaging). Explicitly noted in README + `ponytail:` comment in `main.ts`.
+    - Workspace: `@careeros/browser-agent: workspace:*` for `AgentTask` Zod schema + kill-switch pause/resume helpers.
+  - **Deferred (every piece has an inline `ponytail:` comment naming its upgrade path + owner stream)**:
+    - Playwright invocation inside `TaskRunner` -> "task-runner integration" (next iteration). Today the runner validates the `AgentTask` envelope, honours `isAgentPaused()`, logs, and POSTs `completed` back.
+    - `electron-updater` auto-update wire -> D.6.
+    - macOS notarization + Windows code signing -> D.6 (phase-3.5 non-goal).
+    - Auto-start on boot (login item) -> D.8.
+    - Corp proxy support + screenshot retention cron -> D.8.
+    - JWT auto-refresh on WSS 401 (today: reconnect-until-success, user re-pair if refresh also died) -> "task-runner integration".
+    - Real tray icon assets (today: empty `NativeImage` with a filesystem fallback to `assets/tray.png` if present) -> D.6.
+    - ed25519 device keypair (today: random 32-byte base64 blob accepted by the server's current `<=4096 bytes` publicKey rule) -> D.7.
+    - Playwright-electron end-to-end test harness (Spectron deprecated) -> D.6.
+  - **Tests (2 new files, 10 cases, all pass)**:
+    - `src/keychain.test.ts` - 5 cases on the `Keychain` wrapper with an injected `KeytarLike` fake so the test runs under Linux CI without a native keyring: save/load round-trip, partial-missing returns null, `updateTokens` jwt-only + jwt+refresh, `clear` wipes all three accounts, `clear` idempotent on empty.
+    - `src/wss-client.test.ts` - 5 cases on the pure `reconnectDelayMs(attempt, base, max)` fn so the backoff math is locked without a running socket: base at attempt 0, doubling 1..6, 60s cap at attempt 7+, custom base/max, defensive negative-attempt case.
+    - Full Electron integration/E2E test is explicitly deferred (noted in-source + README).
+  - **Build + typecheck verified locally**:
+    - `pnpm install --filter @careeros/desktop...` -> clean install (73 new packages, keytar prebuilt binary, electron postinstall).
+    - `pnpm --filter @careeros/desktop build` -> `tsc` clean + `copy-renderer.mjs` copies `renderer/pair.html` to `dist/renderer/pair.html`.
+    - `pnpm --filter @careeros/desktop typecheck` -> clean.
+    - `pnpm vitest run apps/desktop` -> 10/10 pass, 110ms.
+    - Window-open NOT verified (no display + launching Electron inside this session is out of scope); operator loop is `pnpm --filter @careeros/desktop dev`.
+  - **Architecture notes (shape for the next iteration)**:
+    - Main process (`src/main.ts`) owns the tray + IPC handlers + WSS lifecycle. Preload (`src/preload.ts`) exposes a 3-method `window.careeros` surface: `submitPairingCode(code)`, `getStatus()`, `revoke()`. Renderer (`src/renderer/pair.ts` + `renderer/pair.html`) is one HTML file + one TS file transpiled by tsc; no vite, no React.
+    - Kill-switch broadcast uses `@careeros/browser-agent`'s `pauseAgent()`/`resumeAgent()` so the same sentinel file (`AGENT_PAUSED_FILE`, default `/var/run/careeros/agent.paused`) that the server-side dispatcher reads also toggles here. One source of truth per phase-3.5 kill-switch spec.
+    - `WssClient` owns reconnect (not socket.io's native `reconnection: true`) so we can refresh the JWT before the next connect once that upgrade lands.
+    - `ApiClient` uses Node 20 global `fetch`; no axios dep.
+  - **Scope respected**: no `apps/web/**`, no `packages/ui/**`, no `infra/docker/**`, no `prisma/**`, no `packages/ai/**`, no `.github/workflows/**`, no `apps/api/src/modules/{agent,interview-prep,outreach,slack}/**` (read-only probes only), no `packages/browser-agent/**` (imported as workspace dep only), no `plan/_audit_*`. Root `package.json`, `pnpm-workspace.yaml`, `turbo.json` all untouched.
+  - **No em dashes** in any added file (verified via grep: `renderer/pair.html` body copy, README, in-source comments and ponytail markers all ASCII; the one `—` originally added to `wss-client.ts` + 6 README bullets were removed before shipping).
+  - **No `git` commands** run. Orchestrator commits after monitor audit.
+  - **Test command for monitor**: `pnpm vitest run apps/desktop` -> 10/10 pass. Also `pnpm --filter @careeros/desktop build` + `pnpm --filter @careeros/desktop typecheck` both clean.
+
+- **Stream H1: no-analytics-in-web guard test (transitive via lockfile)** (session-ponytail, 2026-10-02, not yet committed): closes the `plan/DEFERRED.md` security.md item 6 "no analytics SDK in web guard test" unticked line, complementing the sibling direct-deps test at `apps/web/src/no-analytics-sdk.test.ts` with a transitive scan the sibling doesn't do.
+  - `scripts/__tests__/no-analytics-in-web.test.ts` (new, 3 tests, 0 new deps). Reads `apps/web/package.json` (direct) + parses the `packages:` section of root `pnpm-lock.yaml` (transitive) and asserts no entry matches a 35-item blocklist covering GA/GTM, Segment, Mixpanel, PostHog, Amplitude, Heap, FullStory, Hotjar, Vercel Analytics, Datadog RUM, LogRocket, Intercom, FB/tracking pixels. Blocklist supports exact names + `@scope/*` wildcards. `@sentry/*` DELIBERATELY excluded per task spec (self-hosted error tracking is fine).
+  - Lockfile parsed with a 2-regex sweep (quoted entries like `'@scope/pkg@1.2.3':` and unquoted entries like `react-dom@19.3.0:`) — no new yaml dep. Peer-dep suffixes `(react@19.3.0)` stripped from the version string. Three guard tests: (a) matchesBlocklist positive+negative self-check so a disabled blocklist flips the test, (b) parser non-empty sanity (>100 entries) so a silently-empty parse can't make the main assertion vacuous, (c) the real scan which reports `<pkg>@<version> [direct|transitive]` on failure so a dev can go straight to `pnpm why <pkg>`.
+  - Failure-path verified by injecting `react` into the blocklist in-place and running: test correctly reports `react@18.3.1 [direct]` + `react@19.3.0 [direct]` and fails. Restored to clean. 3/3 pass against current HEAD.
+  - `ponytail:` comment names the extension path: "blocklist additions welcomed; current set covers the common web analytics / session-recording / tag-manager SDKs seen in the wild. Add a package name string + rerun." No config file, no package, no abstraction.
+  - **Files touched**: `scripts/__tests__/no-analytics-in-web.test.ts` (new) + this append. Nothing in `apps/web/**` (read-only), nothing in `apps/web/.eslintrc*`, nothing in off-limits paths. Root `vitest.config.ts` already globs `scripts/**/*.test.ts` so the test auto-picks up in CI without any config change.
+  - **No em dashes** in any added file. **No new deps** (fs/path from stdlib; lockfile parsed as text).
+  - **Test command for monitor**: `pnpm vitest run scripts/__tests__/no-analytics-in-web.test.ts` -> 3/3 pass.
 
 - **Stream G3: repo tooling bundle** (session-ponytail, 2026-10-02, not yet committed): 8 small items from `plan/DEFERRED.md`.
   - **(1) `lefthook.yml`** NEW. 3 parallel pre-commit hooks: `gitleaks protect --staged` (skips if binary absent, CI still gates), `pnpm -w typecheck` scoped to `.ts/.tsx` staged changes, `pnpm -r --parallel --if-present lint`. ponytail comment: three hooks, not thirty; local hook earns its keep only if it beats CI's reject latency. Added `prepare` script in root `package.json` (`command -v lefthook >/dev/null && lefthook install || true`) so `pnpm install` wires hooks when the binary is present and silently no-ops when it isn't. No new npm dep: lefthook is a binary install (`brew install lefthook`).
