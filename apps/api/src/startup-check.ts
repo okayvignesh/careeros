@@ -1,4 +1,5 @@
 import { assertStrongKey } from '@careeros/secrets';
+import { getUsageStatsConfig } from './common/config';
 
 /**
  * Refuses to start if required env is missing or weak.
@@ -9,6 +10,12 @@ export function runStartupChecks(): void {
 
   assertStrongKey('ENCRYPTION_KEY', process.env.ENCRYPTION_KEY);
   assertStrongKey('SESSION_SECRET', process.env.SESSION_SECRET);
+
+  // security.md item 6: parse USAGE_STATS so a bad value (e.g. `true`,
+  // `1`, `yes`) is caught at boot, not at the first telemetry call that
+  // doesn't exist yet. getUsageStatsConfig throws on any value other
+  // than on/off/unset. No network side effects.
+  getUsageStatsConfig();
 
   // === A-auth session-secret assertion ===
   // SessionService reads process.env.SESSION_SECRET lazily inside its
