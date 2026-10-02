@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
-import { SensitivityGate } from '@careeros/ai';
+import { SensitivityGateService } from '../../common/sensitivity-gate.service';
 import {
   ApprovalsService,
   type ApprovalItemDto,
@@ -156,9 +156,9 @@ function fakePrisma() {
   };
 }
 
-function makeService(overrides: { gate?: SensitivityGate } = {}) {
+function makeService(overrides: { gate?: SensitivityGateService } = {}) {
   const prisma = fakePrisma();
-  const gate = overrides.gate ?? new SensitivityGate();
+  const gate = overrides.gate ?? new SensitivityGateService({} as never, { warn() {} } as never);
   const svc = new ApprovalsService(prisma as never, gate);
   return { prisma, gate, svc };
 }
@@ -363,7 +363,7 @@ describe('ApprovalsService bulkApprove', () => {
   it('mocked hasFreshReauth is invoked with (userId, approval.decide)', async () => {
     // Explicit gate mock to satisfy the "fresh re-auth check integrated
     // (mock hasFreshReauth)" test spec item.
-    const gate = new SensitivityGate();
+    const gate = new SensitivityGateService({} as never, { warn() {} } as never);
     const spy = vi.spyOn(gate, 'hasFreshReauth').mockReturnValue(true);
     const { svc } = makeService({ gate });
     const item = await enqueue(svc, 'user-9', 'delete_account');

@@ -64,7 +64,7 @@ raw ingest → normalize → dedupe → freshness → skill extract → verify �
 - [ ] Stage 5 — **Skill extraction**: LLM structured output, ESCO-normalized skill IDs.
 - [ ] Stage 6 — **Verification**: resolve to canonical ATS URL where possible; assign `VERIFIED / DISCOVERED / STALE / CLOSED / UNVERIFIED`. Only `VERIFIED` eligible for auto-apply queue.
 - [~] Stage 7 — **Relevance filter** (user rules): shipped in `JobsService.list` for `remoteOnly`, `mustHaveSkills`, `dealbreakerSkills`, `companyBlacklist` (case-insensitive). Rejects counted per reason and returned to the UI. Target-role classification, comp-band comparison (requires normalized comp from analysis slice), seniority-band comparison (requires classifier), min-company-size, visa sponsorship, and location fuzzy match defer.
-- [~] Stage 8 — **Match score**: `matchScoreForJob` in `packages/shared/src/match.ts`, computed on-the-fly per user in `JobsService.list` (over-fetch → score → sort → paginate). Walking-skeleton treats any evidence row as "user has skill" — proficiency-weighted + confidence-adjusted variants land with `learning_priority`. Precompute + `user_job_match` table lands when pool exceeds ~2k jobs (ponytail note in code).
+- [~] Stage 8 — **Match score**: canonical weighted scorer `computeMatch` + list projection `computeMatchResult` in `packages/job-pipeline/src/stages/match.ts`, shared by `JobsService.list` (over-fetch → score → sort → paginate) and `MatcherService.scoreJob` (detail) so list and detail can never disagree. Relevance filter also extracted to `packages/job-pipeline/src/stages/relevance.ts`. Remaining: confidence-adjustment + `learning_priority`; precompute + `user_job_match` when pool exceeds ~2k jobs (ponytail note in code).
 - [ ] Stage 9 — **Land**: `jobs_normalized` row with state, relevance_score, match_score, first_seen_at, last_verified_at, primary_source, all_sources[].
 
 ### User preferences (drives Stage 7)
@@ -138,7 +138,7 @@ raw ingest → normalize → dedupe → freshness → skill extract → verify �
 - [ ] Trend threshold detection with synthetic time series
 - [ ] Freshness gate — >45d rejected, 14–45d marked `aging`
 - [ ] Relevance filter — every user-pref dimension
-- [x] Match-score formula (isolated from skill graph) — `matchScoreForJob(userSkillIds, jobSkillIds)` in `packages/shared/src/match.ts`, 6 assert scenarios in `match.demo.ts`.
+- [x] Match-score formula (isolated from skill graph) — weighted `computeMatch` in `packages/job-pipeline/src/stages/match.ts` (one scorer for list + detail), with `relevance()` in the same package.
 
 **Property-based (`fast-check`)**
 - [ ] Pipeline dedupe: for any (canonical_url, source_id) collision set, exactly one primary in output

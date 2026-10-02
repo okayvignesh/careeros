@@ -476,6 +476,9 @@ importers:
 
   packages/job-pipeline:
     dependencies:
+      '@careeros/firecrawl':
+        specifier: workspace:*
+        version: link:../firecrawl
       '@careeros/shared':
         specifier: workspace:*
         version: link:../shared

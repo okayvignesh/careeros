@@ -20,10 +20,11 @@ export class JobsController {
   /**
    * `GET /jobs?limit=<1..200>&offset=<n>&skill=<id>`.
    * Match-score pagination: server sorts a fresh page each call. C-P3.8c doc
-   * anchor — the per-page scoring uses the pure `matchScoreForJob` over a
-   * bounded 2x over-fetch (see JobsService.list ponytail note), so query count
-   * per page is constant regardless of pool size. `total` still returns the
-   * DB count so the pager can show honest page numbers.
+   * anchor — the per-page scoring uses the canonical pure `computeMatchResult`
+   * from `@careeros/job-pipeline` (the same scorer `POST /matcher/score` uses)
+   * over a bounded 2x over-fetch (see JobsService.list ponytail note), so query
+   * count per page is constant regardless of pool size. `total` still returns
+   * the DB count so the pager can show honest page numbers.
    */
   @Get('jobs')
   async list(

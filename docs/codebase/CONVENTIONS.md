@@ -17,7 +17,7 @@ Conventions below are stated in `AGENTS.md`, `CONTRIBUTING.md`, and enforced (or
 | Files (non-React) | kebab-case (dot-separated "type" suffix for Nest components) | `zod-validation.pipe.ts`, `market-snapshot.worker.ts`, `assert-public-url.ts` | `apps/api/src/common/pipes/zod-validation.pipe.ts`; `apps/worker/src/market-snapshot.worker.ts` |
 | React components | PascalCase `.tsx`, one component per file | `SkillTree.tsx`, `ApprovalQueue.tsx` | `apps/web/src/components/skills/SkillTree.tsx` |
 | Hooks / utilities | camelCase | `useDrafts.ts`, `api-client.ts`, `chart-geometry.ts` | `packages/ui/src/useDrafts.ts`; `apps/web/src/lib/api-client.ts` |
-| Functions/methods | camelCase, verb-first | `syncSkillState`, `encryptField`, `matchScoreForJob` | `apps/worker/src/aggregator.ts`; `packages/secrets/src/field.ts`; `packages/shared/src/match.ts` |
+| Functions/methods | camelCase, verb-first | `syncSkillState`, `encryptField`, `computeMatch` | `apps/worker/src/aggregator.ts`; `packages/secrets/src/field.ts`; `packages/job-pipeline/src/stages/match.ts` |
 | Types/interfaces | PascalCase; Zod schemas suffixed `Schema` | `NormalizedJob`, `SkillExtractSchema` | `packages/shared/src/schemas/index.ts` |
 | Constants | UPPER_SNAKE_CASE | `QUEUE_GITHUB`, `EMBED_DIM`, `SENSITIVITY_LEVELS` | `packages/shared/src/queues.ts`, `packages/embeddings/src/local.ts` |
 | Env vars | UPPER_SNAKE_CASE | `ENCRYPTION_KEY`, `TRUSTED_ORIGINS` | `.env.example` |

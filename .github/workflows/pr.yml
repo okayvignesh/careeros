@@ -148,3 +148,201 @@ jobs:
           # for push events fall back to the previous commit.
           BASELINE_REF: ${{ github.base_ref && format('origin/{0}', github.base_ref) || 'HEAD~1' }}
         run: bash scripts/verify-prompt-versions.sh
+
+  # C2a: lint gate. `apps/web` is the only workspace with a working eslint 9
+  # setup (`eslint.config.mjs` + the eslint devDep). `@careeros/api` declares a
+  # `lint` script but ships no eslint devDep / flat config, so under eslint 9 it
+  # dies on a missing-config error rather than a lint finding; it is excluded
+  # here (and reported) instead of making every PR red for the wrong reason.
+  # The recursive run still covers every other workspace that adds a lint script.
+  lint:
+    name: eslint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 9.12.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # The real gate: any eslint error in the Next.js app fails the PR.
+      - name: Lint web app
+        run: pnpm --filter @careeros/web lint
+
+      - name: Lint other workspaces
+        run: pnpm -r --if-present --filter '!@careeros/web' --filter '!@careeros/api' lint
+
+  # C2b: Playwright gate. Boots the datastores (docker compose host-dev overlay)
+  # and the api + web on the runner, seeds the deterministic fixtures, then
+  # drives the browser. Flows actually gated:
+  #   - pre-setup.spec.ts  -> always (fresh migrated DB, unauthenticated smoke)
+  #   - post-setup.spec.ts -> via a storage state minted from `pnpm seed:test`'s
+  #     user through /auth/sign-in, so the authenticated smoke + axe checks run.
+  #   - golden-connect-repo.spec.ts -> self-skips: it needs E2E_STUB_MODE=1 and
+  #     server-side GitHub/DeepSeek stubs; only the browser-side page.route()
+  #     surface exists today. The seed:test + storage-state steps below are what
+  #     it is waiting on, so this job is not a no-op.
+  playwright:
+    name: Playwright (e2e)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 9.12.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Build workspace packages + the api/web binaries. Turbo orders the
+      # dependency graph, so @careeros/shared's dist exists before nest/next.
+      - name: Build api + web
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:3001
+          API_URL: http://localhost:3001
+        run: pnpm exec turbo run build --filter=@careeros/api --filter=@careeros/web
+
+      - name: Install Playwright browser
+        run: pnpm --filter @careeros/web exec playwright install --with-deps chromium
+
+      - name: Generate CI secrets
+        run: |
+          {
+            echo "NODE_ENV=development"
+            echo "POSTGRES_USER=careeros"
+            echo "POSTGRES_DB=careeros"
+            echo "POSTGRES_PASSWORD=$(openssl rand -hex 32)"
+            echo "MINIO_ROOT_USER=careeros"
+            echo "MINIO_ROOT_PASSWORD=$(openssl rand -hex 32)"
+            echo "ENCRYPTION_KEY=$(openssl rand -hex 32)"
+            echo "SESSION_SECRET=$(openssl rand -hex 32)"
+          } >> "$GITHUB_ENV"
+
+      # compose `${VAR:?}` interpolation needs all of these even for the
+      # datastore-only services, so write the same values to a compose env file.
+      - name: Write compose .env
+        run: |
+          {
+            echo "POSTGRES_USER=$POSTGRES_USER"
+            echo "POSTGRES_DB=$POSTGRES_DB"
+            echo "POSTGRES_PASSWORD=$POSTGRES_PASSWORD"
+            echo "MINIO_ROOT_USER=$MINIO_ROOT_USER"
+            echo "MINIO_ROOT_PASSWORD=$MINIO_ROOT_PASSWORD"
+            echo "ENCRYPTION_KEY=$ENCRYPTION_KEY"
+            echo "SESSION_SECRET=$SESSION_SECRET"
+            echo "NODE_ENV=$NODE_ENV"
+          } > .env
+
+      - name: Start datastores (postgres/redis/qdrant/minio/squid)
+        run: pnpm docker:infra
+
+      # Host-reachable URLs: the host-dev overlay publishes each datastore on
+      # 127.0.0.1. No HTTP_PROXY on purpose — the e2e stack makes no external
+      # calls, and skipping Squid keeps boot fast.
+      - name: Export host env
+        run: |
+          {
+            echo "DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:5432/${POSTGRES_DB}?schema=public"
+            echo "REDIS_URL=redis://localhost:6379"
+            echo "QDRANT_URL=http://localhost:6333"
+            echo "MINIO_ENDPOINT=localhost"
+            echo "MINIO_PORT=9000"
+            echo "MINIO_USE_SSL=false"
+            echo "MINIO_ACCESS_KEY=${MINIO_ROOT_USER}"
+            echo "MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD}"
+            echo "MINIO_BUCKET=careeros"
+            echo "API_PORT=3001"
+            echo "API_URL=http://localhost:3001"
+            echo "NEXT_PUBLIC_API_URL=http://localhost:3001"
+            echo "WEB_URL=http://localhost:3000"
+            echo "TRUSTED_ORIGINS=http://localhost:3000"
+          } >> "$GITHUB_ENV"
+
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 30); do
+            docker compose --env-file .env \
+              -f infra/docker/docker-compose.yml \
+              -f infra/docker/docker-compose.host-dev.yml \
+              exec -T postgres pg_isready -U "$POSTGRES_USER" && exit 0
+            sleep 2
+          done
+          echo "postgres did not become ready" >&2
+          exit 1
+
+      - name: Migrate database
+        run: pnpm --filter @careeros/api exec prisma migrate deploy
+
+      - name: Start api + web
+        run: |
+          nohup pnpm --filter @careeros/api start > api.log 2>&1 &
+          nohup pnpm --filter @careeros/web start > web.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:3001/health >/dev/null && curl -sf http://localhost:3000 >/dev/null; then
+              echo "api + web are up"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::group::api.log"; tail -100 api.log || true; echo "::endgroup::"
+          echo "::group::web.log"; tail -100 web.log || true; echo "::endgroup::"
+          echo "api/web failed to start" >&2
+          exit 1
+
+      # Fresh DB (migrated, not seeded): proves the setup wizard is reachable.
+      - name: E2E — pre-setup (unauthenticated)
+        env:
+          E2E_BASE_URL: http://localhost:3000
+        run: pnpm --filter @careeros/web test:e2e e2e/pre-setup.spec.ts
+
+      - name: Seed test fixtures
+        run: pnpm seed:test
+
+      - name: Mint authenticated storage state
+        env:
+          API_URL: http://localhost:3001
+        run: node apps/web/e2e/seed-storage-state.mjs
+
+      # E2E_STORAGE_STATE is relative to the playwright config dir (apps/web).
+      - name: E2E — full suite
+        env:
+          E2E_BASE_URL: http://localhost:3000
+          E2E_STORAGE_STATE: e2e/.auth/storageState.json
+        run: pnpm --filter @careeros/web test:e2e
+
+      - name: Upload Playwright artifacts
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: playwright-report
+          path: |
+            apps/web/playwright-report/
+            apps/web/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Dump server logs on failure
+        if: failure()
+        run: |
+          echo "::group::api.log"; tail -200 api.log || true; echo "::endgroup::"
+          echo "::group::web.log"; tail -200 web.log || true; echo "::endgroup::"
+
+      - name: Teardown datastores
+        if: always()
+        run: pnpm docker:infra:down

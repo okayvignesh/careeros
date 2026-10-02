@@ -40,7 +40,7 @@ pnpm test:evals           # @careeros/ai evals (EVAL_MOCK=1 default); real run n
 |-------|----------|----------------|-------|
 | Unit | Yes | Services, parsers, aggregators, crypto, schemas, priority/XP math | Vitest; colocated; `pnpm test:unit` |
 | Integration | Yes (partial) | Prisma queries, storage, worker jobs | Testcontainers gated behind `TESTCONTAINERS_E2E=1` + `isDockerAvailable`; 4 files today |
-| E2E | Yes (gate-dependent) | Setup wizard, connect-repo golden flow, post-setup widgets | `post-setup` and `golden-connect-repo` skip unless `E2E_STORAGE_STATE` (+ `E2E_STUB_MODE=1` for stubs) |
+| E2E | Yes (partial) | Setup wizard, post-setup widgets, connect-repo golden flow | `pr.yml` runs `pre-setup` on a fresh DB and mints an `E2E_STORAGE_STATE` for `post-setup`; `golden-connect-repo` still skips (needs `E2E_STUB_MODE=1` + server-side stubs) |
 | LLM evals | Yes (partial) | skill-extract, knowledge-grader, question-generator, fact-check, email-classifier | `EVAL_MOCK=1` by default; nightly workflow exists but runner registration is deferred |
 | Contract | Yes | 5 job adapters (`ashby`, `greenhouse`, `arbeitnow`, `remotive`, `adzuna` MSW) | Weekly live revalidation via `adapter-contract.yml` |
 | Sandbox security | Yes | Memory/network/fork/wallclock/fs limits | Real Docker (`packages/sandbox/src/security.test.ts`) |
@@ -59,8 +59,8 @@ pnpm test:evals           # @careeros/ai evals (EVAL_MOCK=1 default); real run n
 
 - **Coverage tool + threshold:** none. **No coverage percentage target** (`plan/testing.md` §10). Behavior coverage is the bar: each phase checkbox needs at least one verifying test.
 - **Current reported coverage:** `[TODO]` not measured/committed.
-- **Quality gates in CI:** typecheck, `pnpm audit --prod --audit-level=high`, image-pin check, prompt-version check, unit tests, integration tests, Trivy, CodeQL, gitleaks, adapter contracts (weekly), evals (nightly), restore test (weekly).
-- **Known gaps/flaky areas:** e2e gates skip without storage state + stub mode; only 4 integration files; no visual baselines; embedder is a placeholder so semantic tests assert shape, not quality.
+- **Quality gates in CI:** lint (`apps/web` eslint 9; `@careeros/api`'s lint script is inactive until it gains a flat config), typecheck, `pnpm audit --prod --audit-level=high`, image-pin check, prompt-version check, unit tests, integration tests, Playwright (pre-setup + post-setup), Trivy, CodeQL, gitleaks, adapter contracts (weekly), evals (nightly), restore test (weekly).
+- **Known gaps/flaky areas:** `golden-connect-repo` e2e skips without stub mode + server-side stubs; `@careeros/api` has no working eslint config; only 4 integration files; no visual baselines; embedder is a placeholder so semantic tests assert shape, not quality.
 
 ### 6) Evidence
 
@@ -76,7 +76,7 @@ pnpm test:evals           # @careeros/ai evals (EVAL_MOCK=1 default); real run n
 
 | Workflow | Trigger | Gates |
 |----------|---------|-------|
-| `pr.yml` | PR + push main/master | vitest, `pnpm -r typecheck`, `pnpm audit`, Testcontainers integration, image pins, prompt versions |
+| `pr.yml` | PR + push main/master | lint (`@careeros/web`), vitest, `pnpm -r typecheck`, `pnpm audit`, Testcontainers integration, Playwright (pre-setup + post-setup), image pins, prompt versions |
 | `trivy.yml` | PR + push + Mon 06:00 | HIGH/CRITICAL image CVEs → SARIF |
 | `codeql.yml` | PR + push + Mon 05:00 | JS/TS security-extended SAST |
 | `gitleaks.yml` | PR + push + Mon 07:00 | secret scanning |

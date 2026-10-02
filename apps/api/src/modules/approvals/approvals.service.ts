@@ -1,6 +1,6 @@
-import { ForbiddenException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import type { SensitivityGate } from '@careeros/ai';
+import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { SensitivityGateService } from '../../common/sensitivity-gate.service';
 import {
   APPROVAL_REAUTH_OP,
   BULK_APPROVAL_THRESHOLD,
@@ -12,9 +12,6 @@ import {
   type ApprovalKind,
   type ApprovalState,
 } from './state-machine';
-
-/** DI token for the shared SensitivityGate instance (see approvals.module.ts). */
-export const APPROVAL_SENSITIVITY_GATE = Symbol('APPROVAL_SENSITIVITY_GATE');
 
 /** Interface future submitters (F.2 ATS, F.5 outreach, ...) implement. */
 export interface ApprovalsWorker {
@@ -49,7 +46,7 @@ export class ApprovalsService {
 
   constructor(
     private readonly prisma: PrismaService,
-    @Inject(APPROVAL_SENSITIVITY_GATE) private readonly gate: SensitivityGate,
+    private readonly gate: SensitivityGateService,
   ) {}
 
   /** Consumer registration hook (F.2/F.3/F.5 wire in via module `onModuleInit`). */

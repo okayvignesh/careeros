@@ -33,6 +33,12 @@ export const TIER_BY_ADAPTER: Readonly<Record<string, 1 | 2 | 3>> = {
   adzuna: 2,
   arbeitnow: 2,
   remotive: 2,
+  // Workday public boards are ATS-adjacent: tier 2 until an operator marks the
+  // exact host/tenant/site canonical, then callers pass `tierOverrides:
+  // { workday: 1 }` (mirrors createWorkdayAdapter({ verified: true })).
+  workday: 2,
+  // Firecrawl is web-discovered: DISCOVERED, never auto-VERIFIED.
+  firecrawl: 3,
 };
 
 const UNKNOWN_ADAPTER_TIER: 1 | 2 | 3 = 3;

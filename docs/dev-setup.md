@@ -21,9 +21,9 @@ cp .env.example .env
 #   DEEPSEEK_API_KEY (or leave for wizard entry)
 
 pnpm install
-pnpm docker:up          # postgres + redis + qdrant + minio + embedding + glitchtip
+pnpm docker:up          # postgres + redis + qdrant + minio + squid + api + worker + web
 pnpm migrate            # prisma migrate deploy
-pnpm seed:dev           # realistic candidate data
+pnpm seed:test          # deterministic fixture user (realistic dev seed planned)
 pnpm dev                # api + worker + web in parallel
 ```
 
@@ -36,15 +36,17 @@ Open `http://localhost:3000` — wizard redirects if setup incomplete, else dash
 | Start dev stack | `pnpm dev` |
 | Run all tests | `pnpm test` |
 | Run e2e (Playwright) | `pnpm test:e2e` |
-| Run AI evals | `pnpm eval:ai` |
-| Lint + typecheck | `pnpm check` |
+| Run AI evals | `pnpm test:evals` |
+| Lint | `pnpm lint` |
+| Typecheck | `pnpm typecheck` |
 | Format | `pnpm format` |
-| Reset DB | `pnpm db:reset` (nukes + migrates + seeds) |
-| Regenerate Prisma client | `pnpm prisma generate` |
-| New migration | `pnpm prisma migrate dev --name add_foo` |
-| Regenerate ERD | `pnpm erd` (writes `docs/schema.png`) |
-| View OpenAPI docs | http://localhost:3001/api/docs |
-| GlitchTip UI | http://localhost:9000 |
+| Reset DB | `pnpm db:reset` (nukes + migrates; re-seed with `pnpm seed:test`) |
+| Seed test fixtures | `pnpm seed:test` |
+| Regenerate Prisma client | `pnpm --filter @careeros/api prisma generate` |
+| New migration | `pnpm --filter @careeros/api prisma migrate dev --name add_foo` |
+| Regenerate ERD | Planned — `prisma-erd-generator` not wired yet (will write `docs/schema.png`) |
+| View OpenAPI docs | Planned — Swagger not wired yet; needs `@nestjs/swagger` decorators + `/api/docs` |
+| GlitchTip UI | Planned — GlitchTip compose service not added yet |
 
 ## Repo layout
 
@@ -59,13 +61,13 @@ VS Code recommended. `.vscode/` contains:
 
 ## Test data
 
-`pnpm seed:dev` creates:
-- 1 user (email: `dev@career-os.local`, password: `dev-password-12345`)
-- Career goals for a mid-level backend role
-- 12 skills across 4 clusters with mixed evidence
-- 3 seeded GitHub repos (mocked in dev — real GitHub OAuth optional)
-- 20 evidence rows spanning all 6 types
-- 5 fake job listings + 2 shortlisted applications
+`pnpm seed:test` is an idempotent e2e fixture set:
+- 1 user (email: `test@career-os.local`, password: `test-password-12345`)
+- Career goal for a mid-level backend role (remote, UTC)
+- 2 skills + 2 evidence rows
+- 1 fixture job + 1 application
+
+A richer `pnpm seed:dev` (12 skills across 4 clusters, 3 repos, 20 evidence rows, 5 jobs) is planned but not yet wired; see `plan/phase-0-install.md`.
 
 ## Environment reference
 
@@ -73,13 +75,13 @@ Every `.env` var documented inline in `.env.example`. Never commit `.env`.
 
 ## Troubleshooting
 
-**Compose fails to start:** check port conflicts on 3000 (web), 3001 (api), 5432 (pg), 6379 (redis), 6333 (qdrant), 9000 (minio+glitchtip). Override in `.env`.
+**Compose fails to start:** check port conflicts on 3000 (web), 3001 (api), 5432 (pg), 6379 (redis), 6333 (qdrant), 9000 (minio). Override in `.env`.
 
 **Migrations fail:** `pnpm db:reset` nukes and rebuilds. Only in dev.
 
 **Wizard loops:** `setup_state` row stuck; `pnpm db:reset` or manually update `setup_state.state = 'not_started'`.
 
-**LLM calls fail in dev:** wizard capability test uses the key you entered. Verify with `pnpm ai:probe` (runs a real DeepSeek chat + JSON + tool call and prints the result).
+**LLM calls fail in dev:** wizard capability test uses the key you entered. A standalone `pnpm ai:probe` script is planned but not yet wired.
 
 **Playwright tests flake:** first run downloads browsers (~500MB). `pnpm playwright install` explicitly.
 

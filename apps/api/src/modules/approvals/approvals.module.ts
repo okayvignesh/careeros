@@ -1,30 +1,21 @@
 import { Module } from '@nestjs/common';
-import { SensitivityGate } from '@careeros/ai';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { AuthModule } from '../auth/auth.module';
 import { ApprovalsController } from './approvals.controller';
-import { ApprovalsService, APPROVAL_SENSITIVITY_GATE } from './approvals.service';
+import { ApprovalsService } from './approvals.service';
 
 /**
  * F.1: approval-queue module.
  *
- * A single process-wide SensitivityGate instance backs the fresh-re-auth
- * window used by approve() + bulkApprove(). The gate is a plain class from
- * `@careeros/ai` (C-P0.3) that holds a per-(userId, opTag) map of last
- * re-auth timestamps. Callers that mint a fresh re-auth (passkey verify,
- * password re-verify) resolve the same instance via `APPROVAL_SENSITIVITY_GATE`
- * and call `.withReauthWindow(...)` immediately after success.
- *
- * ponytail: one instance per process. Multi-node deploys swap this for a
- * redis-backed adapter; single-user MVP shape means one node.
+ * Fresh re-auth windows are owned by the global SensitivityGateService (A6):
+ * callers that mint a fresh re-auth (passkey verify, password re-verify) call
+ * `SensitivityGateService.withReauthWindow(...)` on the same singleton that
+ * approve() reads via `hasFreshReauth`, so there is one gate, not two.
  */
 @Module({
   imports: [PrismaModule, AuthModule],
   controllers: [ApprovalsController],
-  providers: [
-    ApprovalsService,
-    { provide: APPROVAL_SENSITIVITY_GATE, useValue: new SensitivityGate() },
-  ],
-  exports: [ApprovalsService, APPROVAL_SENSITIVITY_GATE],
+  providers: [ApprovalsService],
+  exports: [ApprovalsService],
 })
 export class ApprovalsModule {}

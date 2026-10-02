@@ -1,15 +1,18 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { matchScoreForJob, type JobSkillExtraction, type MatchResult } from '@careeros/shared';
+import { type JobSkillExtraction } from '@careeros/shared';
 import { DeepSeekProvider, InjectionBlockedError, renderPrompt, wrapUntrusted } from '@careeros/ai';
 import {
   adapters as allAdapters,
   normalize,
   freshness,
+  relevance,
   crossSourceDedupe,
   verify,
+  computeMatchResult,
   type JobSourceAdapter,
   type NormalizedJob,
+  type MatchResult,
 } from '@careeros/job-pipeline';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UsageService } from '../usage/usage.service';
@@ -100,10 +103,22 @@ export class JobsService {
   }
 
   /**
-   * Walking-skeleton pipeline: fetch → append to jobs_raw → upsert into
-   * jobs_normalized by canonicalUrl. Deferred to later slices: cross-source
-   * fuzzy dedupe, skill extraction, verification-state transitions, freshness
-   * gate, relevance filter, match score. Everything lands as `unverified` for now.
+   * Pipeline ingest: adapter fetch → normalize → cross-source dedupe → verify
+   * → persist (jobs_raw append-only + jobs_normalized upsert). Relevance/
+   * freshness/match are applied at read time in `list`.
+   *
+   * ponytail: this still runs inline in the `POST admin/jobs/sync/:adapter`
+   * request (fetch + Prisma writes), and skill extraction still runs inline in
+   * `POST admin/jobs/extract-skills` (LLM calls). There is no durable
+   * jobs-ingest BullMQ queue to hand off to: unlike github/gitlab/embedding,
+   * persistence here is coupled to Nest's `PrismaService` and no pure
+   * persistence port exists yet. Extracting one is a real refactor, not a
+   * half-migration, so it is deferred. The seam is ready: `sync(adapterId)` is
+   * request-free and unit-tested against a mocked Prisma, every pure stage
+   * (normalize → crossSourceDedupe → verify → relevance → match) lives in
+   * `@careeros/job-pipeline`, and a future `QUEUE_JOBS` handler only needs a
+   * thin persistence adapter. Do NOT enqueue a job that still calls this same
+   * method from the API — that would be the half-migration.
    */
   async sync(adapterId: string): Promise<JobsSyncStats> {
     const adapter = this.adapters[adapterId];
@@ -280,12 +295,11 @@ export class JobsService {
       ? { skillIds: { has: params.skill } }
       : {};
 
-    // Load user's PROVEN skills for match scoring. `historicalDemonstrated` is
-    // the monotonic "was ever proven" flag maintained by the aggregator, which
-    // gives an honest signal (a single stray self-claim in Evidence would NOT
-    // set it). If the aggregator hasn't run, matches will be conservative rather
-    // than inflated — the right failure mode.
-    const [rows, total, provenSkills, prefs] = await Promise.all([
+    // Load candidate skill states (proficiency + recency) for match scoring.
+    // Same set and same canonical scorer as MatcherService.scoreJob, so the
+    // list score and the detail score cannot diverge for one job/candidate.
+    // One batched read per request — constant regardless of page size.
+    const [rows, total, skillStates, prefs] = await Promise.all([
       this.prisma.normalizedJob.findMany({
         where,
         orderBy: [{ sourcePostedAt: { sort: 'desc', nulls: 'last' } }, { firstSeenAt: 'desc' }],
@@ -297,12 +311,17 @@ export class JobsService {
       }),
       this.prisma.normalizedJob.count({ where }),
       this.prisma.candidateSkillState.findMany({
-        where: { userId: params.userId, historicalDemonstrated: true },
-        select: { skillId: true },
+        where: { userId: params.userId },
+        select: { skillId: true, proficiency: true, recencyDays: true },
       }),
       this.prefs.get(params.userId),
     ]);
-    const userSkillIds = provenSkills.map((e) => e.skillId);
+    const stateBySkill = new Map(
+      skillStates.map((s) => [
+        s.skillId,
+        { proficiency: s.proficiency, recencyDays: s.recencyDays },
+      ]),
+    );
 
     const rejected: RejectStats = {
       remoteOnly: 0,
@@ -312,46 +331,49 @@ export class JobsService {
       stale: 0,
       scanned: rows.length,
     };
-    const blacklistLower = new Set(prefs.companyBlacklist.map((c) => c.toLowerCase().trim()));
-    const mustHave = new Set(prefs.mustHaveSkills);
-    const dealbreakers = new Set(prefs.dealbreakerSkills);
     const nowMs = Date.now();
     const filtered = rows.filter((r) => {
-      const f = freshness(
-        { sourcePostedAt: r.sourcePostedAt, firstSeenAt: r.firstSeenAt },
+      const result = relevance(
+        {
+          company: r.company,
+          remote: r.remote,
+          skillIds: r.skillIds,
+          sourcePostedAt: r.sourcePostedAt,
+          firstSeenAt: r.firstSeenAt,
+        },
+        prefs,
         { maxAgeDays: FRESHNESS_DAYS, now: nowMs },
       );
-      if (!f.fresh) {
-        rejected.stale++;
-        return false;
-      }
-      if (prefs.remoteOnly && !r.remote) {
-        rejected.remoteOnly++;
-        return false;
-      }
-      if (blacklistLower.has(r.company.toLowerCase().trim())) {
-        rejected.companyBlacklisted++;
-        return false;
-      }
-      const jobSkills = new Set(r.skillIds);
-      if (dealbreakers.size > 0) {
-        for (const d of dealbreakers) if (jobSkills.has(d)) {
+      if (result.relevant) return true;
+      switch (result.reason) {
+        case 'stale':
+          rejected.stale++;
+          break;
+        case 'remote-only':
+          rejected.remoteOnly++;
+          break;
+        case 'company-blacklisted':
+          rejected.companyBlacklisted++;
+          break;
+        case 'has-dealbreaker':
           rejected.hasDealbreaker++;
-          return false;
-        }
-      }
-      if (mustHave.size > 0) {
-        for (const m of mustHave) if (!jobSkills.has(m)) {
+          break;
+        case 'must-have-missing':
           rejected.mustHaveMissing++;
-          return false;
-        }
+          break;
       }
-      return true;
+      return false;
     });
 
     const scored = filtered.map((r) => ({
       row: r,
-      match: matchScoreForJob(userSkillIds, r.skillIds),
+      match: computeMatchResult({
+        jobId: r.id,
+        required: r.skillIds.map((skillId) => ({ skillId, weight: 1 })),
+        nameById: new Map(),
+        stateBySkill,
+        evidenceBySkill: new Map(),
+      }),
     }));
     // Sort by match score DESC (nulls last), then existing tiebreak.
     scored.sort((a, b) => {

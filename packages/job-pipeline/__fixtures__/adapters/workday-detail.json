@@ -1,0 +1,17 @@
+{
+  "jobPostingInfo": {
+    "id": "7999a28b44c60100f431008e1c150000",
+    "title": "Senior Backend Engineer",
+    "jobDescription": "<p>Own the distributed platform.</p><p>Remote across the US.</p>",
+    "location": "Remote - US",
+    "postedOn": "Posted Today",
+    "startDate": "2026-09-28",
+    "remoteType": "Remote",
+    "jobPostingId": "Senior-Backend-Engineer_R1001",
+    "jobPostingSiteId": "External",
+    "externalUrl": "https://acme.wd5.myworkdayjobs.com/en-US/External/job/Remote/Senior-Backend-Engineer_R1001",
+    "country": { "descriptor": "United States of America" }
+  },
+  "hiringOrganization": { "name": "Acme Inc", "url": "https://acme.example" },
+  "userAuthenticated": false
+}

@@ -10,7 +10,8 @@
 // project's "assert once; assertion must fail if the logic breaks" rule.
 import { describe, expect, it, vi } from 'vitest';
 import { NotFoundException } from '@nestjs/common';
-import { MatcherService, computeMatch, type RequiredSkill } from './matcher.service';
+import { computeMatch, type RequiredSkill } from '@careeros/job-pipeline';
+import { MatcherService } from './matcher.service';
 
 class FakeDecimal {
   constructor(private readonly n: number) {}

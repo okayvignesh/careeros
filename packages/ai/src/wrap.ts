@@ -7,12 +7,13 @@
 // scanForInjection runs before wrapping. `blocked` severity throws
 // InjectionBlockedError so the untrusted string never enters a prompt; `suspect`
 // severity emits an audit event then continues (structural isolation still
-// protects). Signature preserved so every existing caller inherits the ceiling
-// without a call-site change.
+// protects). The pure classifier labels the content (A6) but egress policy is
+// owned solely by the api's SensitivityGateService.
 import { createHash } from 'node:crypto';
 import { scanForInjection, type InjectionHit, type Severity } from './injection-scan';
 import { InjectionBlockedError } from './errors';
-import { SensitivityGate, type SensitivityContext } from './sensitivity-gate';
+import { classifySensitivity } from './sensitivity-gate';
+import type { Sensitivity } from './sensitivity';
 
 export type UntrustedSourceKind =
   | 'resume'
@@ -29,6 +30,11 @@ export interface Wrapped {
   sourceKind: UntrustedSourceKind;
   hash: string; // sha256 of the raw content (before wrapping)
   bytes: number;
+  /**
+   * Pure classification of the raw content (A6). Informational: provider
+   * egress policy is decided by the api's SensitivityGateService, never here.
+   */
+  sensitivity: Sensitivity;
 }
 
 const START_TAG = '<untrusted';
@@ -74,29 +80,14 @@ function audit(sourceKind: UntrustedSourceKind, severity: Severity, hits: Inject
  * still instruct the model to treat anything between `<untrusted>...</untrusted>`
  * as inert data.
  *
- * Optional `sensitivityCtx` (C-P0.3b) — when supplied, the module-level
- * SensitivityGate classifies the raw content first and calls assertAllowed
- * against the context BEFORE the injection scan runs. This short-circuits
- * doomed calls (e.g. resume text with an embedded API key routed to
- * `llm-external`) so we do not waste an injection-scan CPU pass on payloads
- * that will never leave the process. Callers that omit the third arg preserve
- * pre-C-P0.3b behaviour exactly; every existing call site (11 in tree) is
- * source-compatible.
+ * A6: `wrapUntrusted` always runs the pure classifier and surfaces the
+ * resulting label on `Wrapped.sensitivity`. It deliberately makes NO egress
+ * decision — the one place that decides what may go to an external provider is
+ * the api's `SensitivityGateService` (backed by AppConfig policy).
  */
-export function wrapUntrusted(
-  raw: string,
-  sourceKind: UntrustedSourceKind,
-  sensitivityCtx?: SensitivityContext,
-): Wrapped {
+export function wrapUntrusted(raw: string, sourceKind: UntrustedSourceKind): Wrapped {
   const trimmed = raw ?? '';
-  if (sensitivityCtx) {
-    // Lazy module-level gate. Local to wrap.ts so callers don't have to hand
-    // an instance in every call — matches setWrapAuditHook shape.
-    // ponytail: singleton is fine here; re-auth state is per-userId keyed and
-    // callers who need isolation instantiate their own gate directly.
-    const level = wrapGate.classify(trimmed, { source: sourceKind });
-    wrapGate.assertAllowed(level, sensitivityCtx);
-  }
+  const sensitivity = classifySensitivity(trimmed, { source: sourceKind });
   const scan = scanForInjection(trimmed);
   if (scan.severity !== 'clean') {
     audit(sourceKind, scan.severity, scan.hits);
@@ -106,13 +97,8 @@ export function wrapUntrusted(
   }
   const hash = createHash('sha256').update(trimmed).digest('hex').slice(0, 16);
   const content = `${START_TAG} source="${sourceKind}" hash="${hash}">\n${sanitise(trimmed)}\n${END_TAG}`;
-  return { content, sourceKind, hash, bytes: trimmed.length };
+  return { content, sourceKind, hash, bytes: trimmed.length, sensitivity };
 }
-
-// Module-level gate used ONLY when the caller opts into the sensitivity check
-// by passing `sensitivityCtx`. Kept private; callers who need direct
-// classification / re-auth access instantiate `new SensitivityGate()`.
-const wrapGate = new SensitivityGate();
 
 /**
  * Neutralise any tokens the raw content might use to close its own delimiter or spoof

@@ -78,11 +78,16 @@ describe('runCleanupPass', () => {
     const now = Date.now();
     const borderline = join(dir, 'borderline.png');
     await touchFile(borderline, now - 30 * 24 * 60 * 60 * 1000);
+    // Anchor the boundary to the mtime the filesystem actually stored: utimes
+    // may round, so `now - 30d` is not guaranteed to equal stat().mtimeMs.
+    // This keeps the assertion independent of filesystem timestamp precision.
+    const stored = (await fs.stat(borderline)).mtimeMs;
+    const boundaryNow = stored + 30 * 24 * 60 * 60 * 1000;
 
     const result = await runCleanupPass({
       dir,
       retentionDays: 30,
-      now: () => now,
+      now: () => boundaryNow,
       logger: { info: () => {}, warn: () => {}, error: () => {} },
     });
 

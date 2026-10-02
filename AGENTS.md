@@ -76,20 +76,25 @@ These are load-bearing. Break one, break the product.
 career-os/
 ├── apps/
 │   ├── web/              Next.js — user-facing app
-│   ├── api/              NestJS — HTTP API
-│   ├── worker/           BullMQ workers
-│   └── agent/            (from P3.5) Electron desktop companion
+│   ├── api/              NestJS — HTTP API (MinIO wrapper: apps/api/src/common/storage.service.ts; GitHub integration: apps/api/src/modules/integrations/github/)
+│   ├── worker/           BullMQ workers (GitHub sync: apps/worker/src/github-sync.ts)
+│   └── desktop/          (from P3.5) Electron desktop companion
 ├── packages/
 │   ├── ai/               AIProvider abstraction + adapters
 │   ├── embeddings/       Local + external embedding adapters
 │   ├── auth/             Argon2id + session helpers
 │   ├── secrets/          Encryption service
-│   ├── storage/          MinIO wrapper
 │   ├── ui/               Design system (shadcn wrap + primitives)
 │   ├── shared/           Zod schemas + types + constants
 │   ├── job-pipeline/     (from P3) source-agnostic ingestion funnel
-│   ├── browser-agent/    (from P3.5) pacing + kill-switch + task schema
-│   └── github/           (from P1) repo ingest + code analysis
+│   ├── aggregator/       (from P3) aggregator source adapters
+│   ├── firecrawl/        (from P3) public career-site / ATS discovery client
+│   ├── email-parsers/    (from P5) email-alert parsers (linkedin/indeed/naukri)
+│   ├── messaging/        (from P5) Channel interface + Web/Slack stubs
+│   ├── resume-render/    (from P4) ResumeDoc + DOCX/PDF renderers
+│   ├── sandbox/          (from P2) Docker-per-run code sandbox
+│   ├── testing/          test infra (msw, fast-check, storage-state helpers)
+│   └── browser-agent/    (from P3.5) pacing + kill-switch + task schema
 ├── infra/
 │   ├── docker/           compose files + per-service Dockerfiles
 │   ├── nginx/            reverse proxy + TLS
@@ -265,6 +270,8 @@ skill extract → verify → relevance filter → match score → land
 ```
 
 Trust order for cross-source merge: `VERIFIED ATS > Aggregator API > Agent (DISCOVERED) > Email alert`.
+
+The pure/injectable stages live in `packages/job-pipeline`: `normalize`, `crossSourceDedupe`, `verify`, `freshness`, `relevance`, and the canonical weighted match scorer `computeMatch` / list projection `computeMatchResult`. `skill-extract` (LLM) and adapter fetch/persist still run inline in the API request path (`POST admin/jobs/sync`, `POST admin/jobs/extract-skills`) pending a persistence port onto a `jobs` BullMQ queue — see the `ponytail:` note on `JobsService.sync`.
 
 Every rejected job writes to `job_reject_log` with a reason code viewable in a "why didn't I see this job?" audit UI.
 

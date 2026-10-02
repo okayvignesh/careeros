@@ -1,0 +1,22 @@
+{
+  "total": 2,
+  "jobPostings": [
+    {
+      "title": "Senior Backend Engineer",
+      "externalPath": "/job/Remote/Senior-Backend-Engineer_R1001",
+      "locationsText": "Remote - US",
+      "postedOn": "Posted Today",
+      "remoteType": "Remote",
+      "bulletFields": ["R1001"]
+    },
+    {
+      "title": "Product Designer",
+      "externalPath": "/job/New-York-NY/Product-Designer_R1002",
+      "locationsText": "New York, NY",
+      "postedOn": "Posted 3 Days Ago",
+      "remoteType": "Onsite",
+      "bulletFields": ["R1002"]
+    }
+  ],
+  "facets": []
+}

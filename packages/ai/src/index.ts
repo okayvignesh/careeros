@@ -26,11 +26,16 @@ export {
   SensitivityBlockedError,
 } from './errors';
 export {
-  SensitivityGate,
-  SENSITIVITY_LEVELS as SENSITIVITY_GATE_LEVELS,
+  classifySensitivity,
+  decideProviderEgress,
+  assertProviderAllowed,
+  isProviderAllowed,
+  allowedProviders,
+  ceilingRank,
   setSensitivityAuditHook,
-  type SensitivityLevel,
-  type SensitivityContext,
+  type ProviderCeiling,
+  type ProviderPolicy,
+  type EgressDecision,
   type SensitivityAuditEvent,
   type ClassifyMeta,
 } from './sensitivity-gate';

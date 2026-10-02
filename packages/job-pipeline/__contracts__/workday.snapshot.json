@@ -1,0 +1,16 @@
+{
+  "jobPostings": [
+    {
+      "bulletFields": [
+        "string"
+      ],
+      "externalPath": "string",
+      "locationsText": "string",
+      "postedOn": "string",
+      "remoteType": "string",
+      "title": "string"
+    }
+  ],
+  "total": "number",
+  "facets": []
+}

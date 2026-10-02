@@ -13,7 +13,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { BadRequestException } from '@nestjs/common';
-import { SensitivityGate } from '@careeros/ai';
+import { SensitivityGateService } from '../../common/sensitivity-gate.service';
 import { ApprovalsService } from '../approvals/approvals.service';
 import {
   AtsSubmitService,
@@ -230,7 +230,10 @@ beforeEach(() => {
 
 function mkSvc(prismaOpts: Parameters<typeof fakePrisma>[0] = {}) {
   const prisma = fakePrisma(prismaOpts);
-  const approvals = new ApprovalsService(prisma as never, new SensitivityGate());
+  const approvals = new ApprovalsService(
+    prisma as never,
+    new SensitivityGateService({} as never, { warn() {} } as never),
+  );
   const svc = new AtsSubmitService(prisma as never, approvals);
   // onModuleInit registers the worker; call it directly in the test
   // (Nest only runs this via its DI lifecycle in a bootstrapped app).

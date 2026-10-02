@@ -71,12 +71,13 @@ export class InjectionBlockedError extends Error {
 }
 
 /**
- * Thrown by the SensitivityGate (packages/ai/src/sensitivity-gate.ts) when the
- * classified content-level exceeds the trust ceiling of the dispatch context
- * (e.g. `system-secret` content routed to `llm-external`). Fields are enumerable
- * so audit consumers can log them; the class name + `.code` are stable so API
- * layers can map to a sanitised 4xx. Wired into wrapUntrusted so the check runs
- * before injection scan (bail earlier = less LLM spend on doomed calls).
+ * Thrown by `assertProviderAllowed` (packages/ai/src/sensitivity-gate.ts) when
+ * the classified content-level exceeds a provider's configured ceiling (e.g.
+ * `employer-confidential` content routed to a `personal`-ceiling provider).
+ * Fields are enumerable so audit consumers can log them; the class name +
+ * `.code` are stable so API layers can map to a sanitised 4xx. The api's
+ * SensitivityGateService is the authoritative egress decision point and keeps
+ * its own 503 mapping — this error is the package-level shape.
  */
 export class SensitivityBlockedError extends Error {
   readonly code = 'security.audit.sensitivity_blocked';

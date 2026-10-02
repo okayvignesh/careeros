@@ -191,11 +191,11 @@ describe('JobsService.sync — query count (C-P3.8b N+1 fix)', () => {
 
 // C-P3.8c: match-score pagination. JobsController already enforces
 // limit<=200 (see jobs.controller.ts) and JobsService.list already batches
-// the user's proven-skill fetch and computes match scores via the pure
-// `matchScoreForJob` (no per-row DB call). This block pins those two
-// invariants: query count per page is CONSTANT regardless of pool size,
-// and the user-skills fetch happens exactly once per request (not once
-// per job).
+// the user's candidate-skill-state fetch and computes match scores via the
+// canonical pure `computeMatchResult` from `@careeros/job-pipeline` (no
+// per-row DB call). This block pins those two invariants: query count per page
+// is CONSTANT regardless of pool size, and the skill-state fetch happens
+// exactly once per request (not once per job).
 
 function normalizedJobRow(i: number) {
   // Freshness gate rejects rows > 45 days old, so anchor to `now` so the
@@ -236,7 +236,10 @@ function makeListPrismaMock(poolSize: number) {
       candidateSkillState: {
         findMany: vi.fn(async () => {
           calls.push('candidateSkillState.findMany');
-          return [{ skillId: 'ts' }, { skillId: 'react' }];
+          return [
+            { skillId: 'ts', proficiency: 80, recencyDays: 10 },
+            { skillId: 'react', proficiency: 60, recencyDays: 200 },
+          ];
         }),
       },
     },
@@ -282,7 +285,7 @@ describe('JobsService.list — pagination query count (C-P3.8c)', () => {
     expect(m.calls.filter((c) => c === 'normalizedJob.count').length).toBe(1);
     expect(m.calls.filter((c) => c === 'candidateSkillState.findMany').length).toBe(1);
     expect(m.calls.length).toBe(3);
-    // MUTATION SMOKE: swap `matchScoreForJob` (pure) for a per-row
+    // MUTATION SMOKE: swap `computeMatchResult` (pure) for a per-row
     // `this.prisma.<x>.findMany` inside the map → calls.length jumps to
     // 3 + limit and this assertion fails. Move the candidateSkillState
     // fetch INSIDE the filter loop → the count jumps from 1 to page-size.

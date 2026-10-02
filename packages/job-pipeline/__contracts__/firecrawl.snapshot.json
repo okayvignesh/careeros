@@ -1,0 +1,10 @@
+{
+  "data": [
+    {
+      "description": "string",
+      "title": "string",
+      "url": "string"
+    }
+  ],
+  "success": "boolean"
+}

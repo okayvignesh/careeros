@@ -181,6 +181,85 @@ export const ArbeitnowResponseWire = z
   })
   .passthrough();
 
+// ---------- Workday (public career-site CXS API) ----------
+// List: POST /wday/cxs/{tenant}/{site}/jobs -> { total, jobPostings, facets }.
+// `total` saturates at 2000 upstream; callers must stop on an empty page too.
+export const WorkdayJobPostingWire = z
+  .object({
+    title: z.string().min(1),
+    externalPath: z.string().min(1),
+    locationsText: z.string().optional(),
+    postedOn: z.string().optional(),
+    remoteType: z.string().optional(),
+    bulletFields: z.array(z.string()).optional(),
+  })
+  .passthrough();
+
+export const WorkdayJobsWire = z
+  .object({
+    total: z.number(),
+    jobPostings: z.array(WorkdayJobPostingWire),
+    facets: z.array(z.unknown()).optional(),
+  })
+  .passthrough();
+
+// Detail: GET /wday/cxs/{tenant}/{site}{externalPath} with Accept: application/json.
+export const WorkdayJobPostingInfoWire = z
+  .object({
+    id: z.string().optional(),
+    title: z.string().min(1),
+    jobDescription: z.string().optional(),
+    location: z.string().optional(),
+    postedOn: z.string().optional(),
+    startDate: z.string().optional(),
+    timeType: z.string().optional(),
+    jobReqId: z.string().optional(),
+    jobPostingId: z.string().optional(),
+    jobPostingSiteId: z.string().optional(),
+    externalUrl: z.string().url().optional(),
+    remoteType: z.string().optional(),
+    country: z.object({ descriptor: z.string().optional() }).passthrough().optional(),
+  })
+  .passthrough();
+
+export const WorkdayDetailWire = z
+  .object({
+    jobPostingInfo: WorkdayJobPostingInfoWire,
+    hiringOrganization: z.object({ name: z.string().optional() }).passthrough().optional(),
+    userAuthenticated: z.boolean().optional(),
+  })
+  .passthrough();
+
+// ---------- Firecrawl (v1 search response subset) ----------
+// Mirrors packages/firecrawl/src/schemas.ts. Kept local so this test-time
+// registry has no runtime dependency on the client package.
+export const FirecrawlSearchResultWire = z
+  .object({
+    url: z.string(),
+    title: z.string().optional(),
+    description: z.string().optional(),
+    markdown: z.string().optional(),
+    html: z.string().optional(),
+    links: z.array(z.string()).optional(),
+    metadata: z
+      .object({
+        title: z.string().optional(),
+        description: z.string().optional(),
+        sourceURL: z.string().optional(),
+        url: z.string().optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
+
+export const FirecrawlSearchResponseWire = z
+  .object({
+    success: z.literal(true),
+    data: z.array(FirecrawlSearchResultWire),
+  })
+  .passthrough();
+
 /**
  * Registry of adapter wire schemas. The workflow / snapshot regeneration walks
  * this map so a new adapter is one entry, not a new script.
@@ -191,6 +270,8 @@ export const adapterWireSchemas = {
   greenhouse: GreenhouseBoardWire,
   adzuna: AdzunaResponseWire,
   arbeitnow: ArbeitnowResponseWire,
+  workday: WorkdayJobsWire,
+  firecrawl: FirecrawlSearchResponseWire,
 } as const;
 
 export type AdapterId = keyof typeof adapterWireSchemas;
@@ -224,7 +305,7 @@ export function snapshotPath(adapterId: string): string {
  */
 export function minimizePayload(
   raw: unknown,
-  jobsKey: 'jobs' | 'results' | 'data',
+  jobsKey: 'jobs' | 'results' | 'data' | 'jobPostings',
 ): unknown {
   if (raw === null || typeof raw !== 'object') return raw;
   const obj = raw as Record<string, unknown>;

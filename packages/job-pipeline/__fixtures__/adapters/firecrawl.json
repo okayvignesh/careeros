@@ -1,0 +1,65 @@
+{
+  "search": {
+    "success": true,
+    "data": [
+      {
+        "url": "https://jobs.ashbyhq.com/acme/senior-backend-eng",
+        "title": "Senior Backend Engineer",
+        "description": "Own our distributed platform. Remote-friendly."
+      },
+      {
+        "url": "https://boards.greenhouse.io/beta/jobs/4501",
+        "title": "Product Designer",
+        "description": "Own design end to end."
+      },
+      {
+        "url": "https://www.linkedin.com/jobs/view/999",
+        "title": "Dream Job (must never be ingested)",
+        "description": "Banned platform."
+      },
+      {
+        "url": "https://www.indeed.com/viewjob?jk=abc",
+        "title": "Another banned listing",
+        "description": "Banned platform."
+      },
+      {
+        "url": "https://careers.gamma.example/roles/staff-sre",
+        "title": "Staff Site Reliability Engineer",
+        "description": "Remote across the EU. Terraform, Kubernetes."
+      }
+    ]
+  },
+  "scrapes": {
+    "https://jobs.ashbyhq.com/acme/senior-backend-eng": {
+      "success": true,
+      "data": {
+        "markdown": "# Senior Backend Engineer\n\nOwn the platform. Ship the boring code. Remote — Americas.",
+        "metadata": {
+          "title": "Senior Backend Engineer",
+          "sourceURL": "https://jobs.ashbyhq.com/acme/senior-backend-eng"
+        }
+      }
+    },
+    "https://boards.greenhouse.io/beta/jobs/4501": {
+      "success": true,
+      "data": {
+        "markdown": "# Product Designer\n\nOwn design end to end across web and mobile.",
+        "metadata": {
+          "title": "Product Designer",
+          "ogSiteName": "Beta Corp",
+          "sourceURL": "https://boards.greenhouse.io/beta/jobs/4501"
+        }
+      }
+    },
+    "https://careers.gamma.example/roles/staff-sre": {
+      "success": true,
+      "data": {
+        "markdown": "# Staff Site Reliability Engineer\n\nRemote across the EU. Terraform, Kubernetes, GitOps.",
+        "metadata": {
+          "title": "Staff Site Reliability Engineer",
+          "sourceURL": "https://careers.gamma.example/roles/staff-sre"
+        }
+      }
+    }
+  }
+}

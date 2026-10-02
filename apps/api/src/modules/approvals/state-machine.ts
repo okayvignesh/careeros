@@ -72,7 +72,7 @@ export const KINDS_REQUIRING_FRESH_REAUTH: ReadonlySet<ApprovalKind> = new Set([
  */
 export const BULK_APPROVAL_THRESHOLD = 5;
 
-/** Op-tag passed to SensitivityGate.hasFreshReauth for approval flows. */
+/** Op-tag passed to SensitivityGateService.hasFreshReauth for approval flows. */
 export const APPROVAL_REAUTH_OP = 'approval.decide';
 
 export class IllegalStateError extends Error {

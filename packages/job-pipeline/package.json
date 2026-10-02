@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@careeros/firecrawl": "workspace:*",
     "@careeros/shared": "workspace:*",
     "zod": "^3.23.8"
   },

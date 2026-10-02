@@ -1,31 +1,31 @@
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
-import { SENSITIVITY_LEVELS, rankOf, type Sensitivity } from '@careeros/ai';
+import {
+  SENSITIVITY_LEVELS,
+  decideProviderEgress,
+  type ProviderCeiling,
+  type ProviderPolicy,
+  type Sensitivity,
+} from '@careeros/ai';
 import { PrismaService } from '../prisma/prisma.service';
 
-/**
- * Per-provider sensitivity ceiling.
- *   'block'        → this provider may never see any user data (kill switch)
- *   'local-only'   → only the local embedding path may use it (external providers never)
- *   'public'       → public data only (job descriptions, READMEs)
- *   'personal'     → up to personal (resume, user input)
- *   'confidential' → up to confidential (private repos)
- *   'employer-confidential' → any label (opt-in per repo)
- */
-export type ProviderCeiling =
-  | 'block'
-  | 'local-only'
-  | 'public'
-  | 'personal'
-  | 'confidential'
-  | 'employer-confidential';
+export type { ProviderCeiling } from '@careeros/ai';
 
+/**
+ * Single authoritative source for provider sensitivity policy + the fresh
+ * re-auth window (plan/ai-safety.md item 8, cleanup task A6).
+ *
+ * This service owns the policy store (AppConfig), the ONE decision about what
+ * may be sent to a provider, and the per-call opt-in re-auth timestamps. The
+ * pure rank/classify primitives live in `@careeros/ai`; every provider-egress
+ * path funnels through `assertAllowed` here.
+ */
 const APP_CONFIG_KEY = 'llm.sensitivity_policy';
 
 // Fail-closed defaults. External providers never touch confidential+ data
 // until the user explicitly opts in. Local embedding provider gets 'confidential'
 // by default (no data leaves the host).
-const DEFAULT_POLICY: Record<string, ProviderCeiling> = {
+const DEFAULT_POLICY: ProviderPolicy = {
   deepseek: 'personal',
   openai: 'personal',
   anthropic: 'personal',
@@ -35,25 +35,19 @@ const DEFAULT_POLICY: Record<string, ProviderCeiling> = {
   local: 'confidential',
 };
 
-const CEILING_RANK: Record<ProviderCeiling, number> = {
-  block: -2,
-  'local-only': -1,
-  public: rankOf('public'),
-  personal: rankOf('personal'),
-  confidential: rankOf('confidential'),
-  'employer-confidential': rankOf('employer-confidential'),
-};
-
 @Injectable()
 export class SensitivityGateService {
+  /** Per-(userId + opTag) expiry (ms epoch) of the last recorded re-auth. */
+  private readonly reauth = new Map<string, number>();
+
   constructor(
     private readonly prisma: PrismaService,
     @InjectPinoLogger(SensitivityGateService.name) private readonly logger: PinoLogger,
   ) {}
 
-  async getPolicy(): Promise<Record<string, ProviderCeiling>> {
+  async getPolicy(): Promise<ProviderPolicy> {
     const row = await this.prisma.appConfig.findUnique({ where: { key: APP_CONFIG_KEY } });
-    const stored = (row?.value as Record<string, ProviderCeiling> | null) ?? {};
+    const stored = (row?.value as ProviderPolicy | null) ?? {};
     return { ...DEFAULT_POLICY, ...stored };
   }
 
@@ -68,34 +62,68 @@ export class SensitivityGateService {
   }
 
   /**
-   * Throws 503 if the provider isn't allowed to see data at the requested sensitivity.
-   * Non-mutating: safe to call before instantiating the provider.
+   * Throws 503 if the provider isn't allowed to see data at the requested
+   * sensitivity. Non-mutating: safe to call before instantiating the provider.
+   * Delegates the rank comparison to the pure `decideProviderEgress` primitive.
    */
   async assertAllowed(providerName: string, sensitivity: Sensitivity, userId?: string): Promise<void> {
     if (!SENSITIVITY_LEVELS.includes(sensitivity)) {
       throw new Error(`Unknown sensitivity label: ${sensitivity}`);
     }
     const policy = await this.getPolicy();
-    const ceiling = policy[providerName] ?? 'block';
+    const decision = decideProviderEgress(providerName, sensitivity, policy);
+    if (decision.allowed) return;
 
-    if (ceiling === 'block' || ceiling === 'local-only') {
+    if (decision.reason === 'not-permitted') {
       this.logger.warn(
-        { providerName, ceiling, sensitivity, userId },
+        { providerName, ceiling: decision.ceiling, sensitivity, userId },
         'sensitivity gate blocked call',
       );
       throw new ServiceUnavailableException(
-        `Provider '${providerName}' is not permitted (ceiling: ${ceiling}). Adjust from Settings, Sensitivity policy.`,
+        `Provider '${providerName}' is not permitted (ceiling: ${decision.ceiling}). Adjust from Settings, Sensitivity policy.`,
       );
     }
 
-    if (rankOf(sensitivity) > CEILING_RANK[ceiling]) {
-      this.logger.warn(
-        { providerName, ceiling, sensitivity, userId },
-        'sensitivity gate blocked call: request above ceiling',
-      );
-      throw new ServiceUnavailableException(
-        `Cannot send '${sensitivity}' data to '${providerName}' (ceiling: ${ceiling}). Raise the ceiling in Settings, Sensitivity policy or route through a local provider.`,
-      );
-    }
+    this.logger.warn(
+      { providerName, ceiling: decision.ceiling, sensitivity, userId },
+      'sensitivity gate blocked call: request above ceiling',
+    );
+    throw new ServiceUnavailableException(
+      `Cannot send '${sensitivity}' data to '${providerName}' (ceiling: ${decision.ceiling}). Raise the ceiling in Settings, Sensitivity policy or route through a local provider.`,
+    );
   }
+
+  /**
+   * Record a fresh re-auth for a given user + operation tag. Callers wire this
+   * into the passkey / password re-verify path immediately after success. The
+   * returned handle lets a test / debug tool inspect the deadline.
+   */
+  withReauthWindow(userId: string, opTag: string, windowMs = 300_000): { expiresAt: number } {
+    const now = Date.now();
+    const expiresAt = now + windowMs;
+    this.reauth.set(reauthKey(userId, opTag), expiresAt);
+    return { expiresAt };
+  }
+
+  /** True iff withReauthWindow(userId, opTag, ...) fired within its window. */
+  hasFreshReauth(userId: string, opTag: string): boolean {
+    const key = reauthKey(userId, opTag);
+    const expiresAt = this.reauth.get(key);
+    if (expiresAt == null) return false;
+    if (Date.now() >= expiresAt) {
+      // Drop stale entries opportunistically; Map stays small on a single-user host.
+      this.reauth.delete(key);
+      return false;
+    }
+    return true;
+  }
+
+  /** Test / debug helper — never called from prod code paths. */
+  _clearReauth(): void {
+    this.reauth.clear();
+  }
+}
+
+function reauthKey(userId: string, opTag: string): string {
+  return `${userId} ${opTag}`;
 }
