@@ -115,8 +115,10 @@ describe('SlackService.markEvent (dedupe)', () => {
     const svc = new SlackService();
     // Stub the internal redis client without needing a live Redis.
     const seen = new Map<string, string>();
-    (svc as unknown as { redis: { set: (...args: unknown[]) => Promise<string | null> } }).redis = {
-      set: async (key: string, _v: string, _ex: string, _ttl: number, mode: string) => {
+    (svc as unknown as {
+      redis: { set: (key: string, v: string, ex: string, ttl: number, mode: string) => Promise<'OK' | null> };
+    }).redis = {
+      set: async (key, _v, _ex, _ttl, mode) => {
         if (mode === 'NX' && seen.has(key)) return null;
         seen.set(key, '1');
         return 'OK';

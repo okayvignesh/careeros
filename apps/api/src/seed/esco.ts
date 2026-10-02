@@ -6,7 +6,7 @@
 // Ponytail: the "taxonomy" is a static JSON. No download, no ontology library,
 // no sync worker. Bump the JSON, re-run the script.
 
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, type Prisma } from '@prisma/client';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -46,8 +46,8 @@ export async function seedEsco(prisma: {
   skill: {
     upsert: (args: {
       where: { escoId: string };
-      create: Record<string, unknown>;
-      update: Record<string, unknown>;
+      create: Prisma.SkillCreateInput;
+      update: Prisma.SkillUpdateInput;
     }) => Promise<unknown>;
   };
 }): Promise<{ upserted: number }> {

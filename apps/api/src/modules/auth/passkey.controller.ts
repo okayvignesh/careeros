@@ -5,6 +5,7 @@ import { PasskeyService } from './passkey.service';
 import { SessionService } from './session.service';
 import { RateLimitAuth } from './throttle.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
+import { clientIp } from '../../common/client-ip';
 
 /**
  * C-P0.7: passkey endpoints. Register endpoints require an existing session;
@@ -89,14 +90,8 @@ export class PasskeyController {
   }
 }
 
-function requestIp(req: Request): string {
-  const fwd = req.headers['x-forwarded-for'];
-  if (typeof fwd === 'string' && fwd.length > 0) return fwd.split(',')[0].trim();
-  return req.ip ?? req.socket?.remoteAddress ?? 'unknown';
-}
-
 function requestMeta(req: Request): { ip: string; userAgent: string } {
-  return { ip: requestIp(req), userAgent: String(req.headers['user-agent'] ?? '').slice(0, 512) };
+  return { ip: clientIp(req), userAgent: String(req.headers['user-agent'] ?? '').slice(0, 512) };
 }
 
 async function audit(
@@ -115,7 +110,7 @@ async function audit(
         resourceType: 'passkey',
         resourceId: null,
         payload: (payload ?? undefined) as never,
-        ip: requestIp(req),
+        ip: clientIp(req),
         userAgent: String(req.headers['user-agent'] ?? '').slice(0, 512) || null,
       },
     })

@@ -348,7 +348,11 @@ function makeExtractPrismaMock(jobs: Array<ReturnType<typeof jobRow>>) {
       },
       auditEvent: {
         create: vi.fn(async ({ data }: { data: { action: string; payload: Record<string, unknown>; resourceId?: string } }) => {
-          audits.push({ action: data.action, payload: data.payload, resourceId: data.resourceId });
+          audits.push({
+            action: data.action,
+            payload: data.payload,
+            ...(data.resourceId === undefined ? {} : { resourceId: data.resourceId }),
+          });
           return {};
         }),
       },

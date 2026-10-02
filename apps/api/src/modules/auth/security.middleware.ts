@@ -1,5 +1,6 @@
 import { Injectable, NestMiddleware } from '@nestjs/common';
 import type { NextFunction, Request, Response } from 'express';
+import { clientIp } from '../../common/client-ip';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   CSRF_COOKIE_NAME,
@@ -111,7 +112,7 @@ export class SecurityMiddleware implements NestMiddleware {
           resourceType: 'request',
           resourceId: `${req.method} ${req.path}`,
           payload: { reason, detail: detail ?? null },
-          ip: req.ip ?? null,
+          ip: clientIp(req) || null,
           userAgent: String(req.headers['user-agent'] ?? '').slice(0, 512) || null,
         },
       });

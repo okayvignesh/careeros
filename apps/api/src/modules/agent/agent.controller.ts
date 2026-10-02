@@ -13,6 +13,7 @@ import {
 import { Throttle } from '@nestjs/throttler';
 import type { Request } from 'express';
 import { PrismaService } from '../../prisma/prisma.service';
+import { clientIp } from '../../common/client-ip';
 import { SessionService } from '../auth/session.service';
 import { AgentService } from './agent.service';
 import { AgentJwtGuard } from './agent.jwt-strategy';
@@ -215,12 +216,6 @@ export class AgentController {
   }
 }
 
-function requestIp(req: Request): string {
-  const fwd = req.headers['x-forwarded-for'];
-  if (typeof fwd === 'string' && fwd.length > 0) return fwd.split(',')[0].trim();
-  return req.ip ?? req.socket?.remoteAddress ?? 'unknown';
-}
-
 async function audit(
   prisma: PrismaService,
   userId: string | null,
@@ -237,7 +232,7 @@ async function audit(
         resourceType: 'agent_device',
         resourceId: null,
         payload: (payload ?? undefined) as never,
-        ip: requestIp(req),
+        ip: clientIp(req),
         userAgent: String(req.headers['user-agent'] ?? '').slice(0, 512) || null,
       },
     })

@@ -354,3 +354,14 @@ A phase is done only when **all** of the following are true (also in `plan/PLAN.
 ---
 
 *Living document. Updated whenever architecture, conventions, or non-negotiable rules change. Last section (parked questions) is the only place stale info is expected — resolve or delete each one.*
+
+<!-- codebase-knowledge-base:start -->
+## Knowledge base — keep it in sync
+
+This repository has an AI-readable knowledge base at [`docs/codebase/`](docs/codebase/README.md).
+
+- **Discovery entrypoint:** [`docs/codebase/llms.txt`](docs/codebase/llms.txt) · **compact brief:** [`docs/codebase/AI_CONTEXT.md`](docs/codebase/AI_CONTEXT.md) · **machine manifest:** [`docs/codebase/codebase.index.json`](docs/codebase/codebase.index.json).
+- **Whenever you change code, config, dependencies, architecture, or conventions, you MUST update the affected `docs/codebase/*.md` in the same change.** If the change is broad, re-run the `codebase-knowledge-base` skill.
+- Treat `docs/codebase/` as reviewed source, not generated output: include it in the PR and review it like code.
+- Do not delete this section; it is maintained in place by `codebase-knowledge-base`.
+<!-- codebase-knowledge-base:end -->

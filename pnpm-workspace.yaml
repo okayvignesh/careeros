@@ -2,11 +2,11 @@ packages:
   - 'apps/*'
   - 'packages/*'
 
-# No overrides needed: both A-H7 (multer ^2.4.0) and B-11 (postcss ^8.5.18)
-# pins live as direct deps in apps/api/package.json and apps/web/package.json
-# respectively, so pnpm resolves them there without an overrides block.
+# A-H7 (multer ^2.4.0) and B-11 (postcss ^8.5.18) are pinned as direct deps in
+# apps/api/package.json and apps/web/package.json, and enforced for transitive
+# dependents via `pnpm.overrides` in the root package.json.
 #
-# Do NOT re-add `pnpm.overrides` to root package.json (task #14): pnpm 9.12
-# ignores that field and prints a WARN on every command (commit 75b3a1f
-# already dropped it once). If a new transitive pin is ever required, add it
-# here under `overrides:` per https://pnpm.io/settings, not in package.json.
+# Keep overrides in root package.json `pnpm.overrides`: pnpm 9.12 (the version
+# pinned by `packageManager`) reads that field with no warning. It does NOT read
+# an `overrides:` block from this file — workspace-level overrides are a pnpm
+# >=10 feature and are silently ignored by 9.12.

@@ -17,6 +17,7 @@
   "dependencies": {
     "@careeros/ai": "workspace:*",
     "@careeros/auth": "workspace:*",
+    "@careeros/email-parsers": "workspace:*",
     "@careeros/embeddings": "workspace:*",
     "@careeros/job-pipeline": "workspace:*",
     "@careeros/resume-render": "workspace:*",

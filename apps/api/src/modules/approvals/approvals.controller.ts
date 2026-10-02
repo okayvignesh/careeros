@@ -40,7 +40,12 @@ export class ApprovalsController {
     @Query('cursor') cursor?: string,
   ) {
     const userId = this.session.requireUserId(req);
-    return this.approvals.list({ userId, state, limit, cursor: cursor ?? null });
+    return this.approvals.list({
+      userId,
+      ...(state === undefined ? {} : { state }),
+      ...(limit === undefined ? {} : { limit }),
+      cursor: cursor ?? null,
+    });
   }
 
   @Get(':id')
@@ -64,7 +69,12 @@ export class ApprovalsController {
     @Req() req: Request,
   ) {
     const userId = this.session.requireUserId(req);
-    return this.approvals.cancel({ userId, itemId: id, reason: body?.reason });
+    const reason = body?.reason;
+    return this.approvals.cancel({
+      userId,
+      itemId: id,
+      ...(reason === undefined ? {} : { reason }),
+    });
   }
 
   /**

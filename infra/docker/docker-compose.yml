@@ -227,6 +227,17 @@ services:
         condition: service_healthy
       squid:
         condition: service_healthy
+    # security.md item 10: non-root UID (set in Dockerfile.worker), read-only
+    # rootfs with tmpfs for the dirs the node runtime needs to write, drop ALL
+    # Linux caps (worker binds no ports <1024), no-new-privileges. Dev compose
+    # override flips read_only off and runs as root for `tsx watch`.
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     networks:
       - internal
       - egress
@@ -245,6 +256,19 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    # security.md item 10: non-root UID (set in Dockerfile.web), read-only
+    # rootfs, drop ALL Linux caps (web binds 3000 only), no-new-privileges.
+    # Next.js `next start` needs a writable `.next/cache` (fetch cache + image
+    # optimizer); tmpfs roots are root-owned, so mode 1777 lets UID 1001 write.
+    # Dev override flips read_only off + runs as root for `next dev`.
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+      - /app/apps/web/.next/cache:size=128m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     networks:
       # web talks only to api; keep on egress side. If future web-side outbound
       # is required (e.g. server-side fetch to a CDN) it also routes via squid.

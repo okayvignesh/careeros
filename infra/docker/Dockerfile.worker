@@ -2,21 +2,31 @@
 FROM node:20-alpine
 
 RUN apk add --no-cache libc6-compat openssl wget
+
+# Non-root UID 1001:1001 (matches Dockerfile.api and MinIO's bitnami user).
+# Owns /app so install + prisma generate run as the same user the container
+# boots as; prod compose layers a read-only rootfs + tmpfs on top.
+RUN addgroup -g 1001 -S careeros \
+ && adduser -u 1001 -S careeros -G careeros -h /app -s /sbin/nologin
+
 RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
 
 WORKDIR /app
+RUN chown -R careeros:careeros /app
 
-COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml turbo.json tsconfig.base.json ./
-COPY apps/worker/package.json apps/worker/
-COPY apps/api/package.json apps/api/
-COPY packages/shared/package.json packages/shared/
-COPY packages/secrets/package.json packages/secrets/
-COPY packages/ai/package.json packages/ai/
-COPY packages/embeddings/package.json packages/embeddings/
+USER careeros
+
+COPY --chown=careeros:careeros package.json pnpm-lock.yaml* pnpm-workspace.yaml turbo.json tsconfig.base.json ./
+COPY --chown=careeros:careeros apps/worker/package.json apps/worker/
+COPY --chown=careeros:careeros apps/api/package.json apps/api/
+COPY --chown=careeros:careeros packages/shared/package.json packages/shared/
+COPY --chown=careeros:careeros packages/secrets/package.json packages/secrets/
+COPY --chown=careeros:careeros packages/ai/package.json packages/ai/
+COPY --chown=careeros:careeros packages/embeddings/package.json packages/embeddings/
 
 RUN pnpm install --frozen-lockfile || pnpm install
 
-COPY . .
+COPY --chown=careeros:careeros . .
 
 # Worker reads through the same Prisma client the api generates.
 RUN pnpm --filter @careeros/api prisma generate

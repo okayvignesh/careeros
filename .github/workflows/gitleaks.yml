@@ -18,12 +18,12 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           # PR + push: shallow is fine. Scheduled: fetch full history.
           fetch-depth: ${{ github.event_name == 'schedule' && '0' || '1' }}
 
-      - uses: gitleaks/gitleaks-action@v2
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # If/when we add a license, set GITLEAKS_LICENSE for the org-wide

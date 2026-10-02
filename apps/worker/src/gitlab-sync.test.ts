@@ -87,13 +87,15 @@ function fakePrisma(): FakePrisma {
       findUnique: async () => ({ id: 'sec-1', ciphertext }),
     },
     evidence: {
-      create: async ({ data }: { data: Record<string, unknown> }) => {
+      create: async (args: unknown) => {
+        const { data } = args as { data: Record<string, unknown> };
         evidenceCreates.push(data);
         return data;
       },
       // Aggregator queries the persisted rows. Return the ones we captured
       // during this test run for the matching (userId, skillId).
-      findMany: async ({ where }: { where: { userId: string; skillId: string } }) => {
+      findMany: async (args: unknown) => {
+        const { where } = args as { where: { userId: string; skillId: string } };
         return evidenceCreates
           .filter(
             (e) => e.userId === where.userId && e.skillId === where.skillId,

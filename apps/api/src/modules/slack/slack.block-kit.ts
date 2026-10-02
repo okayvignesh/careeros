@@ -59,6 +59,7 @@ export function dailyBriefBlock(input: DailyBriefInput): SlackMessage {
       { type: 'header', text: { type: 'plain_text', text: 'Daily brief', emoji: true } },
       {
         type: 'section',
+        text: { type: 'mrkdwn', text: 'Daily brief' },
         fields: [
           { type: 'mrkdwn', text: `*Level*\n${input.levelLabel}` },
           { type: 'mrkdwn', text: `*Streak*\n${input.streakDays}d` },

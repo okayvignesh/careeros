@@ -24,6 +24,7 @@
 // Pattern mirrors apps/worker/src/audit-log-retention.worker.ts: pino
 // structured log is the audit surface, BullMQ repeatable job runs it.
 
+import type { Prisma } from '@prisma/client';
 import type { AllowlistEntry } from '@careeros/browser-agent';
 
 export const QUEUE_SELECTOR_HEALTH = 'selector-health';
@@ -33,12 +34,12 @@ export const SELECTOR_HEALTH_CRON = '0 5 * * 1'; // 05:00 UTC Mondays
 /** Narrowed Prisma shape — matches the pattern in audit-log-retention. */
 export interface SelectorHealthRepo {
   auditEvent: {
-    create: (args: { data: Record<string, unknown> }) => Promise<unknown>;
+    create: (args: { data: Prisma.AuditEventUncheckedCreateInput }) => Promise<unknown>;
   };
   application: {
     updateMany: (args: {
-      where: Record<string, unknown>;
-      data: Record<string, unknown>;
+      where: Prisma.ApplicationWhereInput;
+      data: Prisma.ApplicationUpdateManyMutationInput;
     }) => Promise<{ count: number }>;
   };
 }

@@ -1,6 +1,13 @@
-import { HttpException, HttpStatus, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  HttpException,
+  HttpStatus,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { hashPassword, verifyPassword } from '@careeros/auth';
 import { PrismaService } from '../../prisma/prisma.service';
+import { FIRST_ACCOUNT_ADVISORY_KEY } from '../../common/advisory-locks';
 
 /**
  * A-C1: exponential lockout after repeated failed sign-ins on the same
@@ -29,16 +36,28 @@ export class LockoutError extends HttpException {
 export class AuthService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * Single-user rule: only allowed when no user exists yet. The count + insert
+   * run in one transaction serialized by FIRST_ACCOUNT_ADVISORY_KEY so two
+   * concurrent sign-ups cannot both pass the check and create a user.
+   */
   async createUser(email: string, password: string, displayName?: string) {
-    const passwordHash = await hashPassword(password);
-    return this.prisma.user.create({
-      data: {
-        email: normalizeEmail(email),
-        displayName: displayName ?? null,
-        passwordHash,
-        setupState: { create: { state: 'account_created' } },
-      },
-      select: { id: true, email: true, displayName: true },
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${FIRST_ACCOUNT_ADVISORY_KEY})`;
+      const existing = await tx.user.count();
+      if (existing > 0) {
+        throw new ForbiddenException('Account already exists. Sign in instead.');
+      }
+      const passwordHash = await hashPassword(password);
+      return tx.user.create({
+        data: {
+          email: normalizeEmail(email),
+          displayName: displayName ?? null,
+          passwordHash,
+          setupState: { create: { state: 'account_created' } },
+        },
+        select: { id: true, email: true, displayName: true },
+      });
     });
   }
 
@@ -100,10 +119,6 @@ export class AuthService {
     }
     await this.recordAttempt(normalized, ip, true);
     return { id: user.id, email: user.email };
-  }
-
-  async userCount(): Promise<number> {
-    return this.prisma.user.count();
   }
 
   /** A-H3: change password. Verifies old password, writes new hash, and

@@ -4,6 +4,7 @@
 import { HttpException } from '@nestjs/common';
 import { createHmac } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SessionService } from '../auth/session.service';
 import { SlackController } from './slack.controller';
 import { SlackService } from './slack.service';
 import { SlackOAuthService } from './slack.oauth';
@@ -24,7 +25,7 @@ function fakeReq(rawBody: string, sig?: string, ts?: string) {
   } as unknown as Parameters<SlackController['events']>[0];
 }
 
-function buildController() {
+function buildController(session: SessionService = fakeSession('u-1')) {
   const slack = new SlackService();
   // Stub redis so markEvent is deterministic without a live instance.
   const seen = new Set<string>();
@@ -38,7 +39,21 @@ function buildController() {
   };
   (slack as unknown as { redis: typeof stub }).redis = stub;
   const oauth = { completeInstall: vi.fn(), loadBotToken: vi.fn() } as unknown as SlackOAuthService;
-  return new SlackController(slack, oauth);
+  return new SlackController(slack, oauth, session);
+}
+
+/** Sealed-session double: `read` returns a session only when a userId is set. */
+function fakeSession(userId: string | null): SessionService {
+  return {
+    read: () =>
+      userId
+        ? { userId, sessionId: 's-1', createdAt: 0, expiresAt: Date.now() + 60_000 }
+        : null,
+    requireUserId: () => {
+      if (!userId) throw new Error('not signed in');
+      return userId;
+    },
+  } as unknown as SessionService;
 }
 
 beforeAll(() => {
@@ -144,30 +159,118 @@ describe('SlackController.interactive', () => {
   });
 });
 
+const OAUTH_REDIRECT = 'https://api.test/webhooks/slack/oauth/callback';
+
+/** Controller wired with a stateful in-memory Redis double so the real
+ * create/consume state path runs end-to-end without a live Redis. */
+function buildOauth(userId: string | null = 'u-owner') {
+  process.env.SLACK_OAUTH_REDIRECT_URI = OAUTH_REDIRECT;
+  const slack = new SlackService();
+  const stateStore = new Map<string, string>();
+  const stub = {
+    set: async (...args: unknown[]) => {
+      const [k, v] = args as [string, string];
+      stateStore.set(k, v);
+      return 'OK';
+    },
+    getdel: async (k: string) => {
+      const v = stateStore.get(k) ?? null;
+      stateStore.delete(k);
+      return v;
+    },
+  };
+  (slack as unknown as { redis: typeof stub }).redis = stub;
+  const oauth = {
+    completeInstall: vi.fn().mockResolvedValue({
+      ok: true,
+      teamId: 'T1',
+      teamName: 'Test',
+      botUserId: 'B1',
+      appId: 'A1',
+      scopes: ['chat:write'],
+    }),
+    loadBotToken: vi.fn(),
+  } as unknown as SlackOAuthService;
+  return { ctrl: new SlackController(slack, oauth, fakeSession(userId)), slack, oauth };
+}
+
+describe('SlackController.oauthStart', () => {
+  it('requires an authenticated session', async () => {
+    const { ctrl } = buildOauth(null);
+    await expect(ctrl.oauthStart(fakeReq(''))).rejects.toBeDefined();
+  });
+
+  it('returns a Slack authorize URL carrying a user-bound one-time state', async () => {
+    process.env.SLACK_CLIENT_ID = 'client_1';
+    const { ctrl, slack } = buildOauth('u-owner');
+    const { url } = await ctrl.oauthStart(fakeReq(''));
+    expect(url).toContain('https://slack.com/oauth/v2/authorize');
+    const state = new URL(url).searchParams.get('state');
+    expect(state).toBeTruthy();
+    expect(await slack.consumeOAuthState(state as string, 'u-owner')).toBe(true);
+    // one-time-use: a second consume fails
+    expect(await slack.consumeOAuthState(state as string, 'u-owner')).toBe(false);
+  });
+});
+
 describe('SlackController.oauthCallback', () => {
   it('rejects when code is missing', async () => {
-    const ctrl = buildController();
-    await expect(ctrl.oauthCallback(undefined, 'https://x/y')).rejects.toMatchObject({
+    const { ctrl, slack } = buildOauth();
+    const state = await slack.createOAuthState('u-owner');
+    await expect(ctrl.oauthCallback(undefined, state, fakeReq(''))).rejects.toMatchObject({
       status: 400,
     });
   });
 
-  it('delegates to SlackOAuthService.completeInstall on success', async () => {
-    const slack = new SlackService();
-    const oauth = {
-      completeInstall: vi.fn().mockResolvedValue({
-        ok: true,
-        teamId: 'T1',
-        teamName: 'Test',
-        botUserId: 'B1',
-        appId: 'A1',
-        scopes: ['chat:write'],
-      }),
-      loadBotToken: vi.fn(),
-    } as unknown as SlackOAuthService;
-    const ctrl = new SlackController(slack, oauth);
-    const res = await ctrl.oauthCallback('code_123', 'https://x/y');
+  it('rejects when state is missing', async () => {
+    const { ctrl } = buildOauth();
+    await expect(ctrl.oauthCallback('code_123', undefined, fakeReq(''))).rejects.toMatchObject({
+      status: 400,
+    });
+  });
+
+  it('rejects when there is no authenticated session', async () => {
+    const { ctrl, slack } = buildOauth(null);
+    const state = await slack.createOAuthState('u-owner');
+    await expect(ctrl.oauthCallback('code_123', state, fakeReq(''))).rejects.toMatchObject({
+      status: 400,
+    });
+  });
+
+  it('rejects a state minted for another user', async () => {
+    const { ctrl, slack, oauth } = buildOauth('u-attacker');
+    const state = await slack.createOAuthState('u-owner');
+    await expect(ctrl.oauthCallback('code_123', state, fakeReq(''))).rejects.toMatchObject({
+      status: 400,
+    });
+    expect(oauth.completeInstall).not.toHaveBeenCalled();
+  });
+
+  it('rejects an expired state', async () => {
+    const { ctrl, slack, oauth } = buildOauth('u-owner');
+    // Mint the nonce 11 min ago (TTL is 10 min) so `expiresAt` is in the past.
+    const state = await slack.createOAuthState('u-owner', Date.now() - 11 * 60 * 1000);
+    await expect(ctrl.oauthCallback('code_123', state, fakeReq(''))).rejects.toMatchObject({
+      status: 400,
+    });
+    expect(oauth.completeInstall).not.toHaveBeenCalled();
+  });
+
+  it('accepts a valid state and pins the server-configured redirect_uri', async () => {
+    const { ctrl, slack, oauth } = buildOauth('u-owner');
+    const state = await slack.createOAuthState('u-owner');
+    const res = await ctrl.oauthCallback('code_123', state, fakeReq(''));
     expect(res).toMatchObject({ ok: true, team: { id: 'T1', name: 'Test' } });
-    expect(oauth.completeInstall).toHaveBeenCalledWith('code_123', 'https://x/y');
+    // Caller-supplied redirect_uri is never consulted; the registered env value is.
+    expect(oauth.completeInstall).toHaveBeenCalledWith('code_123', OAUTH_REDIRECT);
+  });
+
+  it('rejects replay of an already-consumed state', async () => {
+    const { ctrl, slack } = buildOauth('u-owner');
+    const state = await slack.createOAuthState('u-owner');
+    await ctrl.oauthCallback('code_123', state, fakeReq(''));
+    await expect(ctrl.oauthCallback('code_123', state, fakeReq(''))).rejects.toMatchObject({
+      status: 400,
+    });
   });
 });

@@ -1,0 +1,39 @@
+# Host-mode dev overlay. Loaded only by `pnpm docker:infra` on top of
+# docker-compose.yml; never part of the prod stack or `docker:up`.
+#
+# Datastores normally live on the `internal: true` network with no published
+# ports (A-H8). Host mode runs api/worker/web on the host (scripts/dev-host.sh)
+# so the host must be able to reach them: this overlay publishes each datastore
+# on 127.0.0.1 and drops the network's internal isolation. That trade is
+# deliberate for local dev and scoped to this file.
+services:
+  postgres:
+    ports:
+      - '127.0.0.1:5432:5432'
+
+  redis:
+    ports:
+      - '127.0.0.1:6379:6379'
+
+  qdrant:
+    ports:
+      - '127.0.0.1:6333:6333'
+      - '127.0.0.1:6334:6334'
+
+  minio:
+    ports:
+      - '127.0.0.1:9000:9000'
+      - '127.0.0.1:9001:9001'
+
+  # Squid stays on the egress network; host processes proxy through its
+  # published port (HTTP_PROXY=http://localhost:3128 set by dev-host.sh).
+  squid:
+    ports:
+      - '127.0.0.1:3128:3128'
+
+networks:
+  # Published ports are not reachable while the network is internal, so host-dev
+  # flips it off. Datastores remain unexposed to the LAN (ports bind to
+  # 127.0.0.1 above).
+  internal:
+    internal: false

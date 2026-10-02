@@ -30,7 +30,7 @@ describe('slash-command routing', () => {
   });
 
   it('/quiz -> assessment prompt (mock handler observes call)', async () => {
-    const mockQuiz = vi.fn(() => ({
+    const mockQuiz = vi.fn((_p: SlackSlashPayload) => ({
       text: 'quiz mock',
       blocks: [{ type: 'section' as const, text: { type: 'mrkdwn' as const, text: 'x' } }],
     }));

@@ -1,6 +1,8 @@
-import { Body, Controller, ForbiddenException, HttpCode, Post, Req, Res } from '@nestjs/common';
+import { Body, ConflictException, Controller, HttpCode, Post, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
+import { Prisma } from '@prisma/client';
 import { CreateAccountSchema, SignInSchema, type CreateAccountInput, type SignInInput } from '@careeros/shared';
+import { clientIp } from '../../common/client-ip';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import { AuthService } from './auth.service';
 import { SessionService } from './session.service';
@@ -21,14 +23,19 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    // Single-user rule for MVP: only allowed when no user exists yet.
-    const existing = await this.auth.userCount();
-    if (existing > 0) {
-      throw new ForbiddenException('Account already exists. Sign in instead.');
+    try {
+      // Single-user rule for MVP: createUser wraps the count + insert in one
+      // transaction behind the shared first-account advisory lock.
+      const user = await this.auth.createUser(body.email, body.password, body.displayName);
+      await this.session.write(res, user.id, requestMeta(req));
+      return { id: user.id, email: user.email };
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        // Never reveal which field collided (email-enumeration guard).
+        throw new ConflictException('Account already exists. Sign in instead.');
+      }
+      throw e;
     }
-    const user = await this.auth.createUser(body.email, body.password, body.displayName);
-    await this.session.write(res, user.id, requestMeta(req));
-    return { id: user.id, email: user.email };
   }
 
   @Post('sign-in')
@@ -39,7 +46,7 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const ip = requestIp(req);
+    const ip = clientIp(req);
     const user = await this.auth.verifyCredentialsWithLockout(body.email, body.password, ip);
     await this.session.write(res, user.id, requestMeta(req));
     return { id: user.id, email: user.email };
@@ -76,12 +83,6 @@ export class AuthController {
   }
 }
 
-function requestIp(req: Request): string {
-  const fwd = req.headers['x-forwarded-for'];
-  if (typeof fwd === 'string' && fwd.length > 0) return fwd.split(',')[0].trim();
-  return req.ip ?? req.socket?.remoteAddress ?? 'unknown';
-}
-
 function requestMeta(req: Request): { ip: string; userAgent: string } {
-  return { ip: requestIp(req), userAgent: String(req.headers['user-agent'] ?? '').slice(0, 512) };
+  return { ip: clientIp(req), userAgent: String(req.headers['user-agent'] ?? '').slice(0, 512) };
 }

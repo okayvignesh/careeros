@@ -20,7 +20,7 @@ function derive(secret: string): Buffer {
 export function seal(session: Session, secret: string): string {
   const key = derive(secret);
   const iv = randomBytes(IV_BYTES);
-  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  const cipher = createCipheriv('aes-256-gcm', key, iv, { authTagLength: TAG_BYTES });
   const plaintext = Buffer.from(JSON.stringify(session), 'utf8');
   const ct = Buffer.concat([cipher.update(plaintext), cipher.final()]);
   const tag = cipher.getAuthTag();
@@ -35,7 +35,7 @@ export function unseal(sealed: string, secret: string): Session | null {
     const iv = buf.subarray(0, IV_BYTES);
     const tag = buf.subarray(IV_BYTES, IV_BYTES + TAG_BYTES);
     const ct = buf.subarray(IV_BYTES + TAG_BYTES);
-    const decipher = createDecipheriv('aes-256-gcm', key, iv);
+    const decipher = createDecipheriv('aes-256-gcm', key, iv, { authTagLength: TAG_BYTES });
     decipher.setAuthTag(tag);
     const plaintext = Buffer.concat([decipher.update(ct), decipher.final()]).toString('utf8');
     const session = JSON.parse(plaintext) as Session;

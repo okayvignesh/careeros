@@ -13,6 +13,7 @@ import {
   type GithubConnectInput,
   type CareerGoalsInput,
 } from '@careeros/shared';
+import { clientIp } from '../../common/client-ip';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import { AuthService } from '../auth/auth.service';
 import { SessionService } from '../auth/session.service';
@@ -24,11 +25,8 @@ import { GoalsService } from '../goals/goals.service';
 import { RecoveryService } from '../recovery/recovery.service';
 import { HealthService, type HealthResponse } from '../health/health.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { FIRST_ACCOUNT_ADVISORY_KEY } from '../../common/advisory-locks';
 import { SetupService } from './setup.service';
-
-// A-M2: single global advisory lock key for the "create the first account"
-// transaction. Any concurrent POST /setup/account serializes on this.
-const SETUP_ACCOUNT_ADVISORY_KEY = 1;
 
 @Controller('setup')
 export class SetupController {
@@ -64,7 +62,7 @@ export class SetupController {
     // does NOT hint whether the email exists (enumeration guard).
     try {
       const user = await this.prisma.$transaction(async (tx) => {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(${SETUP_ACCOUNT_ADVISORY_KEY})`;
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(${FIRST_ACCOUNT_ADVISORY_KEY})`;
         const existing = await tx.user.count();
         if (existing > 0) {
           throw new ForbiddenException('Account already exists. Sign in instead.');
@@ -82,7 +80,7 @@ export class SetupController {
         });
       });
       await this.session.write(res, user.id, {
-        ip: (req.ip ?? 'unknown').toString(),
+        ip: clientIp(req),
         userAgent: String(req.headers['user-agent'] ?? '').slice(0, 512),
       });
       return { id: user.id, email: user.email };

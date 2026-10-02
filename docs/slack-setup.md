@@ -13,14 +13,24 @@ own Slack workspace, install the app into it once, done.
 
 ## 2. Install to workspace
 
-1. On the app page: **Settings -> Install App -> Install to Workspace**.
-2. Approve the requested bot scopes:
+The install must start from the API so it can mint the OAuth `state` nonce that
+protects the callback. A direct **Install to Workspace** from the Slack app page
+carries no state and is rejected.
+
+1. While signed in to Career OS, call `GET /webhooks/slack/oauth/start`. The
+   response is `{ "url": "https://slack.com/oauth/v2/authorize?..." }` carrying a
+   one-time `state` bound to your session.
+2. Open that URL and approve the requested bot scopes:
    - `chat:write` (post messages)
    - `commands` (slash commands)
    - `im:history`, `im:read`, `im:write` (direct-message channel)
-3. Slack will redirect to `https://<your-host>/webhooks/slack/oauth/callback?code=...`.
-   The API's OAuth handler exchanges the code and stores the bot token
-   encrypted in `encrypted_secrets` (purpose `integration:slack:bot_token`).
+3. Slack redirects to
+   `https://<your-host>/webhooks/slack/oauth/callback?code=...&state=...`. The
+   API requires your session plus the matching, unexpired, unused `state` before
+   it exchanges the code and stores the bot token encrypted in
+   `encrypted_secrets` (purpose `integration:slack:bot_token`). The
+   `redirect_uri` used in the exchange is always the server-configured
+   `SLACK_OAUTH_REDIRECT_URI`; a caller-supplied value is ignored.
 
 ## 3. Environment variables
 
@@ -47,17 +57,21 @@ daily-brief block. If Slack shows `dispatch_failed`, check the API logs for
 | `POST /webhooks/slack/events` | Events API (message, app_mention). URL-verification challenge handled inline. |
 | `POST /webhooks/slack/interactive` | Block Kit button + menu callbacks. |
 | `POST /webhooks/slack/commands` | The seven slash commands. |
-| `POST /webhooks/slack/oauth/callback` | OAuth completion redirect. |
+| `GET /webhooks/slack/oauth/start` | Auth-required. Mints a one-time OAuth `state`, returns the Slack authorize URL. |
+| `POST /webhooks/slack/oauth/callback` | OAuth completion. Requires session + matching, unexpired, one-time `state`. |
 
 ## 6. Security notes
 
-- Every inbound endpoint verifies `x-slack-signature` HMAC-SHA256 BEFORE
-  parsing the body. Requests with a bad signature return 401 with
-  `reason: bad_signature`.
+- Every Slack webhook endpoint (`events`, `interactive`, `commands`) verifies
+  `x-slack-signature` HMAC-SHA256 BEFORE parsing the body. Requests with a bad
+  signature return 401 with `reason: bad_signature`.
 - Timestamps outside +/- 5 minutes are rejected as `stale_timestamp` to
   block replay attacks.
 - `event_id` is deduped in Redis with a 24h TTL so Slack retries on our
   500s do not double-fire handlers.
+- Slack OAuth requires a signed-in session and a cryptographically random,
+  user-bound, one-time `state` nonce (Redis TTL 10 min, consumed with `GETDEL`).
+  Missing/mismatched/expired/replayed state is rejected with 400.
 - The bot token is stored under AES-GCM with the `ENCRYPTION_KEY` master
   key bound to `purpose = integration:slack:bot_token` as AAD.
 

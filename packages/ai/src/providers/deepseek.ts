@@ -5,7 +5,7 @@ import type {
   ProviderProbeResult,
 } from '../provider';
 import { ZodError, type z } from 'zod';
-import { assertPublicUrl, assertPublicUrlShape, safeFetch } from '@careeros/shared';
+import { assertPublicUrl, assertPublicUrlShape, safeFetch } from '@careeros/shared/net';
 import { LLMProviderError, StructuredOutputError } from '../errors';
 
 export interface LlmCallRecord {
@@ -87,7 +87,7 @@ export class DeepSeekProvider implements AIProvider {
         allowlist: this.allowlist,
       }).then(() => undefined);
     }
-    return this.baseUrlValidated;
+    await this.baseUrlValidated;
   }
 
   async chat({
@@ -282,7 +282,9 @@ export class DeepSeekProvider implements AIProvider {
     };
     if (signal) init.signal = signal;
     try {
-      const res = await fetch(`${this.base}/chat/completions`, init);
+      const res = await safeFetch(`${this.base}/chat/completions`, init, {
+        allowlist: this.allowlist,
+      });
       if (!res.ok || !res.body) throw new Error(`stream HTTP ${res.status}`);
       const reader = res.body.getReader();
       const decoder = new TextDecoder();

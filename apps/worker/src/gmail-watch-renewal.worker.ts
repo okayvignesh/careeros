@@ -63,7 +63,7 @@ export interface GmailRenewalRepo {
     findUnique: (args: { where: { id: string } }) => Promise<{ ciphertext: string } | null>;
   };
   auditEvent: {
-    create: (args: { data: Prisma.AuditEventCreateInput }) => Promise<unknown>;
+    create: (args: { data: Prisma.AuditEventUncheckedCreateInput }) => Promise<unknown>;
   };
 }
 

@@ -15,7 +15,7 @@
     "@careeros/secrets": "workspace:*",
     "@careeros/shared": "workspace:*",
     "@octokit/rest": "^21.1.0",
-    "@prisma/client": "^5.20.0",
+    "@prisma/client": "^6.19.3",
     "bullmq": "^5.13.0",
     "google-auth-library": "^9.15.0",
     "googleapis": "^144.0.0",

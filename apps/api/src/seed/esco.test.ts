@@ -82,7 +82,7 @@ describe('esco seed data', () => {
 
 describe('seedEsco', () => {
   it('upserts every row keyed by escoId', async () => {
-    const upsert = vi.fn(async () => ({}));
+    const upsert = vi.fn(async (_args: { where: { escoId: string } }) => ({}));
     const prisma = { skill: { upsert } };
 
     const { upserted } = await seedEsco(prisma);

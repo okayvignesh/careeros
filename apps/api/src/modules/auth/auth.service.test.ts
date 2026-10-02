@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { AuthService, LockoutError, lockoutSecondsFor, normalizeEmail } from './auth.service';
 
 // Argon2 verify path is mocked so the tests are fast + deterministic. The
@@ -246,5 +246,122 @@ describe('AuthService.changePassword (A-H3)', () => {
     };
     const svc = new AuthService(prisma as never);
     await expect(svc.changePassword('user-1', 'old', 'short')).rejects.toThrow(/short/i);
+  });
+});
+
+// --- A-C1/A-M2 single-user sign-up lock ---
+
+/**
+ * Emulates `pg_advisory_xact_lock`: the lock is held only while a transaction
+ * that called `$executeRaw` is running. If production drops the lock, both
+ * transactions overlap and both observe `count() === 0` → two users created.
+ */
+function advisoryLockPrisma(users: Array<{ id: string; email: string }>) {
+  let held = false;
+  const waiters: Array<() => void> = [];
+  const acquire = () =>
+    new Promise<void>((resolve) => {
+      if (!held) {
+        held = true;
+        resolve();
+        return;
+      }
+      waiters.push(() => {
+        held = true;
+        resolve();
+      });
+    });
+  const release = () => {
+    const next = waiters.shift();
+    if (next) next();
+    else held = false;
+  };
+
+  const base = {
+    user: {
+      count: async () => users.length,
+      create: async ({ data }: { data: { email: string } }) => {
+        const user = { id: `user-${users.length + 1}`, email: data.email };
+        users.push(user);
+        return user;
+      },
+    },
+  };
+
+  return {
+    users,
+    $transaction: async <T>(
+      fn: (tx: typeof base & { $executeRaw: () => Promise<void> }) => Promise<T>,
+    ): Promise<T> => {
+      let acquired = false;
+      const tx = {
+        ...base,
+        $executeRaw: async () => {
+          acquired = true;
+          await acquire();
+        },
+      };
+      try {
+        return await fn(tx);
+      } finally {
+        if (acquired) release();
+      }
+    },
+  };
+}
+
+describe('AuthService.createUser (single-user advisory lock)', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('serializes concurrent sign-ups so only the first user is created', async () => {
+    const prisma = advisoryLockPrisma([]);
+    const svc = new AuthService(prisma as never);
+    const results = await Promise.allSettled([
+      svc.createUser('a@b.com', 'pw-a-long-enough', 'A'),
+      svc.createUser('c@d.com', 'pw-c-long-enough', 'C'),
+    ]);
+    const fulfilled = results.filter((r) => r.status === 'fulfilled');
+    const rejected = results.filter((r) => r.status === 'rejected');
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(ForbiddenException);
+    expect(prisma.users).toHaveLength(1);
+    // MUTATION-SMOKE: remove the `$executeRaw(... pg_advisory_xact_lock ...)`
+    // line from AuthService.createUser and both transactions run concurrently
+    // → both see count=0 → `users` has 2 rows and this test fails.
+  });
+
+  it('acquires the shared first-account advisory lock inside the transaction', async () => {
+    const seen: string[] = [];
+    const users: Array<{ id: string; email: string }> = [];
+    const prisma = {
+      user: {
+        count: async () => users.length,
+        create: async ({ data }: { data: { email: string } }) => {
+          const u = { id: 'user-1', email: data.email };
+          users.push(u);
+          return u;
+        },
+      },
+      $transaction: async <T>(fn: (tx: unknown) => Promise<T>): Promise<T> =>
+        fn({
+          $executeRaw: async (parts: TemplateStringsArray) => {
+            seen.push(parts.join('?'));
+          },
+          user: {
+            count: async () => users.length,
+            create: async ({ data }: { data: { email: string } }) => {
+              const u = { id: 'user-1', email: data.email };
+              users.push(u);
+              return u;
+            },
+          },
+        }),
+    };
+    const svc = new AuthService(prisma as never);
+    await svc.createUser('a@b.com', 'pw-a-long-enough', 'A');
+    expect(seen[0]).toContain('pg_advisory_xact_lock');
   });
 });

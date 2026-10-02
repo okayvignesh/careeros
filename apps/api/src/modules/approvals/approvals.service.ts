@@ -37,7 +37,7 @@ export interface ApprovalItemDto {
   failedReason: string | null;
 }
 
-interface ListPage {
+export interface ListPage {
   items: ApprovalItemDto[];
   nextCursor: string | null;
 }

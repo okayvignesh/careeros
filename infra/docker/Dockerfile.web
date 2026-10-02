@@ -1,18 +1,27 @@
 FROM node:20-alpine
 
 RUN apk add --no-cache libc6-compat
+
+# Non-root UID 1001:1001 (matches Dockerfile.api). See Dockerfile.api for why
+# the dev image stays single-stage alpine; compose adds read-only + tmpfs.
+RUN addgroup -g 1001 -S careeros \
+ && adduser -u 1001 -S careeros -G careeros -h /app -s /sbin/nologin
+
 RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
 
 WORKDIR /app
+RUN chown -R careeros:careeros /app
 
-COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml turbo.json tsconfig.base.json ./
-COPY apps/web/package.json apps/web/
-COPY packages/shared/package.json packages/shared/
-COPY packages/ui/package.json packages/ui/
+USER careeros
+
+COPY --chown=careeros:careeros package.json pnpm-lock.yaml* pnpm-workspace.yaml turbo.json tsconfig.base.json ./
+COPY --chown=careeros:careeros apps/web/package.json apps/web/
+COPY --chown=careeros:careeros packages/shared/package.json packages/shared/
+COPY --chown=careeros:careeros packages/ui/package.json packages/ui/
 
 RUN pnpm install --frozen-lockfile || pnpm install
 
-COPY . .
+COPY --chown=careeros:careeros . .
 
 EXPOSE 3000
 

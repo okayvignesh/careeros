@@ -12,7 +12,16 @@
     "esModuleInterop": true,
     "jsx": "react",
     "types": ["node"],
-    "lib": ["ES2022", "DOM"]
+    "lib": ["ES2022", "DOM"],
+    "baseUrl": ".",
+    // This package intentionally stays on React 18 while the workspace hoists
+    // @types/react 19 for apps/web. @react-pdf/renderer's bundled .d.ts resolves
+    // `react` from the virtual-store hoist (19), producing two incompatible
+    // React.Component declarations. Pin type resolution to this package's
+    // React 18 types so the whole program compiles against one React.
+    "paths": {
+      "react": ["./node_modules/@types/react"]
+    }
   },
   "include": ["src/**/*"]
 }

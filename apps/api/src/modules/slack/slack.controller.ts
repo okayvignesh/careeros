@@ -6,12 +6,15 @@
 //   POST /webhooks/slack/events        - Events API (JSON)
 //   POST /webhooks/slack/interactive   - Interactive payloads (urlencoded)
 //   POST /webhooks/slack/commands      - Slash commands (urlencoded)
+//   GET  /webhooks/slack/oauth/start   - Begin install (auth required, state)
 //   POST /webhooks/slack/oauth/callback - OAuth completion (query string)
 //
 // ponytail: one controller. Slack could get its own module per endpoint but
 // four handlers in 150 lines is not a module split, it's four handlers.
 import {
+  BadRequestException,
   Controller,
+  Get,
   HttpCode,
   HttpException,
   HttpStatus,
@@ -21,6 +24,7 @@ import {
   Req,
 } from '@nestjs/common';
 import type { Request } from 'express';
+import { SessionService } from '../auth/session.service';
 import { SlackService } from './slack.service';
 import { SlackOAuthService } from './slack.oauth';
 import {
@@ -40,6 +44,7 @@ export class SlackController {
   constructor(
     private readonly slack: SlackService,
     private readonly oauth: SlackOAuthService,
+    private readonly session: SessionService,
   ) {}
 
   /**
@@ -103,32 +108,65 @@ export class SlackController {
   async commands(@Req() req: Request): Promise<SlackMessage> {
     this.verifyOrReject(req);
     const form = new URLSearchParams(this.rawString(req));
+    const triggerId = form.get('trigger_id');
+    const responseUrl = form.get('response_url');
     const payload: SlackSlashPayload = {
       command: (form.get('command') ?? '') as SlashCommand,
       text: form.get('text') ?? '',
       user_id: form.get('user_id') ?? '',
       channel_id: form.get('channel_id') ?? '',
       team_id: form.get('team_id') ?? '',
-      trigger_id: form.get('trigger_id') ?? undefined,
-      response_url: form.get('response_url') ?? undefined,
+      ...(triggerId === null ? {} : { trigger_id: triggerId }),
+      ...(responseUrl === null ? {} : { response_url: responseUrl }),
     };
     return dispatchSlash(payload);
   }
 
   /**
-   * OAuth completion. Slack redirects the operator's browser here with a
-   * `code`. NOT signature-verified (OAuth codes prove possession themselves).
+   * Begin the install. Auth-required: the caller is the operator's signed-in
+   * browser. Mints a one-time `state` bound to this user and returns the Slack
+   * authorize URL carrying it. The state is the CSRF defence for the callback.
+   */
+  @Get('oauth/start')
+  async oauthStart(@Req() req: Request): Promise<{ url: string }> {
+    const userId = this.session.requireUserId(req);
+    const clientId = process.env.SLACK_CLIENT_ID;
+    const redirectUri = process.env.SLACK_OAUTH_REDIRECT_URI;
+    if (!clientId || !redirectUri) {
+      throw new HttpException('slack oauth not configured', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+    const state = await this.slack.createOAuthState(userId);
+    const url = `https://slack.com/oauth/v2/authorize?${new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      state,
+    }).toString()}`;
+    return { url };
+  }
+
+  /**
+   * OAuth completion. NOT signature-verified - the `code` proves possession.
+   * Defence is session + one-time server-issued `state`: the caller must be
+   * signed in, hold the state minted for that same user, and not have replayed
+   * it. `redirect_uri` is always the server-configured registered value; the
+   * query param is ignored so an attacker cannot redirect the code exchange.
    */
   @Post('oauth/callback')
   @HttpCode(200)
   async oauthCallback(
     @Query('code') code: string | undefined,
-    @Query('redirect_uri') redirectUri: string | undefined,
+    @Query('state') state: string | undefined,
+    @Req() req: Request,
   ): Promise<Record<string, unknown>> {
-    if (!code) throw new HttpException('missing code', HttpStatus.BAD_REQUEST);
-    const target = redirectUri ?? process.env.SLACK_OAUTH_REDIRECT_URI ?? '';
-    if (!target) throw new HttpException('missing redirect_uri', HttpStatus.BAD_REQUEST);
-    const result = await this.oauth.completeInstall(code, target);
+    if (!code) throw new BadRequestException('missing code');
+    if (!state) throw new BadRequestException('missing state');
+    const session = this.session.read(req);
+    if (!session) throw new BadRequestException('oauth state mismatch');
+    const redirectUri = process.env.SLACK_OAUTH_REDIRECT_URI ?? '';
+    if (!redirectUri) throw new BadRequestException('missing redirect_uri');
+    const valid = await this.slack.consumeOAuthState(state, session.userId);
+    if (!valid) throw new BadRequestException('oauth state mismatch');
+    const result = await this.oauth.completeInstall(code, redirectUri);
     return { ok: true, team: { id: result.teamId, name: result.teamName }, scopes: result.scopes };
   }
 

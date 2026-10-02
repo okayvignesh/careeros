@@ -30,7 +30,8 @@
     "dev:host": "bash scripts/dev-host.sh",
     "migrate": "pnpm --filter @careeros/api prisma migrate deploy",
     "migrate:dev": "pnpm --filter @careeros/api prisma migrate dev",
-    "db:reset": "pnpm --filter @careeros/api prisma migrate reset --force"
+    "db:reset": "pnpm --filter @careeros/api prisma migrate reset --force",
+    "seed:test": "pnpm --filter @careeros/api exec ts-node --project tsconfig.json --transpile-only ../../scripts/seed-test.ts"
   },
   "devDependencies": {
     "cheerio": "^1.0.0",

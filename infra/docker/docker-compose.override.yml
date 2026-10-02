@@ -19,6 +19,11 @@ services:
     command: pnpm --filter @careeros/api dev
 
   worker:
+    # Dev needs root + writable rootfs: bind-mounted source is host-owned and
+    # `tsx watch` writes caches under /app; prod hardening lives in
+    # docker-compose.yml.
+    read_only: false
+    user: root
     volumes:
       - ../../apps/worker:/app/apps/worker
       - ../../apps/api:/app/apps/api
@@ -31,6 +36,11 @@ services:
   web:
     ports:
       - '3000:3000'
+    # Dev needs root + writable rootfs: bind-mounted source is host-owned and
+    # `next dev` writes .next + caches under /app; prod hardening lives in
+    # docker-compose.yml.
+    read_only: false
+    user: root
     volumes:
       - ../../apps/web:/app/apps/web
       - ../../packages:/app/packages

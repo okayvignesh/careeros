@@ -193,7 +193,7 @@ describe('InterviewPrepService.generateTalkTrack', () => {
             apiKeySecretId: 'sec-1',
             baseUrl: null,
           },
-          secret: { ciphertext: ct },
+          secret: { ciphertext: Buffer.from(ct, 'base64') },
         }),
         fakeUsage(),
         fakeUsageCache(),

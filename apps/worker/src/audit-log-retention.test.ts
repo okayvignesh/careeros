@@ -4,6 +4,7 @@ import {
   AUDIT_LOG_RETENTION_DAYS,
   handleAuditLogRetention,
   pruneAuditLog,
+  type AuditLogRetentionRepo,
 } from './audit-log-retention.worker';
 
 // F.6b unit test: the worker delegates to the SECURITY DEFINER stored proc
@@ -11,15 +12,15 @@ import {
 // shape + the pino log line. Integration test (append-only-integration.test.ts)
 // exercises the real proc against a Postgres testcontainer.
 
-function fakePrisma(returned: number | bigint) {
+function fakePrisma(returned: number | bigint): AuditLogRetentionRepo & { calls: string[] } {
   const calls: string[] = [];
-  return {
-    calls,
-    $queryRawUnsafe: async (sql: string) => {
-      calls.push(sql);
-      return [{ audit_log_retention_prune: returned }];
-    },
+  const $queryRawUnsafe: AuditLogRetentionRepo['$queryRawUnsafe'] = async <T,>(
+    sql: string,
+  ) => {
+    calls.push(sql);
+    return [{ audit_log_retention_prune: returned }] as T;
   };
+  return { calls, $queryRawUnsafe };
 }
 
 describe('F.6b pruneAuditLog', () => {

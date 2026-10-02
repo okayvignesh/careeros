@@ -9,7 +9,7 @@
 // ponytail: no @slack/bolt runtime. Hand-verify because Bolt ships its own HTTP
 // server (would collide with Nest) and the signing math is 20 lines.
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import Redis from 'ioredis';
 
 /**
@@ -32,6 +32,17 @@ export interface SlackVerifyResult {
 // The ceiling on replay-protection is 5 minutes per Slack's own guidance.
 const MAX_SKEW_SECONDS = 60 * 5;
 const DEDUPE_TTL_SECONDS = 60 * 60 * 24; // 24h per plan/phase-5.
+// OAuth CSRF nonce lifetime. The operator must finish the Slack consent screen
+// within this window; the nonce is one-time-use regardless.
+const OAUTH_STATE_TTL_SECONDS = 60 * 10;
+
+/** Server-side OAuth `state` payload. `userId` binds the nonce to the session
+ * that started the install; `expiresAt` is checked explicitly so expiry is
+ * deterministic and testable independent of Redis TTL. */
+export interface SlackOAuthState {
+  userId: string;
+  expiresAt: number;
+}
 
 @Injectable()
 export class SlackService implements OnModuleDestroy {
@@ -105,5 +116,59 @@ export class SlackService implements OnModuleDestroy {
       this.logger.warn(`dedupe fail-open (${(err as Error).message})`);
       return true;
     }
+  }
+
+  /**
+   * Issue a one-time OAuth `state` nonce bound to `userId`. Stored in Redis
+   * (existing transient-state store) under `slack:oauth:state:<nonce>` with a
+   * TTL, so an abandoned install self-cleans.
+   *
+   * Fails CLOSED: unlike event dedupe, a Redis outage must not mint a token the
+   * callback can never verify. No nonce => installer sees an error, not a
+   * silently unverifiable install.
+   */
+  async createOAuthState(userId: string, now: number = Date.now()): Promise<string> {
+    const state = randomBytes(32).toString('base64url');
+    const payload: SlackOAuthState = {
+      userId,
+      expiresAt: now + OAUTH_STATE_TTL_SECONDS * 1000,
+    };
+    try {
+      await this.redis.set(
+        `slack:oauth:state:${state}`,
+        JSON.stringify(payload),
+        'EX',
+        OAUTH_STATE_TTL_SECONDS,
+      );
+    } catch (err) {
+      this.logger.error(`oauth state store failed: ${(err as Error).message}`);
+      throw new Error('could not issue oauth state');
+    }
+    return state;
+  }
+
+  /**
+   * Consume an OAuth `state` nonce. `GETDEL` makes it one-time-use (replay of
+   * a captured callback fails). Returns true only when the nonce exists, was
+   * minted for `userId`, and has not expired. Fails CLOSED on Redis errors.
+   */
+  async consumeOAuthState(state: string, userId: string, now: number = Date.now()): Promise<boolean> {
+    const key = `slack:oauth:state:${state}`;
+    let raw: string | null;
+    try {
+      raw = await this.redis.getdel(key);
+    } catch (err) {
+      this.logger.warn(`oauth state read failed: ${(err as Error).message}`);
+      return false;
+    }
+    if (!raw) return false;
+    let parsed: SlackOAuthState;
+    try {
+      parsed = JSON.parse(raw) as SlackOAuthState;
+    } catch {
+      return false;
+    }
+    if (!parsed || parsed.userId !== userId || typeof parsed.expiresAt !== 'number') return false;
+    return parsed.expiresAt > now;
   }
 }

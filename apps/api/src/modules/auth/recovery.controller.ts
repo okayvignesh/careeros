@@ -1,6 +1,7 @@
 import { Body, Controller, ForbiddenException, HttpCode, Post, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { PrismaService } from '../../prisma/prisma.service';
+import { clientIp } from '../../common/client-ip';
 import { RecoveryCodesService } from './recovery.service';
 import { SessionService } from './session.service';
 import { RateLimitAuth } from './throttle.decorator';
@@ -75,14 +76,8 @@ function clampCount(n: unknown): number {
   return parsed;
 }
 
-function requestIp(req: Request): string {
-  const fwd = req.headers['x-forwarded-for'];
-  if (typeof fwd === 'string' && fwd.length > 0) return fwd.split(',')[0].trim();
-  return req.ip ?? req.socket?.remoteAddress ?? 'unknown';
-}
-
 function requestMeta(req: Request): { ip: string; userAgent: string } {
-  return { ip: requestIp(req), userAgent: String(req.headers['user-agent'] ?? '').slice(0, 512) };
+  return { ip: clientIp(req), userAgent: String(req.headers['user-agent'] ?? '').slice(0, 512) };
 }
 
 async function audit(
@@ -101,7 +96,7 @@ async function audit(
         resourceType: 'recovery_code',
         resourceId: null,
         payload: (payload ?? undefined) as never,
-        ip: requestIp(req),
+        ip: clientIp(req),
         userAgent: String(req.headers['user-agent'] ?? '').slice(0, 512) || null,
       },
     })
