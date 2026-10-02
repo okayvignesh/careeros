@@ -23,10 +23,14 @@ import { readFileSync } from 'node:fs';
 import { hostname, platform } from 'node:os';
 import { join } from 'node:path';
 import {
+  defaultAllowlistDir,
   isAgentPaused,
+  loadAllowlistDir,
   pauseAgent,
   resumeAgent,
   type AgentTask,
+  type AllowlistEntry,
+  type FormFillPayload,
 } from '@careeros/browser-agent';
 import { ApiClient } from './api-client';
 import { loadConfig } from './config';
@@ -35,7 +39,7 @@ import { applyProxy } from './proxy';
 import { startCleanupScheduler } from './screenshot-cleanup';
 import { startRotationScheduler } from './log-rotation';
 import { startUpdater } from './updater';
-import { TaskRunner } from './task-runner';
+import { TaskRunner, type TaskResult } from './task-runner';
 import { WssClient, type WssStatus } from './wss-client';
 
 const config = loadConfig();
@@ -45,6 +49,36 @@ let wss: WssClient | null = null;
 let tray: Tray | null = null;
 let pairWindow: BrowserWindow | null = null;
 let wssStatus: WssStatus = 'disconnected';
+let activeRunner: TaskRunner | null = null;
+
+// ponytail: allowlist loaded once at pair-time. Upgrade path: refresh on a
+// signal from the server (e.g. a 'allowlist-updated' WSS event) so operators
+// can roll new entries without a restart.
+let allowlistCache: Map<string, AllowlistEntry> | null = null;
+function getAllowlist(): Map<string, AllowlistEntry> {
+  if (!allowlistCache) {
+    try {
+      allowlistCache = loadAllowlistDir(defaultAllowlistDir());
+    } catch (err) {
+      console.warn(`allowlist: load failed (${(err as Error).message}); starting empty`);
+      allowlistCache = new Map();
+    }
+  }
+  return allowlistCache;
+}
+
+// ponytail: default payload is empty; the server embeds the real candidate
+// payload on `task.params.payload` per-task so the desktop never caches PII.
+// Upgrade path: pull from an authenticated /me endpoint on pair and cache in
+// the keychain when F.1 approvals need offline operation.
+const defaultPayload: FormFillPayload = {};
+
+function mapResultStatus(s: TaskResult['status']): 'completed' | 'failed' | 'timeout' {
+  if (s === 'ok') return 'completed';
+  // 'failed' | 'selector-broken' | 'killed' all surface as 'failed' at the
+  // Prisma status column; the resultJson carries the finer failureReason.
+  return 'failed';
+}
 
 function getKeychain(): Keychain {
   if (!keychain) keychain = createKeychain(config.keychainService);
@@ -86,7 +120,7 @@ function trayMenu(): Menu {
     { label: 'Pair device', click: () => createPairWindow() },
     paused
       ? { label: 'Resume', click: () => { resumeAgent(); refreshTray(); } }
-      : { label: 'Pause', click: () => { pauseAgent(); refreshTray(); } },
+      : { label: 'Pause', click: () => { pauseAgent(); activeRunner?.killMidTask(); refreshTray(); } },
     { type: 'separator' },
     { label: 'Quit', click: () => app.quit() },
   ]);
@@ -117,12 +151,21 @@ async function startWssIfPaired(): Promise<void> {
   if (!creds) return;
   const runner = new TaskRunner({
     isPaused: () => isAgentPaused(),
-    postResult: async (taskId, status, resultJson) => {
+    userDataDir: app.getPath('userData'),
+    allowlist: getAllowlist(),
+    payload: defaultPayload,
+    postResult: async (result) => {
       const latest = await getKeychain().load();
       if (!latest) throw new Error('no credentials to post result');
-      await api.postTaskResult(latest.jwt, taskId, status, resultJson);
+      await api.postTaskResult(
+        latest.jwt,
+        result.taskId,
+        mapResultStatus(result.status),
+        result,
+      );
     },
   });
+  activeRunner = runner;
   wss?.stop();
   wss = new WssClient({
     wssUrl: config.wssUrl,
@@ -173,8 +216,10 @@ ipcMain.handle('agent:status', async () => {
 });
 
 ipcMain.handle('agent:revoke', async () => {
+  activeRunner?.killMidTask();
   wss?.stop();
   wss = null;
+  activeRunner = null;
   await getKeychain().clear();
   refreshTray();
 });
@@ -208,5 +253,6 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  activeRunner?.killMidTask();
   wss?.stop();
 });

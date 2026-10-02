@@ -214,6 +214,9 @@ importers:
       keytar:
         specifier: ^7.9.0
         version: 7.9.0
+      playwright-core:
+        specifier: ^1.47.2
+        version: 1.63.0
       socket.io-client:
         specifier: ^4.7.5
         version: 4.8.4

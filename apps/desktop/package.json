@@ -19,6 +19,7 @@
     "@careeros/browser-agent": "workspace:*",
     "electron-updater": "^6.3.9",
     "keytar": "^7.9.0",
+    "playwright-core": "^1.47.2",
     "socket.io-client": "^4.7.5"
   },
   "devDependencies": {
