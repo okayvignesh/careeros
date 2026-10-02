@@ -29,7 +29,7 @@ import {
 // backlog:#74 - re-export so existing importers (apps/worker/src/main.ts)
 // keep resolving `GitlabSyncPayload` from this module.
 export type { GitlabSyncPayload };
-import { syncSkillState } from './aggregator.js';
+import { syncSkillState } from '@careeros/aggregator';
 import { GH_LANGUAGE_TO_SKILL } from './skills-seed.js';
 
 const KEY = loadMasterKey();

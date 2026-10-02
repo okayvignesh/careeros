@@ -25,7 +25,7 @@ vi.mock('@careeros/secrets', async () => {
   return { ...actual, decrypt: () => 'k', loadMasterKey: () => Buffer.alloc(32) };
 });
 
-vi.mock('../../common/aggregate-skill', () => ({
+vi.mock('@careeros/aggregator', () => ({
   syncSkillState: vi.fn(async () => ({
     state: { proficiency: 0, confidence: 0, recencyDays: 0, historicalDemonstrated: 0, evidenceCount: 0 },
     level: 1,

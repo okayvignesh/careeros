@@ -70,6 +70,7 @@ function buildService() {
     {} as never, // usageCache
     storage as never,
     logger,
+    {} as never,
   );
   return { svc, prisma, storage };
 }

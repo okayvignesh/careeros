@@ -110,6 +110,7 @@ function buildService(
     fakeUsage as never,
     fakeUsageCache as never,
     fakeSensitivity as never,
+    { loadProviderForUser: async () => null } as never,
   );
   (svc as unknown as { tryLoadProvider: (u: string) => Promise<unknown> }).tryLoadProvider = async () => provider;
   return svc;

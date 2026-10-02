@@ -23,7 +23,7 @@ import {
   type GithubSyncPayload,
   type KnownEmails,
 } from '@careeros/shared';
-import { syncSkillState } from './aggregator.js';
+import { syncSkillState } from '@careeros/aggregator';
 import { GH_LANGUAGE_TO_SKILL } from './skills-seed.js';
 
 const KEY = loadMasterKey();

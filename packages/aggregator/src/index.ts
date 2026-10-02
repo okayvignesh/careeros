@@ -1,9 +1,22 @@
-// Persistence glue: aggregate evidence[] for one (user, skill) into candidate_skill_state.
-// Also appends ONE skill_state_events row per sync summarising the before/after delta,
-// linked back to the most recent evidence that triggered the change. Per-evidence audit
-// can be reconstructed by re-running aggregate() over the evidence table if needed.
-import type { PrismaClient, Prisma } from '@prisma/client';
-import { aggregate, level, type Evidence, type EvidenceKind, type EvidenceSignal, type SkillState } from '@careeros/shared';
+// Persistence glue for the skill-state write path. Aggregates evidence[] for one
+// (user, skill) into candidate_skill_state and, when the state meaningfully
+// changes, appends one skill_state_events row capturing the before/after delta.
+//
+// AGENTS.md §3.9: every skill-state change must store the reason so users can
+// audit *why* proficiency or confidence moved. This package is the single
+// implementation of that invariant; apps/api and apps/worker both call it.
+//
+// Prisma enters through a type-only import so the compiled package has no
+// runtime coupling to the generated client.
+import type { Prisma, PrismaClient } from '@prisma/client';
+import {
+  aggregate,
+  level,
+  type Evidence,
+  type EvidenceKind,
+  type EvidenceSignal,
+  type SkillState,
+} from '@careeros/shared';
 
 export async function syncSkillState(
   prisma: PrismaClient,
@@ -60,8 +73,9 @@ export async function syncSkillState(
     },
   });
 
-  // Skip event insert when nothing meaningful changed. The "why" panel drowns in noops
-  // if every scheduled resync writes a row for a skill whose evidence hasn't shifted.
+  // Skip the event insert when nothing meaningful changed. The "why" panel
+  // drowns in noops if every scheduled resync writes a row for a skill whose
+  // evidence hasn't shifted.
   if (!stateChanged(before, state, derivedLevel, existing?.level ?? null)) {
     return { state, level: derivedLevel, before };
   }

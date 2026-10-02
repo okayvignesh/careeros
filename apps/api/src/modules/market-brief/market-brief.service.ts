@@ -9,16 +9,14 @@ import {
   wrapUntrusted,
   type FactCheckClaim,
 } from '@careeros/ai';
-import { decrypt, loadMasterKey } from '@careeros/secrets';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UsageService } from '../usage/usage.service';
 import { UsageCache } from '../usage/usage.cache';
 import { SensitivityGateService } from '../../common/sensitivity-gate.service';
-import { makeLlmAuditor } from '../../common/llm-audit';
+import { ProviderLoaderService } from '../../common/provider-loader.service';
 import { JobPreferencesService } from '../job-prefs/job-prefs.service';
 import { SnapshotService, type TrendDiff } from './snapshot.service';
 
-const KEY = loadMasterKey();
 const WINDOW_DAYS = 7;
 const DAY_MS = 86_400_000;
 const TOP_N = 10;
@@ -68,6 +66,7 @@ export class MarketBriefService {
     private readonly sensitivity: SensitivityGateService,
     private readonly prefs: JobPreferencesService,
     private readonly snapshots: SnapshotService,
+    private readonly providerLoader: ProviderLoaderService,
   ) {}
 
   async getLatest(userId: string): Promise<BriefDto | null> {
@@ -428,26 +427,11 @@ export class MarketBriefService {
       });
   }
 
-  /** Same shape as CorpusService / JobsService `tryLoadProvider`. */
+  /** Delegates to the shared provider loader; gates at `public`. */
   private async tryLoadProvider(userId: string): Promise<DeepSeekProvider | null> {
     try {
-      await this.usage.assertCallAllowed(userId);
-      const cfg = await this.prisma.providerConfig.findFirst({
-        where: { userId, isDefault: true },
-      });
-      if (!cfg || cfg.provider !== 'deepseek') return null;
-      await this.sensitivity.assertAllowed(cfg.provider, 'public', userId);
-      const secret = await this.prisma.encryptedSecret.findUnique({
-        where: { id: cfg.apiKeySecretId },
-      });
-      if (!secret) return null;
-      const apiKey = decrypt(secret.ciphertext, KEY, `provider:${cfg.provider}:apiKey`);
-      return new DeepSeekProvider({
-        apiKey,
-        baseUrl: cfg.baseUrl ?? undefined,
-        chatModel: cfg.chatModel,
-        onCall: makeLlmAuditor(this.prisma, userId, this.logger as never, this.usageCache),
-      });
+      const loaded = await this.providerLoader.loadProviderForUser(userId, 'public');
+      return loaded?.provider ?? null;
     } catch (err) {
       this.logger.warn(`market-brief: provider unavailable: ${(err as Error).message}`);
       return null;

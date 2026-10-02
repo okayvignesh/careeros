@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 //   allowlist check) — swap in a class with a mockable chatStructured.
 // - @careeros/secrets: decrypt is called with a real ciphertext buffer; return
 //   a fixed api key so the service reaches the provider stub.
-// - ../../common/aggregate-skill: pure DB-touching aggregator. Not what we're
+// - @careeros/aggregator: pure DB-touching aggregator. Not what we're
 //   testing here — the grader path is. Return a stable delta.
 // - ../../common/llm-audit: makeLlmAuditor writes to prisma.llmCall; noop.
 // -----------------------------------------------------------------------------
@@ -46,7 +46,7 @@ vi.mock('@careeros/secrets', async () => {
   };
 });
 
-vi.mock('../../common/aggregate-skill', () => ({
+vi.mock('@careeros/aggregator', () => ({
   syncSkillState: vi.fn(async () => ({
     state: { proficiency: 0.5, confidence: 0.5, recencyDays: 0, historicalDemonstrated: 1, evidenceCount: 1 },
     level: 2,

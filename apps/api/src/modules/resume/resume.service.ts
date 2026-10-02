@@ -1,14 +1,14 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
-import { DeepSeekProvider, InjectionBlockedError, renderPrompt, wrapUntrusted } from '@careeros/ai';
-import { decrypt, encryptField, loadMasterKey } from '@careeros/secrets';
+import { InjectionBlockedError, renderPrompt, wrapUntrusted } from '@careeros/ai';
+import { encryptField, loadMasterKey } from '@careeros/secrets';
 import { type ExtractedFacts } from '@careeros/shared';
 import mammoth from 'mammoth';
 import { extractText, getDocumentProxy } from 'unpdf';
 import { PrismaService } from '../../prisma/prisma.service';
-import { makeLlmAuditor } from '../../common/llm-audit';
 import { makeHallucinationLogger } from '../../common/hallucination-log';
 import { SensitivityGateService } from '../../common/sensitivity-gate.service';
+import { ProviderLoaderService } from '../../common/provider-loader.service';
 import { QueueService } from '../../common/queue.service';
 import {
   ForbiddenObjectAccessError,
@@ -45,6 +45,7 @@ export class ResumeService {
     private readonly usageCache: UsageCache,
     private readonly storage: StorageService,
     @InjectPinoLogger(ResumeService.name) private readonly logger: PinoLogger,
+    private readonly providerLoader: ProviderLoaderService,
   ) {}
 
   /**
@@ -176,27 +177,9 @@ export class ResumeService {
       throw err;
     }
 
-    await this.usage.assertCallAllowed(userId);
-    const cfg = await this.prisma.providerConfig.findFirst({
-      where: { userId, isDefault: true },
-    });
-    if (!cfg) throw new NotFoundException('No AI provider configured');
     // Resume text carries personal sensitivity by default. Gate blocks the call if the
     // configured provider's ceiling is below 'personal'.
-    await this.sensitivity.assertAllowed(cfg.provider, 'personal', userId);
-
-    const secret = await this.prisma.encryptedSecret.findUnique({
-      where: { id: cfg.apiKeySecretId },
-    });
-    if (!secret) throw new NotFoundException('Provider key missing');
-    const apiKey = decrypt(secret.ciphertext, KEY, `provider:${cfg.provider}:apiKey`);
-
-    const provider = new DeepSeekProvider({
-      apiKey,
-      baseUrl: cfg.baseUrl ?? undefined,
-      chatModel: cfg.chatModel,
-      onCall: makeLlmAuditor(this.prisma, userId, this.logger, this.usageCache),
-    });
+    const { provider } = await this.providerLoader.requireProviderForUser(userId, 'personal');
 
     const rendered = renderPrompt('resume-extract', { resume: wrapped.content });
 

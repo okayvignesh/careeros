@@ -4,7 +4,7 @@
  * Ensures Qdrant collections exist before accepting embedding jobs.
  */
 import Redis from 'ioredis';
-import { Queue, Worker, type ConnectionOptions } from 'bullmq';
+import { type ConnectionOptions } from 'bullmq';
 import { PrismaClient } from '@prisma/client';
 import pino from 'pino';
 import { QdrantStore } from '@careeros/embeddings';
@@ -68,6 +68,7 @@ import {
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { installEgressProxy } from '@careeros/shared/net';
+import { registerWorker } from './register-worker.js';
 
 const logger = pino({
   name: 'careeros-worker',
@@ -114,207 +115,129 @@ async function bootstrap() {
 
   await ensureCollections();
 
-  const githubWorker = new Worker<GithubSyncPayload>(
-    QUEUE_GITHUB,
-    async (job) => {
-      if (job.name !== 'sync') {
-        logger.warn({ name: job.name }, 'unknown github job name');
-        return { skipped: true };
-      }
-      return handleGithubSync(prisma, logger, job.data);
+  await registerWorker(
+    {
+      queue: QUEUE_GITHUB,
+      jobName: 'sync',
+      connection,
+      concurrency: 2,
+      handler: (data: GithubSyncPayload) => handleGithubSync(prisma, logger, data),
+      unknownJobNameMessage: 'unknown github job name',
+      failedMessage: 'job failed',
+      completed: { message: 'job completed', include: 'data' },
     },
-    { connection, concurrency: 2 },
+    logger,
   );
 
-  githubWorker.on('completed', (job) =>
-    logger.info({ id: job.id, name: job.name, data: job.data }, 'job completed'),
-  );
-  githubWorker.on('failed', (job, err) =>
-    logger.error({ id: job?.id, err: err.message }, 'job failed'),
-  );
-
-  const gitlabWorker = new Worker<GitlabSyncPayload>(
-    QUEUE_GITLAB,
-    async (job) => {
-      if (job.name !== 'sync') {
-        logger.warn({ name: job.name }, 'unknown gitlab job name');
-        return { skipped: true };
-      }
-      return handleGitlabSync(prisma, logger, job.data);
+  await registerWorker(
+    {
+      queue: QUEUE_GITLAB,
+      jobName: 'sync',
+      connection,
+      concurrency: 2,
+      handler: (data: GitlabSyncPayload) => handleGitlabSync(prisma, logger, data),
+      unknownJobNameMessage: 'unknown gitlab job name',
+      failedMessage: 'gitlab job failed',
+      completed: { message: 'gitlab job completed', include: 'data' },
     },
-    { connection, concurrency: 2 },
-  );
-  gitlabWorker.on('completed', (job) =>
-    logger.info({ id: job.id, name: job.name, data: job.data }, 'gitlab job completed'),
-  );
-  gitlabWorker.on('failed', (job, err) =>
-    logger.error({ id: job?.id, err: err.message }, 'gitlab job failed'),
+    logger,
   );
 
-  const embeddingWorker = new Worker<EmbeddingGeneratePayload>(
-    QUEUE_EMBEDDING,
-    async (job) => {
-      if (job.name !== 'generate') {
-        logger.warn({ name: job.name }, 'unknown embedding job name');
-        return { skipped: true };
-      }
-      return handleEmbeddingGenerate(qdrant, logger, job.data);
+  await registerWorker(
+    {
+      queue: QUEUE_EMBEDDING,
+      jobName: 'generate',
+      connection,
+      concurrency: 4,
+      handler: (data: EmbeddingGeneratePayload) => handleEmbeddingGenerate(qdrant, logger, data),
+      unknownJobNameMessage: 'unknown embedding job name',
+      failedMessage: 'embedding job failed',
+      completed: { message: 'embedding job completed', include: 'result' },
     },
-    { connection, concurrency: 4 },
-  );
-
-  embeddingWorker.on('completed', (job, result) =>
-    logger.info({ id: job.id, name: job.name, result }, 'embedding job completed'),
-  );
-  embeddingWorker.on('failed', (job, err) =>
-    logger.error({ id: job?.id, err: err.message }, 'embedding job failed'),
+    logger,
   );
 
   // A-M4: daily 30-day retention on llm_hallucination_log. Repeatable job
   // registered against a static jobId so a restart is idempotent (BullMQ
   // updates the schedule rather than stacking duplicates).
-  const retentionQueue = new Queue(QUEUE_RETENTION, { connection });
-  await retentionQueue.add(
-    JOB_HALLUCINATION_LOG_RETENTION,
-    {},
+  await registerWorker(
     {
-      jobId: `repeat:${JOB_HALLUCINATION_LOG_RETENTION}`,
-      repeat: { pattern: '17 3 * * *' }, // 03:17 UTC daily, off the top of the hour
-      removeOnComplete: { count: 30 },
-      removeOnFail: { count: 30 },
+      queue: QUEUE_RETENTION,
+      jobName: JOB_HALLUCINATION_LOG_RETENTION,
+      connection,
+      // 03:17 UTC daily, off the top of the hour
+      schedule: { pattern: '17 3 * * *' },
+      handler: () => handleHallucinationLogRetention(prisma, logger),
+      unknownJobNameMessage: 'unknown retention job name',
+      failedMessage: 'retention job failed',
     },
-  );
-  const retentionWorker = new Worker(
-    QUEUE_RETENTION,
-    async (job) => {
-      if (job.name !== JOB_HALLUCINATION_LOG_RETENTION) {
-        logger.warn({ name: job.name }, 'unknown retention job name');
-        return { skipped: true };
-      }
-      return handleHallucinationLogRetention(prisma, logger);
-    },
-    { connection, concurrency: 1 },
-  );
-  retentionWorker.on('failed', (job, err) =>
-    logger.error({ id: job?.id, err: err.message }, 'retention job failed'),
+    logger,
   );
 
   // C-P2.7d: weekly corpus refresh. Cron 04:00 UTC Sunday. Static jobId keeps
   // the schedule idempotent across restarts. The handler fetches every
   // registered adapter, dedupes by promptHash + embedding cosine, and inserts
   // survivors into `question_bank`.
-  const corpusQueue = new Queue(QUEUE_CORPUS_REFRESH, { connection });
-  await corpusQueue.add(
-    JOB_CORPUS_REFRESH,
-    {},
+  await registerWorker(
     {
-      jobId: `repeat:${JOB_CORPUS_REFRESH}`,
-      repeat: { pattern: CORPUS_REFRESH_CRON },
-      removeOnComplete: { count: 30 },
-      removeOnFail: { count: 30 },
+      queue: QUEUE_CORPUS_REFRESH,
+      jobName: JOB_CORPUS_REFRESH,
+      connection,
+      schedule: { pattern: CORPUS_REFRESH_CRON },
+      handler: () => handleCorpusRefresh(prisma, qdrant, logger),
+      unknownJobNameMessage: 'unknown corpus job name',
+      failedMessage: 'corpus refresh job failed',
     },
-  );
-  const corpusWorker = new Worker(
-    QUEUE_CORPUS_REFRESH,
-    async (job) => {
-      if (job.name !== JOB_CORPUS_REFRESH) {
-        logger.warn({ name: job.name }, 'unknown corpus job name');
-        return { skipped: true };
-      }
-      return handleCorpusRefresh(prisma, qdrant, logger);
-    },
-    { connection, concurrency: 1 },
-  );
-  corpusWorker.on('failed', (job, err) =>
-    logger.error({ id: job?.id, err: err.message }, 'corpus refresh job failed'),
+    logger,
   );
 
   // C-P3.4d: weekly market snapshot. Monday 06:00 UTC. Static jobId keeps the
   // schedule idempotent across restarts. Writes one shared-default row plus
   // one row per user with saved job preferences.
-  const snapshotQueue = new Queue(QUEUE_MARKET_SNAPSHOT, { connection });
-  await snapshotQueue.add(
-    JOB_MARKET_SNAPSHOT,
-    {},
+  await registerWorker(
     {
-      jobId: `repeat:${JOB_MARKET_SNAPSHOT}`,
-      repeat: { pattern: MARKET_SNAPSHOT_CRON },
-      removeOnComplete: { count: 30 },
-      removeOnFail: { count: 30 },
+      queue: QUEUE_MARKET_SNAPSHOT,
+      jobName: JOB_MARKET_SNAPSHOT,
+      connection,
+      schedule: { pattern: MARKET_SNAPSHOT_CRON },
+      handler: () => handleMarketSnapshot(prisma, logger),
+      unknownJobNameMessage: 'unknown market-snapshot job name',
+      failedMessage: 'market-snapshot job failed',
     },
-  );
-  const snapshotWorker = new Worker(
-    QUEUE_MARKET_SNAPSHOT,
-    async (job) => {
-      if (job.name !== JOB_MARKET_SNAPSHOT) {
-        logger.warn({ name: job.name }, 'unknown market-snapshot job name');
-        return { skipped: true };
-      }
-      return handleMarketSnapshot(prisma, logger);
-    },
-    { connection, concurrency: 1 },
-  );
-  snapshotWorker.on('failed', (job, err) =>
-    logger.error({ id: job?.id, err: err.message }, 'market-snapshot job failed'),
+    logger,
   );
 
   // F.6b: daily 365-day retention on `audit_log`. Cron 04:00 UTC. Calls the
   // SECURITY DEFINER stored proc `audit_log_retention_prune()` (see migration
   // 20261012000005). Static jobId keeps the schedule idempotent across worker
   // restarts.
-  const auditLogRetentionQueue = new Queue(QUEUE_AUDIT_LOG_RETENTION, { connection });
-  await auditLogRetentionQueue.add(
-    JOB_AUDIT_LOG_RETENTION,
-    {},
+  await registerWorker(
     {
-      jobId: `repeat:${JOB_AUDIT_LOG_RETENTION}`,
-      repeat: { pattern: AUDIT_LOG_RETENTION_CRON },
-      removeOnComplete: { count: 30 },
-      removeOnFail: { count: 30 },
+      queue: QUEUE_AUDIT_LOG_RETENTION,
+      jobName: JOB_AUDIT_LOG_RETENTION,
+      connection,
+      schedule: { pattern: AUDIT_LOG_RETENTION_CRON },
+      handler: () => handleAuditLogRetention(prisma, logger),
+      unknownJobNameMessage: 'unknown audit-log-retention job name',
+      failedMessage: 'audit-log-retention job failed',
     },
-  );
-  const auditLogRetentionWorker = new Worker(
-    QUEUE_AUDIT_LOG_RETENTION,
-    async (job) => {
-      if (job.name !== JOB_AUDIT_LOG_RETENTION) {
-        logger.warn({ name: job.name }, 'unknown audit-log-retention job name');
-        return { skipped: true };
-      }
-      return handleAuditLogRetention(prisma, logger);
-    },
-    { connection, concurrency: 1 },
-  );
-  auditLogRetentionWorker.on('failed', (job, err) =>
-    logger.error({ id: job?.id, err: err.message }, 'audit-log-retention job failed'),
+    logger,
   );
 
   // E.4d: daily 03:00 UTC Gmail watch renewal. Static jobId keeps the schedule
   // idempotent across restarts. Watches auto-expire 7d after users.watch, so
   // running daily with a 24h renewal window guarantees at-least-one attempt.
-  const gmailWatchQueue = new Queue(QUEUE_GMAIL_WATCH_RENEWAL, { connection });
-  await gmailWatchQueue.add(
-    JOB_GMAIL_WATCH_RENEWAL,
-    {},
+  await registerWorker(
     {
-      jobId: `repeat:${JOB_GMAIL_WATCH_RENEWAL}`,
-      repeat: { pattern: GMAIL_WATCH_RENEWAL_CRON },
-      removeOnComplete: { count: 30 },
-      removeOnFail: { count: 30 },
+      queue: QUEUE_GMAIL_WATCH_RENEWAL,
+      jobName: JOB_GMAIL_WATCH_RENEWAL,
+      connection,
+      schedule: { pattern: GMAIL_WATCH_RENEWAL_CRON },
+      handler: () => handleGmailWatchRenewal(prisma, logger),
+      unknownJobNameMessage: 'unknown gmail-watch-renewal job name',
+      failedMessage: 'gmail-watch-renewal job failed',
     },
-  );
-  const gmailWatchWorker = new Worker(
-    QUEUE_GMAIL_WATCH_RENEWAL,
-    async (job) => {
-      if (job.name !== JOB_GMAIL_WATCH_RENEWAL) {
-        logger.warn({ name: job.name }, 'unknown gmail-watch-renewal job name');
-        return { skipped: true };
-      }
-      return handleGmailWatchRenewal(prisma, logger);
-    },
-    { connection, concurrency: 1 },
-  );
-  gmailWatchWorker.on('failed', (job, err) =>
-    logger.error({ id: job?.id, err: err.message }, 'gmail-watch-renewal job failed'),
+    logger,
   );
 
   // F.3: weekly selector-health probe (05:00 UTC Monday). Walks every entry
@@ -356,35 +279,18 @@ async function bootstrap() {
     return { domain: r.domain, healthy: r.healthy, missing: r.missing, drifted: r.drifted };
   };
 
-  const selectorHealthQueue = new Queue(QUEUE_SELECTOR_HEALTH, { connection });
-  await selectorHealthQueue.add(
-    JOB_SELECTOR_HEALTH,
-    {},
+  await registerWorker(
     {
-      jobId: `repeat:${JOB_SELECTOR_HEALTH}`,
-      repeat: { pattern: SELECTOR_HEALTH_CRON },
-      removeOnComplete: { count: 30 },
-      removeOnFail: { count: 30 },
+      queue: QUEUE_SELECTOR_HEALTH,
+      jobName: JOB_SELECTOR_HEALTH,
+      connection,
+      schedule: { pattern: SELECTOR_HEALTH_CRON },
+      handler: () =>
+        handleSelectorHealth([...allowlistEntries.values()], probeFromFixture, prisma, logger),
+      unknownJobNameMessage: 'unknown selector-health job name',
+      failedMessage: 'selector-health job failed',
     },
-  );
-  const selectorHealthWorker = new Worker(
-    QUEUE_SELECTOR_HEALTH,
-    async (job) => {
-      if (job.name !== JOB_SELECTOR_HEALTH) {
-        logger.warn({ name: job.name }, 'unknown selector-health job name');
-        return { skipped: true };
-      }
-      return handleSelectorHealth(
-        [...allowlistEntries.values()],
-        probeFromFixture,
-        prisma,
-        logger,
-      );
-    },
-    { connection, concurrency: 1 },
-  );
-  selectorHealthWorker.on('failed', (job, err) =>
-    logger.error({ id: job?.id, err: err.message }, 'selector-health job failed'),
+    logger,
   );
 
   logger.info(

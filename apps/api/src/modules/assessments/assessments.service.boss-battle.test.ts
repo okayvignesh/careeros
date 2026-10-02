@@ -34,7 +34,7 @@ vi.mock('@careeros/secrets', async () => {
   };
 });
 
-vi.mock('../../common/aggregate-skill', () => ({
+vi.mock('@careeros/aggregator', () => ({
   syncSkillState: vi.fn(async () => ({
     state: { proficiency: 0.5, confidence: 0.5, recencyDays: 0, historicalDemonstrated: 1, evidenceCount: 1 },
     level: 2,

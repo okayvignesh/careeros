@@ -2,7 +2,7 @@
 // aggregation math, state transitions, dedup, or evidence pruning. That logic
 // lives in packages/shared/src/knowledge-rules.ts (aggregation + level bands,
 // tested in knowledge-rules.test.ts + knowledge-rules.property.test.ts) and in
-// apps/worker/src/aggregator.ts (persistence glue). Dedup + pruning are not
+// packages/aggregator/src/index.ts (persistence glue). Dedup + pruning are not
 // implemented anywhere in the tree yet. See the report for scope reconciliation.
 //
 // These tests cover the mapping + left-join contract this service actually owns:

@@ -4,6 +4,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { StorageModule } from './common/storage.module';
 import { QueueModule } from './common/queue.module';
 import { SensitivityGateModule } from './common/sensitivity-gate.module';
+import { ProviderLoaderModule } from './common/provider-loader.module';
 import { MetricsModule } from './common/metrics/metrics.module';
 import { HttpMetricsMiddleware } from './common/metrics/http-metrics.middleware';
 import {
@@ -82,6 +83,7 @@ const loggerParams: Params = {
     StorageModule,
     QueueModule,
     SensitivityGateModule,
+    ProviderLoaderModule,
     MetricsModule,
     AuthModule,
     ProvidersModule,

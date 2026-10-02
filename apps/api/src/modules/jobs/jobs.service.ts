@@ -2,7 +2,6 @@ import { BadRequestException, Injectable, Logger, NotFoundException } from '@nes
 import { Prisma } from '@prisma/client';
 import { matchScoreForJob, type JobSkillExtraction, type MatchResult } from '@careeros/shared';
 import { DeepSeekProvider, InjectionBlockedError, renderPrompt, wrapUntrusted } from '@careeros/ai';
-import { decrypt, loadMasterKey } from '@careeros/secrets';
 import {
   adapters as allAdapters,
   normalize,
@@ -16,10 +15,8 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { UsageService } from '../usage/usage.service';
 import { UsageCache } from '../usage/usage.cache';
 import { SensitivityGateService } from '../../common/sensitivity-gate.service';
-import { makeLlmAuditor } from '../../common/llm-audit';
+import { ProviderLoaderService } from '../../common/provider-loader.service';
 import { JobPreferencesService } from '../job-prefs/job-prefs.service';
-
-const KEY = loadMasterKey();
 
 export interface JobsSyncStats {
   adapter: string;
@@ -89,6 +86,7 @@ export class JobsService {
     private readonly usageCache: UsageCache,
     private readonly sensitivity: SensitivityGateService,
     private readonly prefs: JobPreferencesService,
+    private readonly providerLoader: ProviderLoaderService,
   ) {}
 
   listAdapters() {
@@ -532,30 +530,15 @@ export class JobsService {
   }
 
   /**
-   * Same shape as `CorpusService.tryLoadProvider` — gates at `public`
-   * sensitivity, returns null on any failure so callers can decide what to do.
-   * Kept inline pending a third caller that would justify extracting a shared
-   * `packages/ai/tryLoadUserProvider` helper.
+   * Gates at `public` sensitivity; returns null on any failure so callers can
+   * decide what to do. The budget/config/gate/decrypt sequence lives in
+   * `ProviderLoaderService`; this wrapper only keeps the jobs-specific log and
+   * null handling.
    */
   private async tryLoadProvider(userId: string): Promise<DeepSeekProvider | null> {
     try {
-      await this.usage.assertCallAllowed(userId);
-      const cfg = await this.prisma.providerConfig.findFirst({
-        where: { userId, isDefault: true },
-      });
-      if (!cfg || cfg.provider !== 'deepseek') return null;
-      await this.sensitivity.assertAllowed(cfg.provider, 'public', userId);
-      const secret = await this.prisma.encryptedSecret.findUnique({
-        where: { id: cfg.apiKeySecretId },
-      });
-      if (!secret) return null;
-      const apiKey = decrypt(secret.ciphertext, KEY, `provider:${cfg.provider}:apiKey`);
-      return new DeepSeekProvider({
-        apiKey,
-        baseUrl: cfg.baseUrl ?? undefined,
-        chatModel: cfg.chatModel,
-        onCall: makeLlmAuditor(this.prisma, userId, this.logger as never, this.usageCache),
-      });
+      const loaded = await this.providerLoader.loadProviderForUser(userId, 'public');
+      return loaded?.provider ?? null;
     } catch (err) {
       this.logger.warn(`jobs: provider unavailable: ${(err as Error).message}`);
       return null;

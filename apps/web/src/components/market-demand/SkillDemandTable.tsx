@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiGet } from '@/lib/api-client';
 import { Loader } from '@/components/Loader';
+import { UnavailableNotice } from '@/components/UnavailableNotice';
 import { Sparkline } from './Sparkline';
 import { GapBadge } from './GapBadge';
 
@@ -10,8 +11,8 @@ import { GapBadge } from './GapBadge';
  * Screen 33: Skill demand table.
  *
  * TODO(api): implement GET /api/market/skill-demand?window=<days>
- * Expected shape matches SkillDemandRow[]. Until the endpoint lands, the
- * component renders a fixture so screen 33 is visibly complete.
+ * Expected shape matches SkillDemandRow[]. Until the endpoint lands the panel
+ * renders an explicit unavailable state — never a fixture.
  */
 
 export interface SkillDemandRow {
@@ -26,54 +27,6 @@ export interface SkillDemandRow {
 
 const CLUSTERS = ['All', 'Backend', 'Cloud', 'Data', 'Frontend'] as const;
 
-const FIXTURE: SkillDemandRow[] = [
-  {
-    skillId: 'typescript',
-    label: 'TypeScript',
-    cluster: 'Frontend',
-    postings: 412,
-    share: 0.34,
-    history: [180, 210, 250, 280, 320, 360, 412],
-    gap: 0,
-  },
-  {
-    skillId: 'aws',
-    label: 'AWS',
-    cluster: 'Cloud',
-    postings: 388,
-    share: 0.32,
-    history: [280, 300, 310, 320, 350, 370, 388],
-    gap: 24,
-  },
-  {
-    skillId: 'postgres',
-    label: 'PostgreSQL',
-    cluster: 'Data',
-    postings: 302,
-    share: 0.25,
-    history: [200, 210, 220, 240, 260, 280, 302],
-    gap: 27,
-  },
-  {
-    skillId: 'kubernetes',
-    label: 'Kubernetes',
-    cluster: 'Cloud',
-    postings: 264,
-    share: 0.22,
-    history: [180, 190, 210, 220, 230, 245, 264],
-    gap: 13,
-  },
-  {
-    skillId: 'terraform',
-    label: 'Terraform',
-    cluster: 'Cloud',
-    postings: 198,
-    share: 0.16,
-    history: [80, 90, 110, 130, 150, 170, 198],
-    gap: 38,
-  },
-];
-
 export function SkillDemandTable() {
   const [rows, setRows] = useState<SkillDemandRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -82,11 +35,9 @@ export function SkillDemandTable() {
 
   const load = useCallback(async () => {
     try {
-      // ponytail: endpoint missing (see TODO above). Fall back to fixture so
-      // the screen renders. Real fetch path stays wired for the day it ships.
-      const res = await apiGet<SkillDemandRow[]>('/me/market/skill-demand').catch(
-        () => FIXTURE,
-      );
+      // Endpoint missing (see TODO above): a failure must not resolve to data,
+      // so the panel can render an honest unavailable state.
+      const res = await apiGet<SkillDemandRow[]>('/me/market/skill-demand');
       setRows(res);
     } catch (e) {
       setError((e as Error).message);
@@ -107,11 +58,7 @@ export function SkillDemandTable() {
   }, [rows, cluster, onlyGaps]);
 
   if (error) {
-    return (
-      <div className="rounded-[var(--radius)] border border-danger/30 bg-danger/10 px-3.5 py-2.5 text-[13px] text-danger">
-        {error}
-      </div>
-    );
+    return <UnavailableNotice feature="Skill demand" />;
   }
 
   if (rows === null) {

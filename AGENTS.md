@@ -40,7 +40,7 @@ These are load-bearing. Break one, break the product.
 1. **Evidence, not claims.** Every skill state, market signal, or company fact shown to the user carries an evidence reference with source + timestamp. No timeless facts.
 2. **Never invent facts in generated content.** Resume variants, cover letters, and outreach messages may only rephrase verified facts from `resume_facts` / evidence graph. Any output that references a claim without a fact ID is blocked at the fact-check gate.
 3. **Approval queue + audit log for every outbound action.** Applications, emails, Slack messages, ATS submissions — nothing sends without approval and nothing is untraceable.
-4. **No unauthorized scraping from the VPS.** LinkedIn / Indeed / Naukri / Glassdoor accessed only via (a) authorized partner APIs (JSearch, Serpapi), (b) the user's own desktop agent session (P3.5), or (c) parsed email alerts (P5). Server-side scraping of these platforms is prohibited. Apify or third-party scrapers are also out — outsourcing a ToS violation doesn't launder it.
+4. **Scrape only what is authorized.** LinkedIn / Indeed / Naukri / Glassdoor are never server-side scraped — they are accessed only via (a) authorized partner APIs (JSearch, Serpapi), (b) the user's own desktop agent session (P3.5), or (c) parsed email alerts (P5). Apify or third-party scrapers pointed at those platforms are also out — outsourcing a ToS violation doesn't launder it. **Permitted (owner decision U6):** Firecrawl (`@careeros/firecrawl`) and direct crawling of *public* company career sites and ATS boards — Workday, Lever, SmartRecruiters, Workable, iCIMS, SuccessFactors — provided robots.txt and each site's ToS are respected and rate limits are honored (shared retry/backoff + per-host pacing). Discovery should prefer Firecrawl; direct crawl targets are explicitly allowlisted in `infra/docker/squid/squid.conf`. See [`docs/job-sources.md`](docs/job-sources.md) for sources, trust tiers, and the robots/ToS + rate-limit policy.
 5. **Every job flows through one pipeline.** All sources — ATS, aggregators, agent, email — funnel through `packages/job-pipeline`: normalize → dedupe → freshness → skill-extract → verify → relevance → match. No source bypasses. Every reject logs a reason.
 6. **Sensitivity labels on data.** Tag every stored object `public | personal | confidential | employer-confidential`. Never send employer-confidential code to an external model by default. Redact secrets before embedding.
 7. **Structured LLM output only when consumed downstream.** Use Zod schemas end-to-end. If an LLM response is parsed by code, it must be structured; never regex-parse prose.
@@ -312,8 +312,8 @@ After landing:
 
 ## 15. Anti-patterns (things NOT to do)
 
-- **Don't scrape LinkedIn / Indeed / Naukri / Glassdoor from the server.** Use partner APIs, the desktop agent (user's session), or parsed email alerts.
-- **Don't outsource scraping to Apify or similar.** Same ToS violation, still yours.
+- **Don't scrape LinkedIn / Indeed / Naukri / Glassdoor from the server.** Use partner APIs, the desktop agent (user's session), or parsed email alerts. Firecrawl/career-site crawling is allowed only for public company career sites + ATS boards, with robots.txt/ToS + rate limits (see rule #4).
+- **Don't outsource scraping of the banned platforms to Apify or similar.** Same ToS violation, still yours.
 - **Don't invent facts in generated content.** Ever.
 - **Don't auto-send outbound anything** without going through the approval queue.
 - **Don't put everything in the vector DB.** Structured facts in Postgres, semantic content in Qdrant, files in MinIO, transient state in Redis. Job records, verification state, company profiles = Postgres.

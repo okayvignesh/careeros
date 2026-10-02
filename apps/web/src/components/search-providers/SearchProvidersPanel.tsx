@@ -3,11 +3,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { apiGet } from '@/lib/api-client';
 import { Loader } from '@/components/Loader';
+import { UnavailableNotice } from '@/components/UnavailableNotice';
 import { quotaShare, quotaTone } from './quota-tone';
 
 /**
- * TODO(api): implement GET /api/search-providers
- * Expected shape matches SearchProvider[]. Renders fixture until endpoint lands.
+ * TODO(api): implement GET /api/search-providers (and .../workloads)
+ * Expected shape matches SearchProvider[] / ProviderWorkload[]. Until the
+ * endpoints land the panel renders an explicit unavailable state — never a
+ * fixture.
  */
 
 export type ProviderStatus = 'active' | 'standby' | 'error';
@@ -30,38 +33,6 @@ export interface ProviderWorkload {
   schedule: string;
 }
 
-const FIXTURE_PROVIDERS: SearchProvider[] = [
-  {
-    id: 'brave',
-    name: 'Brave Search API',
-    host: 'api.search.brave.com',
-    status: 'active',
-    addedAt: '20 Sep',
-    usage: 'market refresh, dossiers, discovery',
-    quota: 20000,
-    used: 12480,
-    authNote: 'encrypted at rest',
-  },
-  {
-    id: 'searx',
-    name: 'SearX (self-hosted)',
-    host: 'searx.internal:8080',
-    status: 'standby',
-    addedAt: '02 Sep',
-    usage: 'fallback when the primary is rate-limited',
-    quota: 5000,
-    used: 240,
-    authNote: 'none required',
-  },
-];
-
-const FIXTURE_WORKLOADS: ProviderWorkload[] = [
-  { workload: 'Market refresh', provider: 'Brave Search', schedule: 'daily 08:00' },
-  { workload: 'Company dossier', provider: 'Brave Search', schedule: 'on shortlist' },
-  { workload: 'Technology signals', provider: 'Brave News', schedule: 'daily 08:00' },
-  { workload: 'Career page discovery', provider: 'Brave Search', schedule: 'weekly' },
-];
-
 const statusClass: Record<ProviderStatus, string> = {
   active:
     'border-[hsl(var(--success)/0.35)] bg-[hsl(var(--success)/0.10)] text-[hsl(var(--success))]',
@@ -83,11 +54,11 @@ export function SearchProvidersPanel() {
 
   const load = useCallback(async () => {
     try {
+      // Endpoints missing (see TODO above): a failure must not resolve to
+      // data, so the panel can render an honest unavailable state.
       const [p, w] = await Promise.all([
-        apiGet<SearchProvider[]>('/me/search-providers').catch(() => FIXTURE_PROVIDERS),
-        apiGet<ProviderWorkload[]>('/me/search-providers/workloads').catch(
-          () => FIXTURE_WORKLOADS,
-        ),
+        apiGet<SearchProvider[]>('/me/search-providers'),
+        apiGet<ProviderWorkload[]>('/me/search-providers/workloads'),
       ]);
       setProviders(p);
       setWorkloads(w);
@@ -101,11 +72,7 @@ export function SearchProvidersPanel() {
   }, [load]);
 
   if (error) {
-    return (
-      <div className="rounded-[var(--radius)] border border-danger/30 bg-danger/10 px-3.5 py-2.5 text-[13px] text-danger">
-        {error}
-      </div>
-    );
+    return <UnavailableNotice feature="Search providers" />;
   }
 
   if (providers === null) return <Loader size={64} label="Loading providers" />;

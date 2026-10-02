@@ -187,6 +187,9 @@ beforeEach(() => {
 describe('ApprovalsService state machine', () => {
   it('happy path: enqueue -> approve -> markSent walks pending -> approved -> sent', async () => {
     const { svc, prisma } = makeService();
+    // outreach_email has no production worker yet; register a no-op so the
+    // fail-loud dispatch path doesn't pre-empt the manual markSent below.
+    svc.registerWorker({ handles: (k) => k === 'outreach_email', onApproved: () => {} });
     const item = await enqueue(svc, 'user-1');
     expect(item.state).toBe('pending');
     const approved = await svc.approve({ userId: 'user-1', itemId: item.id });
@@ -211,6 +214,7 @@ describe('ApprovalsService state machine', () => {
 
   it('cancel from sent throws IllegalStateError', async () => {
     const { svc } = makeService();
+    svc.registerWorker({ handles: (k) => k === 'outreach_email', onApproved: () => {} });
     const item = await enqueue(svc, 'user-1');
     await svc.approve({ userId: 'user-1', itemId: item.id });
     await svc.markSent({ itemId: item.id });
@@ -454,5 +458,48 @@ describe('ApprovalsService worker registration', () => {
     const out = await svc.approve({ userId: 'user-1', itemId: item.id });
     expect(out.state).toBe('approved');
     await new Promise((r) => setImmediate(r));
+  });
+
+  it('unhandled kind does not silently no-op: item fails + audit records it', async () => {
+    const { svc, prisma } = makeService();
+    // No worker registered for outreach_email.
+    const item = await enqueue(svc, 'user-1', 'outreach_email');
+    const approved = await svc.approve({ userId: 'user-1', itemId: item.id });
+    expect(approved.state).toBe('approved');
+    // Drain the fire-and-forget dispatch + its audit/state writes.
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+
+    const row = prisma._items.find((r) => r.id === item.id)!;
+    expect(row.state).toBe('failed');
+    expect(row.failedReason).toContain("no worker registered for kind 'outreach_email'");
+    const audit = prisma._audit.find((a) => a.action === 'approval.unexecutable');
+    expect(audit).toBeDefined();
+    expect(audit?.actor).toBe('system');
+    expect(audit?.resourceId).toBe(item.id);
+    expect(audit?.payload).toMatchObject({
+      kind: 'outreach_email',
+      registeredWorkers: 0,
+    });
+    expect(prisma._events.some((e) => e.event === 'approval.failed')).toBe(true);
+  });
+
+  it('handled kind still dispatches and is not marked unexecutable', async () => {
+    const { svc, prisma } = makeService();
+    const seen: string[] = [];
+    svc.registerWorker({
+      handles: (k) => k === 'ats_submit',
+      onApproved: (i) => {
+        seen.push(i.id);
+      },
+    });
+    const item = await enqueue(svc, 'user-1', 'ats_submit');
+    await svc.approve({ userId: 'user-1', itemId: item.id });
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+
+    expect(seen).toEqual([item.id]);
+    expect(prisma._items.find((r) => r.id === item.id)!.state).toBe('approved');
+    expect(prisma._audit.some((a) => a.action === 'approval.unexecutable')).toBe(false);
   });
 });

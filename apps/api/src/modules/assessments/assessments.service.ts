@@ -32,7 +32,7 @@ import { DeepSeekProvider, renderPrompt, wrapUntrusted, type AIProvider, type Se
 import { runSandboxed, type LanguageId, type SandboxResult } from '@careeros/sandbox';
 import { decrypt, loadMasterKey } from '@careeros/secrets';
 import { PrismaService } from '../../prisma/prisma.service';
-import { syncSkillState } from '../../common/aggregate-skill';
+import { syncSkillState } from '@careeros/aggregator';
 import { UsageService } from '../usage/usage.service';
 import { UsageCache } from '../usage/usage.cache';
 import { SensitivityGateService } from '../../common/sensitivity-gate.service';

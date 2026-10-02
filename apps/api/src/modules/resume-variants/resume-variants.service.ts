@@ -9,14 +9,11 @@ import {
   wrapUntrusted,
   type FactCheckClaim,
 } from '@careeros/ai';
-import { decrypt, loadMasterKey } from '@careeros/secrets';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UsageService } from '../usage/usage.service';
 import { UsageCache } from '../usage/usage.cache';
 import { SensitivityGateService } from '../../common/sensitivity-gate.service';
-import { makeLlmAuditor } from '../../common/llm-audit';
-
-const KEY = loadMasterKey();
+import { ProviderLoaderService } from '../../common/provider-loader.service';
 
 export interface FactRefInfo {
   id: string;
@@ -62,6 +59,7 @@ export class ResumeVariantsService {
     private readonly usage: UsageService,
     private readonly usageCache: UsageCache,
     private readonly sensitivity: SensitivityGateService,
+    private readonly providerLoader: ProviderLoaderService,
   ) {}
 
   async listForUser(userId: string): Promise<Array<Omit<ResumeVariantDto, 'content' | 'factRefs' | 'audit'>>> {
@@ -389,25 +387,10 @@ export class ResumeVariantsService {
 
   private async tryLoadProvider(userId: string): Promise<DeepSeekProvider | null> {
     try {
-      await this.usage.assertCallAllowed(userId);
-      const cfg = await this.prisma.providerConfig.findFirst({
-        where: { userId, isDefault: true },
-      });
-      if (!cfg || cfg.provider !== 'deepseek') return null;
       // Resume facts + job description together are `personal` — the candidate's
       // work history alongside third-party listing prose. Gate accordingly.
-      await this.sensitivity.assertAllowed(cfg.provider, 'personal', userId);
-      const secret = await this.prisma.encryptedSecret.findUnique({
-        where: { id: cfg.apiKeySecretId },
-      });
-      if (!secret) return null;
-      const apiKey = decrypt(secret.ciphertext, KEY, `provider:${cfg.provider}:apiKey`);
-      return new DeepSeekProvider({
-        apiKey,
-        baseUrl: cfg.baseUrl ?? undefined,
-        chatModel: cfg.chatModel,
-        onCall: makeLlmAuditor(this.prisma, userId, this.logger as never, this.usageCache),
-      });
+      const loaded = await this.providerLoader.loadProviderForUser(userId, 'personal');
+      return loaded?.provider ?? null;
     } catch (err) {
       this.logger.warn(`resume-variants: provider unavailable: ${(err as Error).message}`);
       return null;

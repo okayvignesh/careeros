@@ -7,7 +7,7 @@ export default defineConfig({
       'apps/**/src/**/*.test.ts',
       'scripts/**/*.test.ts',
     ],
-    exclude: ['**/node_modules/**', '**/dist/**', '**/.next/**', '**/e2e/**'],
+    exclude: ['**/node_modules/**', '**/dist/**', '**/.next/**', '**/e2e/**', '**/._*'],
     setupFiles: ['./vitest.setup.ts'],
     watch: false,
     testTimeout: 15_000,

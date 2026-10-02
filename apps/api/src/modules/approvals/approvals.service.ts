@@ -319,9 +319,13 @@ export class ApprovalsService {
       .create({
         data: {
           userId,
-          actor: action.endsWith('.enqueued') || action.endsWith('.sent') || action.endsWith('.failed')
-            ? 'system'
-            : 'user',
+          actor:
+            action.endsWith('.enqueued') ||
+            action.endsWith('.sent') ||
+            action.endsWith('.failed') ||
+            action === 'approval.unexecutable'
+              ? 'system'
+              : 'user',
           action,
           resourceType: 'approval_item',
           resourceId,
@@ -335,13 +339,47 @@ export class ApprovalsService {
   }
 
   private async dispatch(item: ApprovalItemDto): Promise<void> {
-    for (const w of this.workers) {
-      if (!w.handles(item.kind)) continue;
+    const matching = this.workers.filter((w) => w.handles(item.kind));
+    if (matching.length === 0) {
+      await this.failUnexecutable(item, `no worker registered for kind '${item.kind}'`);
+      return;
+    }
+    for (const w of matching) {
       try {
         await w.onApproved(item);
       } catch (err) {
         this.logger.error({ err, itemId: item.id, kind: item.kind }, 'approvals worker threw');
       }
+    }
+  }
+
+  /**
+   * An approved item with no matching worker would otherwise be a silent
+   * no-op: the user saw "approved" but nothing will ever send it. Record the
+   * approved-but-unexecuted condition on the audit log and drive the item to
+   * its terminal `failed` state so it is visible to the user + operators.
+   *
+   * ponytail: the worker registry is in-process (see registerWorker). Every
+   * replica currently bootstraps the same module set, so whichever replica
+   * serves approve() also hosts the handler; if replicas ever diverge, the
+   * absent handler deliberately fails the item loud here rather than losing
+   * it silently. Move registration to a queue/shared registry before then.
+   */
+  private async failUnexecutable(item: ApprovalItemDto, reason: string): Promise<void> {
+    this.logger.error(
+      { itemId: item.id, kind: item.kind, reason, registeredWorkers: this.workers.length },
+      'approved item has no registered worker',
+    );
+    await this.writeAudit(item.userId, 'approval.unexecutable', item.id, {
+      kind: item.kind,
+      reason,
+      registeredWorkers: this.workers.length,
+    });
+    try {
+      await this.markFailed({ itemId: item.id, reason });
+    } catch (err) {
+      // Item may already have advanced (race); the audit above still records it.
+      this.logger.error({ err, itemId: item.id }, 'failed to mark unexecutable approval as failed');
     }
   }
 }

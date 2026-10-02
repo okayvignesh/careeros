@@ -119,7 +119,16 @@ function stubProvider(scripts: unknown[]) {
 }
 
 function buildService(prisma: ReturnType<typeof fakePrisma>) {
-  return new CoverLettersService(prisma as never, fakeUsage, fakeUsageCache, fakeSensitivity);
+  // Tests below spy on `tryLoadProvider`; this null-returning stub is the
+  // fallback for the paths that assert the "no provider configured" branch.
+  const fakeProviderLoader = { loadProviderForUser: async () => null };
+  return new CoverLettersService(
+    prisma as never,
+    fakeUsage,
+    fakeUsageCache,
+    fakeSensitivity,
+    fakeProviderLoader as never,
+  );
 }
 
 const twoFacts: FactRow[] = [

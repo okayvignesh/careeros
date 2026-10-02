@@ -16,6 +16,7 @@
     "seed:esco": "ts-node src/seed/esco.ts"
   },
   "dependencies": {
+    "@careeros/aggregator": "workspace:*",
     "@careeros/ai": "workspace:*",
     "@careeros/auth": "workspace:*",
     "@careeros/email-parsers": "workspace:*",

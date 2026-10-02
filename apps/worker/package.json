@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@careeros/aggregator": "workspace:*",
     "@careeros/browser-agent": "workspace:*",
     "@careeros/embeddings": "workspace:*",
     "@careeros/secrets": "workspace:*",

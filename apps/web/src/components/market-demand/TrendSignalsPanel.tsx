@@ -3,11 +3,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { apiGet } from '@/lib/api-client';
 import { Loader } from '@/components/Loader';
+import { UnavailableNotice } from '@/components/UnavailableNotice';
 import { Sparkline } from './Sparkline';
 
 /**
  * TODO(api): implement GET /api/market/trends
- * Expected shape matches TrendSignal[]. Fixture shown until endpoint lands.
+ * Expected shape matches TrendSignal[]. Until the endpoint lands the panel
+ * renders an explicit unavailable state — never a fixture.
  */
 
 export interface TrendSignal {
@@ -20,59 +22,6 @@ export interface TrendSignal {
   trajectory: 'rising' | 'steady' | 'declining';
   history: number[];
 }
-
-const FIXTURE: TrendSignal[] = [
-  {
-    id: 'qdrant',
-    technology: 'Qdrant',
-    category: 'Vector database',
-    mentions: 142,
-    sources: 18,
-    firstSeen: 'Jul 2026',
-    trajectory: 'rising',
-    history: [4, 12, 22, 38, 61, 92, 142],
-  },
-  {
-    id: 'temporal',
-    technology: 'Temporal',
-    category: 'Durable workflows',
-    mentions: 118,
-    sources: 22,
-    firstSeen: 'Aug 2026',
-    trajectory: 'rising',
-    history: [8, 15, 24, 40, 62, 88, 118],
-  },
-  {
-    id: 'bun',
-    technology: 'Bun',
-    category: 'JS runtime',
-    mentions: 96,
-    sources: 14,
-    firstSeen: 'Mar 2026',
-    trajectory: 'steady',
-    history: [72, 78, 82, 88, 92, 94, 96],
-  },
-  {
-    id: 'kafka',
-    technology: 'Kafka',
-    category: 'Event streaming',
-    mentions: 210,
-    sources: 44,
-    firstSeen: 'Jan 2024',
-    trajectory: 'steady',
-    history: [204, 208, 206, 212, 210, 209, 210],
-  },
-  {
-    id: 'nomad',
-    technology: 'Nomad',
-    category: 'Orchestration',
-    mentions: 58,
-    sources: 11,
-    firstSeen: 'Feb 2024',
-    trajectory: 'declining',
-    history: [96, 88, 80, 74, 68, 63, 58],
-  },
-];
 
 const trajectoryLabel = {
   rising: 'Rising',
@@ -93,9 +42,9 @@ export function TrendSignalsPanel() {
 
   const load = useCallback(async () => {
     try {
-      const res = await apiGet<TrendSignal[]>('/me/market/trends').catch(
-        () => FIXTURE,
-      );
+      // Endpoint missing (see TODO above): a failure must not resolve to data,
+      // so the panel can render an honest unavailable state.
+      const res = await apiGet<TrendSignal[]>('/me/market/trends');
       setRows(res);
       if (res.length > 0 && res[0]) setSelectedId(res[0].id);
     } catch (e) {
@@ -108,11 +57,7 @@ export function TrendSignalsPanel() {
   }, [load]);
 
   if (error) {
-    return (
-      <div className="rounded-[var(--radius)] border border-danger/30 bg-danger/10 px-3.5 py-2.5 text-[13px] text-danger">
-        {error}
-      </div>
-    );
+    return <UnavailableNotice feature="Trend signals" />;
   }
 
   if (rows === null) return <Loader size={64} label="Loading trend signals" />;

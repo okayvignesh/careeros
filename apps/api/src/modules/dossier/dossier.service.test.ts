@@ -156,7 +156,7 @@ function build(opts: {
     ? { narrative: '', claims: [{ text: 'Sample claim.', factRefs: ['fact-1'] }] }
     : opts.script;
   const svc = new TestDossierService(
-    [prisma as never, usage as never, {} as never, sensitivity as never],
+    [prisma as never, usage as never, {} as never, sensitivity as never, {} as never],
     script,
   );
   return { svc, prisma };
@@ -534,7 +534,7 @@ describe('DossierService.assembleFor per-claim fact-check (C-P4.7d)', () => {
     };
     const prisma = fakePrisma();
     const svc = new MultiScriptDossierService(
-      [prisma as never, fakeUsage() as never, {} as never, fakeSensitivity() as never],
+      [prisma as never, fakeUsage() as never, {} as never, fakeSensitivity() as never, {} as never],
       [writer, audit],
     );
     svc.registerHints(hints);
@@ -575,7 +575,7 @@ describe('DossierService.assembleFor per-claim fact-check (C-P4.7d)', () => {
     const audit = { results: [{ bulletIndex: 0, supported: true, reason: 'ok' }] };
     const prisma = fakePrisma();
     const svc = new MultiScriptDossierService(
-      [prisma as never, fakeUsage() as never, {} as never, fakeSensitivity() as never],
+      [prisma as never, fakeUsage() as never, {} as never, fakeSensitivity() as never, {} as never],
       [writer, audit],
     );
     svc.registerHints(hints);
@@ -607,7 +607,7 @@ describe('DossierService.assembleFor per-claim fact-check (C-P4.7d)', () => {
     };
     const prisma = fakePrisma();
     const svc = new MultiScriptDossierService(
-      [prisma as never, fakeUsage() as never, {} as never, fakeSensitivity() as never],
+      [prisma as never, fakeUsage() as never, {} as never, fakeSensitivity() as never, {} as never],
       [writer, new Error('deepseek 500')],
     );
     svc.registerHints(hints);

@@ -2,16 +2,13 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import type { KeyPointsExtraction } from '@careeros/shared';
 import { DeepSeekProvider, renderPrompt, wrapUntrusted } from '@careeros/ai';
-import { decrypt, loadMasterKey } from '@careeros/secrets';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UsageService } from '../usage/usage.service';
 import { UsageCache } from '../usage/usage.cache';
 import { SensitivityGateService } from '../../common/sensitivity-gate.service';
-import { makeLlmAuditor } from '../../common/llm-audit';
+import { ProviderLoaderService } from '../../common/provider-loader.service';
 import type { CorpusAdapter, IngestedQuestion } from './types';
 import { systemDesignPrimerAdapter } from './adapters/system-design-primer';
-
-const KEY = loadMasterKey();
 
 export interface SyncStats {
   adapter: string;
@@ -34,6 +31,7 @@ export class CorpusService {
     private readonly usage: UsageService,
     private readonly usageCache: UsageCache,
     private readonly sensitivity: SensitivityGateService,
+    private readonly providerLoader: ProviderLoaderService,
   ) {}
 
   listAdapters(): Array<Pick<CorpusAdapter, 'id' | 'name' | 'licenseSpdx' | 'sourceUrl'>> {
@@ -145,31 +143,14 @@ export class CorpusService {
   }
 
   /**
-   * Same load-provider pattern as `AssessmentsService.runLlmGraderOrFallback`
-   * but inlined here since corpus ingestion is a distinct call-site with its
-   * own sensitivity story: the input is public open-source content, so we
-   * gate on `public` not `personal`.
+   * Corpus ingestion is a distinct call-site with its own sensitivity story:
+   * the input is public open-source content, so we gate on `public` not
+   * `personal`. Sequencing is delegated to `ProviderLoaderService`.
    */
   private async tryLoadProvider(userId: string): Promise<DeepSeekProvider | null> {
     try {
-      await this.usage.assertCallAllowed(userId);
-      const cfg = await this.prisma.providerConfig.findFirst({
-        where: { userId, isDefault: true },
-      });
-      if (!cfg || cfg.provider !== 'deepseek') return null;
-      await this.sensitivity.assertAllowed(cfg.provider, 'public', userId);
-
-      const secret = await this.prisma.encryptedSecret.findUnique({
-        where: { id: cfg.apiKeySecretId },
-      });
-      if (!secret) return null;
-      const apiKey = decrypt(secret.ciphertext, KEY, `provider:${cfg.provider}:apiKey`);
-      return new DeepSeekProvider({
-        apiKey,
-        baseUrl: cfg.baseUrl ?? undefined,
-        chatModel: cfg.chatModel,
-        onCall: makeLlmAuditor(this.prisma, userId, this.logger as never, this.usageCache),
-      });
+      const loaded = await this.providerLoader.loadProviderForUser(userId, 'public');
+      return loaded?.provider ?? null;
     } catch (err) {
       this.logger.warn(`corpus: provider unavailable, ingestion will skip keyPoints extraction: ${(err as Error).message}`);
       return null;

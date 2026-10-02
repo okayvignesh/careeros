@@ -216,7 +216,7 @@ function build(opts: {
     ? { sections: [{ heading: 'Overview', body: 'body', sourceUrls: [] }] }
     : opts.script;
   const svc = new TestMarketBriefService(
-    [prisma as never, usage as never, {} as never, {} as never, prefs as never, snapshots as never],
+    [prisma as never, usage as never, {} as never, {} as never, prefs as never, snapshots as never, {} as never],
     script,
   );
   return { svc, prisma, usage, prefs, snapshots };
@@ -538,6 +538,7 @@ describe('MarketBriefService.getLatest', () => {
         {} as never,
         fakePrefs() as never,
         fakeSnapshots() as never,
+        {} as never,
       ],
       null,
     );
@@ -699,7 +700,7 @@ describe('MarketBriefService.generate per-sentence fact-check (C-P4.7c)', () => 
     const jobs = pool();
     const prisma = fakePrisma(jobs);
     const svc = new MultiScriptService(
-      [prisma as never, fakeUsage() as never, {} as never, {} as never, fakePrefs() as never, fakeSnapshots() as never],
+      [prisma as never, fakeUsage() as never, {} as never, {} as never, fakePrefs() as never, fakeSnapshots() as never, {} as never],
       [writer, audit],
     );
 
@@ -744,7 +745,7 @@ describe('MarketBriefService.generate per-sentence fact-check (C-P4.7c)', () => 
     const jobs = pool();
     const prisma = fakePrisma(jobs);
     const svc = new MultiScriptService(
-      [prisma as never, fakeUsage() as never, {} as never, {} as never, fakePrefs() as never, fakeSnapshots() as never],
+      [prisma as never, fakeUsage() as never, {} as never, {} as never, fakePrefs() as never, fakeSnapshots() as never, {} as never],
       [writer, audit],
     );
 
@@ -769,7 +770,7 @@ describe('MarketBriefService.generate per-sentence fact-check (C-P4.7c)', () => 
     const jobs = pool();
     const prisma = fakePrisma(jobs);
     const svc = new MultiScriptService(
-      [prisma as never, fakeUsage() as never, {} as never, {} as never, fakePrefs() as never, fakeSnapshots() as never],
+      [prisma as never, fakeUsage() as never, {} as never, {} as never, fakePrefs() as never, fakeSnapshots() as never, {} as never],
       [writer, new Error('deepseek 500')],
     );
 
@@ -797,7 +798,7 @@ describe('MarketBriefService.generate per-sentence fact-check (C-P4.7c)', () => 
     const jobs = pool();
     const prisma = fakePrisma(jobs);
     const svc = new MultiScriptService(
-      [prisma as never, fakeUsage() as never, {} as never, {} as never, fakePrefs() as never, fakeSnapshots() as never],
+      [prisma as never, fakeUsage() as never, {} as never, {} as never, fakePrefs() as never, fakeSnapshots() as never, {} as never],
       [writer, audit],
     );
 
