@@ -45,7 +45,7 @@ Open `http://localhost:3000` — wizard redirects if setup incomplete, else dash
 | Regenerate Prisma client | `pnpm --filter @careeros/api prisma generate` |
 | New migration | `pnpm --filter @careeros/api prisma migrate dev --name add_foo` |
 | Regenerate ERD | Planned — `prisma-erd-generator` not wired yet (will write `docs/schema.png`) |
-| View OpenAPI docs | Planned — Swagger not wired yet; needs `@nestjs/swagger` decorators + `/api/docs` |
+| View OpenAPI docs | Swagger UI at `http://localhost:3001/api/docs`; raw spec at `http://localhost:3001/api/openapi.json`. Generated from the shared Zod schemas (`zod-to-openapi`); both routes require a session when `NODE_ENV=production` |
 | GlitchTip UI | Planned — GlitchTip compose service not added yet |
 
 ## Repo layout

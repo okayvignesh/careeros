@@ -16,6 +16,7 @@
     "seed:esco": "ts-node src/seed/esco.ts"
   },
   "dependencies": {
+    "@asteasolutions/zod-to-openapi": "^7.3.4",
     "@careeros/aggregator": "workspace:*",
     "@careeros/ai": "workspace:*",
     "@careeros/auth": "workspace:*",
@@ -32,6 +33,7 @@
     "@nestjs/jwt": "^10.2.0",
     "@nestjs/platform-express": "^10.4.22",
     "@nestjs/platform-socket.io": "^10.4.4",
+    "@nestjs/swagger": "^7.4.2",
     "@nestjs/throttler": "^6.4.0",
     "@nestjs/websockets": "^10.4.4",
     "socket.io": "^4.8.1",

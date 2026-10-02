@@ -177,8 +177,9 @@ describe('F.6c audit-log-append-only skip guard', () => {
 
 // ---------------------------------------------------------------------------
 // Split a Postgres SQL script on top-level `;`, ignoring `;` inside DO $$ ... $$
-// blocks and single-quoted strings. Small enough that a real parser would be
-// over-engineering; big enough to warrant a helper with a name.
+// blocks, single-quoted strings, and `--` line comments. Small enough that a
+// real parser would be over-engineering; big enough to warrant a helper with a
+// name.
 // ponytail: covers our migration's shape (DO blocks + CREATE OR REPLACE
 // FUNCTION using $$). Add nested-tag / named-tag handling only when a future
 // migration needs it.
@@ -189,6 +190,17 @@ function splitTopLevel(sql: string): string[] {
   let inDollar = false;
   let inSingle = false;
   for (let i = 0; i < sql.length; i++) {
+    // Line comments must be copied verbatim: a `;` inside `-- ...` is prose,
+    // not a statement boundary. The migration's header comment says
+    // "remove audit rows; the worker owns it" — splitting there sends the
+    // fragment `the worker ...` to Postgres (syntax error at or near "the").
+    if (!inDollar && !inSingle && sql.slice(i, i + 2) === '--') {
+      const nl = sql.indexOf('\n', i);
+      const end = nl === -1 ? sql.length : nl;
+      buf += sql.slice(i, end);
+      i = end - 1;
+      continue;
+    }
     if (!inSingle && sql.slice(i, i + 2) === '$$') {
       inDollar = !inDollar;
       buf += '$$';

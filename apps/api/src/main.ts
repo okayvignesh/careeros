@@ -1,12 +1,22 @@
 import 'reflect-metadata';
 import { randomBytes } from 'node:crypto';
 import { NestFactory } from '@nestjs/core';
+import { SwaggerModule } from '@nestjs/swagger';
 import { Logger } from 'nestjs-pino';
 import helmet from 'helmet';
 import type { RequestHandler, Response } from 'express';
 import { installEgressProxy } from '@careeros/shared/net';
 import { AppModule } from './app.module';
 import { LockoutExceptionFilter } from './common/filters/lockout.filter';
+import {
+  OPENAPI_JSON_PATH,
+  OPENAPI_JSON_ROUTE,
+  SWAGGER_UI_PATH,
+  SWAGGER_UI_ROUTE,
+  buildOpenApiDocument,
+} from './openapi/openapi';
+import { createDocsGate, createNonceInjector } from './openapi/docs.middleware';
+import { SessionService } from './modules/auth/session.service';
 import { runStartupChecks } from './startup-check';
 
 // A-H2: exported so main.test.ts can assert against the EXACT middleware chain
@@ -111,6 +121,28 @@ async function bootstrap() {
   if (instance && typeof (instance as { set?: (k: string, v: unknown) => void }).set === 'function') {
     (instance as { set: (k: string, v: unknown) => void }).set('trust proxy', 1);
   }
+
+  // AGENTS.md §6: OpenAPI JSON at /api/openapi.json + Swagger UI at /api/docs.
+  // The document is generated from the shared Zod schemas (zod-to-openapi), so
+  // there are no re-declared DTO classes to keep in sync. In production both
+  // routes sit behind a valid session; dev/test stay open.
+  const sessionService = app.get(SessionService);
+  const docsGate = createDocsGate({
+    isProduction: process.env.NODE_ENV === 'production',
+    hasSession: async (req) => {
+      const sealed = sessionService.read(req);
+      return sealed ? sessionService.isActive(sealed.sessionId) : false;
+    },
+  });
+  app.use(SWAGGER_UI_ROUTE, docsGate);
+  app.use(OPENAPI_JSON_ROUTE, docsGate);
+  // Stamp the strict CSP's per-request nonce onto Swagger's inline tags instead
+  // of weakening the policy.
+  app.use(SWAGGER_UI_ROUTE, createNonceInjector());
+  SwaggerModule.setup(SWAGGER_UI_PATH, app, buildOpenApiDocument(), {
+    jsonDocumentUrl: OPENAPI_JSON_PATH,
+    customSiteTitle: 'Career OS API',
+  });
 
   const port = Number(process.env.API_PORT ?? 3001);
   await app.listen(port, '0.0.0.0');

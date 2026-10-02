@@ -34,7 +34,10 @@ export interface StartInfraOptions {
 const PG_IMAGE = 'postgres:16-alpine';
 const REDIS_IMAGE = 'redis:7-alpine';
 const QDRANT_IMAGE = 'qdrant/qdrant:v1.11.3';
-const MINIO_IMAGE = 'minio/minio:RELEASE.2024-10-13T13-34-11Z';
+// docker.io/minio/minio was retired (pull access denied). Mirror the pinned
+// digest from infra/docker/docker-compose.yml; see the comment there.
+const MINIO_IMAGE =
+  'bitnamilegacy/minio@sha256:d07cf144fe42fd6d49bc4757e5562baa92407157626e4ffebbeb02e03c716268';
 
 export async function startInfra(opts: StartInfraOptions = {}): Promise<StartedInfra> {
   const want = {
@@ -98,8 +101,13 @@ export async function startInfra(opts: StartInfraOptions = {}): Promise<StartedI
     }
 
     if (want.minio) {
+      // Bypass bitnamilegacy's entrypoint: it runs MinIO once for setup, stops
+      // it, then starts the real server, and does not act on SIGTERM during
+      // that transition, so Testcontainers' stop() blocks. Running the binary
+      // as PID 1 keeps the same server, port, and credentials but stops clean.
       const minio = await new GenericContainer(MINIO_IMAGE)
-        .withCommand(['server', '/data'])
+        .withEntrypoint(['/opt/bitnami/minio/bin/minio'])
+        .withCommand(['server', '/bitnami/minio/data'])
         .withEnvironment({
           MINIO_ROOT_USER: minioAccessKey,
           MINIO_ROOT_PASSWORD: minioSecretKey,
