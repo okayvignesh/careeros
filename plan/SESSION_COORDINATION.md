@@ -46,7 +46,8 @@ Live file for parallel Claude Code sessions to see who owns what. Update **befor
 | `scripts/__tests__/**` + `scripts/smoke/**` | session-ponytail (next batch) | Stream C backup byte-inspection + encryption-key exclusion |
 | `infra/docker/Dockerfile.api` | session-ponytail (next batch) | Stream D distroless + non-root + cap-drop |
 | `docs/backup.md` | session-ponytail (next batch) | Stream D RPO/RTO paragraph |
-| `apps/desktop/**` | session-ponytail | H2 D.4 Electron scaffold shipped |
+| `apps/desktop/**` | session-ponytail | H2 D.4 scaffold + I1 D.6/D.8 packaging/ops shipped |
+| `.github/workflows/desktop-release.yml` | session-ponytail | I1 D.6 release workflow (tag-triggered) |
 
 Everything not listed is unclaimed.
 
@@ -72,6 +73,7 @@ Everything not listed is unclaimed.
 | G3 lefthook + eslint rules + verify-esco (5 new, 3 already-shipped) | shipped 5f6f76d | 0 new deps; root package.json surgically staged |
 | H1 no-analytics-in-web guard (direct + transitive via lockfile) | shipped ca93a9c | 3/3; 35-item blocklist; 0 new deps |
 | H2 D.4 Electron scaffold minimal (apps/desktop) | shipped f65cd96 | 10/10; builds + typecheck clean; D.6/D.8/task-runner wire still deferred |
+| I1 D.6 packaging + D.8 ops (electron-builder + updater + proxy + cleanup + rotation) | shipped 4746494 | 38/38; CI release workflow mac/win/linux matrix; non-goals (notarization + EV cert) ponytail-tagged |
 
 ### session-ai-infra
 
@@ -85,6 +87,51 @@ Everything not listed is unclaimed.
 ---
 
 ## Shipped this cross-session batch
+
+- **Stream I1: D.6 packaging + D.8 ops (combined, apps/desktop/-scoped)** (session-ponytail, 2026-10-02, not yet committed): closes `plan/phase-3.5-desktop-agent.md:65-68` (D.6) + `:116-118` (D.8) + `plan/DEFERRED.md` P3.5 "D.6 packaging" + "D.8 proxy config + screenshot cleanup + log rotation" lines at MVP level on the H2 scaffold.
+  - **D.6 shipped**:
+    - `apps/desktop/electron-builder.yml` NEW: dmg (mac) + nsis (win) + AppImage (linux); appId `com.careeros.desktop`; GitHub provider for `electron-updater` wire; `asar: true`. Unsigned MVP per phase-3.5 non-goals; ponytail comments name the APPLE_ID / CSC_LINK upgrade.
+    - `apps/desktop/build/icon.png` NEW: 512x512 solid-color RGB placeholder generated via a one-shot Node script (crypto PNG writer, 1.8KB). electron-builder derives Windows `.ico` + macOS `.icns` automatically. Ponytail comment in `build/README.md` names the "replace with real brand assets when the logo folder lands" upgrade path.
+    - `apps/desktop/build/README.md` NEW: packaging-resources explainer.
+    - `apps/desktop/src/updater.ts` NEW: lazy-requires `electron-updater`, wires `error` / `update-available` / `update-downloaded` handlers, calls `autoUpdater.checkForUpdatesAndNotify()` on start AND on a 6h interval. Pure `isNewerVersion(a, b)` SemVer comparator exported so the test locks the `1.10.0 vs 1.9.0` regression without the updater runtime. Degrades to a no-op when electron-updater is absent (keeps unit tests fast + unblocks dev loops without the native dep).
+    - `apps/desktop/package.json`: + `pack`, `dist:mac`, `dist:win`, `dist:linux`, `release` scripts; `electron-updater` moved from devDependencies to dependencies (updater code is RUNTIME, not build-time); `electron-builder ^25.1.8` added to devDependencies.
+    - `.github/workflows/desktop-release.yml` NEW: triggered on `desktop-v*` tag push; matrix `[macos-latest, windows-latest, ubuntu-latest]`; pnpm/action-setup@v4 + actions/setup-node@v4 with pnpm cache; builds via `pnpm --filter @careeros/desktop release` which runs electron-builder with `--publish always` + `GH_TOKEN` so artifacts auto-attach to the triggering GitHub Release.
+  - **D.8 shipped**:
+    - `apps/desktop/src/proxy.ts` NEW: `parseProxyEnv(env)` reads `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` (both uppercase + lowercase, curl-style) and returns Chromium's `{proxyRules, proxyBypassRules}` shape (`http=url;https=url` + comma-joined bypass list). `applyProxy(session, override?, env?)` calls `session.setProxy()` with either the override (future Settings UI hook) or the env-derived config; empty env resets to clear any prior proxy. Ponytail comments name the Settings UI deferral + PAC/WPAD upgrade path.
+    - `apps/desktop/src/screenshot-cleanup.ts` NEW: `runCleanupPass({dir, retentionDays=30, now})` recursively walks (`fs.readdir` with `withFileTypes`), compares `fs.stat.mtimeMs` to the cutoff, `fs.unlink`s stale files. Handles missing dir cleanly. `startCleanupScheduler({dir})` runs one pass immediately + re-runs every 24h on `setInterval` (unref'd timer so it doesn't keep the loop alive on quit). YYYY-MM subdirs per phase-3.5 spec recurse automatically.
+    - `apps/desktop/src/log-rotation.ts` NEW: pure `shouldRotate(stat, now, maxBytes, retentionDays)` predicate — triggers on size (10MB default) OR age (14d default), whichever first. `runRotationPass({dir, file='agent.log', keep=5})` does the rename chain: unlinks `.log.5`, `.log.4` -> `.log.5`, ..., `.log` -> `.log.1`, then writes an empty new `.log`. `startRotationScheduler` ticks every hour (unref'd). Oldest-dropped signal returned so tests can assert ring overflow.
+    - `apps/desktop/src/main.ts`: surgical additive wires inside the existing `whenReady()` handler. Added imports for `session` (from electron), `applyProxy`, `startCleanupScheduler`, `startRotationScheduler`, `startUpdater`. Added inside `whenReady` (after `app.dock?.hide` but BEFORE tray creation): `await applyProxy(session.defaultSession)` (try/catch logs instead of crashing main), `startCleanupScheduler({dir: userData/screenshots})`, `startRotationScheduler({dir: app.getPath('logs')})`, `startUpdater()`. All existing H2 wiring preserved verbatim.
+  - **Tests** (4 new files, 28 new cases, 38/38 pass across the whole `apps/desktop` suite including the 10 pre-existing):
+    - `src/updater.test.ts` (10 cases): 5 on `isNewerVersion` locking the `1.10.0 > 1.9.0` regression + stable-beats-prerelease + leading-v tolerance + reject-downgrade; 4 on `startUpdater` with an injected fake updater that counts `checkForUpdatesAndNotify` calls (asserts initial check + each tick fires it, verifies all 3 event handlers wired, verifies rejection is swallowed to a warn log instead of crashing main); 1 on no-op degradation when electron-updater is missing.
+    - `src/proxy.test.ts` (7 cases): `parseProxyEnv` null on empty / both proxies parse / lowercase curl-style names / NO_PROXY whitespace normalization; `applyProxy` env happy path / override wins over env / empty env resets.
+    - `src/screenshot-cleanup.test.ts` (4 cases, real tmpdir with `fs.utimes` to seed mtimes): fresh vs stale split with scanned/deleted/errors tally; YYYY-MM subdir recursion; missing-dir clean no-op; exactly-at-cutoff survives (strict less-than).
+    - `src/log-rotation.test.ts` (7 cases, real tmpdir): 4 on `shouldRotate` predicate (no stat / under both / size wins / age wins); 3 on `runRotationPass` (chain shift on size trigger, ring overflow drops the oldest, missing current log is no-op, under-threshold leaves chain untouched).
+  - **Deps added (apps/desktop/ ONLY, zero at root)**:
+    - `electron-builder ^25.1.8` (devDep) - packaging CLI. Verified NOT already pulled in by electron (electron ships the runtime, electron-builder is a separate CLI).
+    - `electron-updater ^6.3.9` moved from devDependencies to dependencies (same version H2 shipped; wire went from unused -> runtime so it must bundle).
+    - 133 transitive packages added by electron-builder (dmg-builder, app-builder-lib, 7zip-bin, etc.); no new workspace deps.
+  - **Build + typecheck + tests all GREEN**:
+    - `pnpm install --filter @careeros/desktop...` - clean (133 new transitive packages, no peer-dep violations).
+    - `pnpm --filter @careeros/desktop typecheck` - clean after a one-line Dirent widen in screenshot-cleanup.ts (node@22 types quirk on `fs.readdir(..., {withFileTypes})`).
+    - `pnpm --filter @careeros/desktop build` - tsc clean + copy-renderer.mjs. All 11 modules compile to dist/.
+    - `pnpm vitest run apps/desktop` - **38/38 pass in 199ms** (10 pre-existing + 28 new).
+    - Full packaging run (`pnpm --filter @careeros/desktop dist:mac`) NOT verified in this session (same machine policy as H2 window-open smoke); operator one-liner lives in README.
+  - **Scope cuts honoured** (all have inline `ponytail:` comments):
+    - Unsigned MVP; no notarization, no code-signing (phase-3.5 non-goal). CI workflow deliberately does NOT reference APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID / CSC_LINK / CSC_KEY_PASSWORD; comment at the top names them for the upgrade.
+    - Placeholder icon (solid-color 512x512 PNG, deterministically generated from a Node script); comment names "replace with real brand assets when the logo folder lands".
+    - No Settings UI for proxy override (apps/web stream owns the UI); `applyProxy(session, override)` is the programmatic hook a future IPC call wires into.
+    - No PAC / WPAD autodiscovery (static URL via `HTTPS_PROXY` covers most corp proxies; comment names the `pac_script` upgrade).
+    - No gzip on rotated logs (plain text keeps grep/less working; comment names the upgrade when disk budget bites).
+    - Playwright-electron E2E harness still deferred (updater handlers covered via injected fake; comment in README names the "lands with signing" upgrade).
+  - **Rules followed**:
+    - No em dashes in any added file (two slipped in during drafting, both fixed before shipping: `screenshot-cleanup.ts:13` + `build/README.md:13`; final grep clean).
+    - No `git` commands run; orchestrator commits after monitor audit.
+    - OFF-LIMITS respected: no `apps/web/**`, no `packages/ui/**`, no `infra/docker/**`, no `prisma/schema.prisma`, no `packages/ai/**`, no `packages/browser-agent/**` (imported as workspace dep only), no touches to any pre-existing `.github/workflows/**` file (new `desktop-release.yml` is this stream's; `nightly-evals.yml` / `codeql.yml` / `trivy.yml` / `gitleaks.yml` / `pr.yml` / `restore-test.yml` / `tag-release.yml` / `test-failure-autofile.yml` / `adapter-contract.yml` all read for pattern only, zero edits).
+    - All non-trivial logic has at least one assert test (updater version-compare, proxy env parse, cleanup mtime filter, rotation chain shift + ring overflow).
+  - **Files touched**:
+    - NEW: `apps/desktop/electron-builder.yml`, `apps/desktop/build/icon.png`, `apps/desktop/build/README.md`, `apps/desktop/src/updater.ts`, `apps/desktop/src/updater.test.ts`, `apps/desktop/src/proxy.ts`, `apps/desktop/src/proxy.test.ts`, `apps/desktop/src/screenshot-cleanup.ts`, `apps/desktop/src/screenshot-cleanup.test.ts`, `apps/desktop/src/log-rotation.ts`, `apps/desktop/src/log-rotation.test.ts`, `.github/workflows/desktop-release.yml`.
+    - EDITED (surgical): `apps/desktop/package.json` (+5 scripts, electron-updater dep tier swap, electron-builder devDep), `apps/desktop/src/main.ts` (6 added import lines + 11 added lines inside the existing `whenReady` handler; all H2 wiring preserved), `apps/desktop/README.md` (replaced the "Deferred" table with Packaging + Ops + revised Deferred sections reflecting what shipped vs still-deferred).
+  - **Test command for monitor**: `pnpm vitest run apps/desktop` -> 38/38 pass. Also `pnpm --filter @careeros/desktop build` + `pnpm --filter @careeros/desktop typecheck` both clean.
 
 - **Stream H2: D.4 Electron scaffold (MINIMAL)** (session-ponytail, 2026-10-02, not yet committed): closes the `plan/DEFERRED.md` P3.5 line "D.4 Electron scaffold + tray + pairing window + keytar + wss-client + task-runner" at MVP level. The scaffold compiles, the renderer HTML lands in dist, 10/10 unit tests pass. Window-open was not launched (CI env; `pnpm --filter @careeros/desktop dev` is the operator one-liner).
   - **New package**: `apps/desktop/` (chose `apps/*` over `packages/*` because this is an Electron application, mirroring `apps/api` / `apps/web` / `apps/worker`; `pnpm-workspace.yaml` already covers `apps/*` so no workspace edit required).
