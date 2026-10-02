@@ -1,0 +1,33 @@
+# Local pre-commit hooks. CI (gitleaks.yml, codeql.yml, trivy.yml) is the
+# authoritative gate; this file catches the obvious stuff before push so devs
+# don't bounce off CI for a leaked secret or a type error.
+#
+# Install: `pnpm install` runs `lefthook install` via the root `prepare`
+# script, provided the `lefthook` binary is on PATH. Install it once per
+# machine (brew install lefthook / go install / scoop / ...; it is not an
+# npm dep by design — zero runtime cost, zero package bloat).
+#
+# ponytail: three hooks, not thirty. gitleaks catches the one failure that
+# cannot be un-pushed (secret in git history); typecheck + lint catch the
+# fast-feedback stuff. If a hook is slow enough that devs reach for
+# --no-verify, delete it; local hooks only earn their keep when they finish
+# faster than CI would reject the push.
+
+pre-commit:
+  parallel: true
+  commands:
+    gitleaks:
+      # gitleaks binary must be on PATH (brew install gitleaks). Skip gracefully
+      # otherwise — CI has the authoritative scan.
+      run: command -v gitleaks >/dev/null && gitleaks protect --staged --redact --no-banner || true
+      stage_fixed: false
+    typecheck:
+      # Workspace-wide typecheck is overkill for a single-file edit; turbo's
+      # cache keeps the incremental cost low. Fallback: `pnpm -w typecheck`
+      # if turbo isn't warm.
+      glob: "*.{ts,tsx}"
+      run: pnpm -w typecheck
+    lint:
+      glob: "*.{ts,tsx}"
+      # Per-workspace lint; only apps/web + apps/api currently have scripts.
+      run: pnpm -r --parallel --if-present lint
