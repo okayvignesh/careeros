@@ -1,0 +1,562 @@
+
+=== DIRECTORY TREE (max depth 3, source files only) ===
+.editorconfig
+.env.example
+.eslintrc.cjs
+.github
+.github/renovate.json
+.github/workflows
+.github/workflows/adapter-contract.yml
+.github/workflows/codeql.yml
+.github/workflows/desktop-release.yml
+.github/workflows/gitleaks.yml
+.github/workflows/nightly-evals.yml
+.github/workflows/pr.yml
+.github/workflows/restore-test.yml
+.github/workflows/tag-release.yml
+.github/workflows/trivy.yml
+.gitignore
+.gitleaks.toml
+.nvmrc
+.prettierrc
+.vscode
+.vscode/extensions.json
+.vscode/settings.json
+AGENTS.md
+CHANGELOG.md
+CONTRIBUTING.md
+Makefile
+NOTICES
+README.md
+SECURITY.md
+apps
+apps/api
+apps/api/nest-cli.json
+apps/api/package.json
+apps/api/prisma
+apps/api/prisma/migrations
+apps/api/prisma/schema.prisma
+apps/api/src
+apps/api/src/app.module.ts
+apps/api/src/common
+apps/api/src/main.test.ts
+apps/api/src/main.ts
+apps/api/src/modules
+apps/api/src/prisma
+apps/api/src/seed
+apps/api/src/startup-check.test.ts
+apps/api/src/startup-check.ts
+apps/api/tsconfig.json
+apps/desktop
+apps/desktop/README.md
+apps/desktop/electron-builder.yml
+apps/desktop/package.json
+apps/desktop/renderer
+apps/desktop/renderer/pair.html
+apps/desktop/scripts
+apps/desktop/scripts/copy-renderer.mjs
+apps/desktop/src
+apps/desktop/src/api-client.ts
+apps/desktop/src/config.ts
+apps/desktop/src/keychain.test.ts
+apps/desktop/src/keychain.ts
+apps/desktop/src/log-rotation.test.ts
+apps/desktop/src/log-rotation.ts
+apps/desktop/src/main.ts
+apps/desktop/src/playwright-launcher.ts
+apps/desktop/src/preload.ts
+apps/desktop/src/proxy.test.ts
+apps/desktop/src/proxy.ts
+apps/desktop/src/renderer
+apps/desktop/src/screenshot-cleanup.test.ts
+apps/desktop/src/screenshot-cleanup.ts
+apps/desktop/src/task-runner.test.ts
+apps/desktop/src/task-runner.ts
+apps/desktop/src/updater.test.ts
+apps/desktop/src/updater.ts
+apps/desktop/src/wss-client.test.ts
+apps/desktop/src/wss-client.ts
+apps/desktop/tsconfig.json
+apps/web
+apps/web/e2e
+apps/web/e2e/README.md
+apps/web/e2e/golden-connect-repo.spec.ts
+apps/web/e2e/post-setup.spec.ts
+apps/web/e2e/pre-setup.spec.ts
+apps/web/next-env.d.ts
+apps/web/next.config.mjs
+apps/web/package.json
+apps/web/playwright.config.ts
+apps/web/postcss.config.js
+apps/web/src
+apps/web/src/app
+apps/web/src/components
+apps/web/src/lib
+apps/web/src/middleware.test.ts
+apps/web/src/middleware.ts
+apps/web/tailwind.config.ts
+apps/web/tsconfig.json
+apps/worker
+apps/worker/package.json
+apps/worker/src
+apps/worker/src/aggregator.ts
+apps/worker/src/audit-log-retention.test.ts
+apps/worker/src/audit-log-retention.worker.ts
+apps/worker/src/corpus
+apps/worker/src/embedding-job.ts
+apps/worker/src/github-sync.ts
+apps/worker/src/gitlab-sync.test.ts
+apps/worker/src/gitlab-sync.ts
+apps/worker/src/gmail-watch-renewal.worker.test.ts
+apps/worker/src/gmail-watch-renewal.worker.ts
+apps/worker/src/hallucination-log-retention.test.ts
+apps/worker/src/hallucination-log-retention.worker.ts
+apps/worker/src/main.ts
+apps/worker/src/market-snapshot.worker.test.ts
+apps/worker/src/market-snapshot.worker.ts
+apps/worker/src/selector-health.test.ts
+apps/worker/src/selector-health.worker.ts
+apps/worker/src/skills-seed.ts
+apps/worker/tsconfig.json
+careeros-screens
+careeros-screens/README.txt
+careeros-screens/index.html
+careeros-screens/phase-0-install-and-first-run
+careeros-screens/phase-0-install-and-first-run/01-preflight.html
+careeros-screens/phase-0-install-and-first-run/02-create-account.html
+careeros-screens/phase-0-install-and-first-run/03-ai-provider.html
+careeros-screens/phase-0-install-and-first-run/04-capability-test.html
+careeros-screens/phase-0-install-and-first-run/05-embedding-mode.html
+careeros-screens/phase-0-install-and-first-run/06-embedding-test.html
+careeros-screens/phase-0-install-and-first-run/07-github.html
+careeros-screens/phase-0-install-and-first-run/08-integrations.html
+careeros-screens/phase-0-install-and-first-run/09-resume-import.html
+careeros-screens/phase-0-install-and-first-run/10-fact-review.html
+careeros-screens/phase-0-install-and-first-run/11-career-goals.html
+careeros-screens/phase-0-install-and-first-run/12-health-check.html
+careeros-screens/phase-0-install-and-first-run/13-recovery-key.html
+careeros-screens/phase-0-install-and-first-run/14-setup-complete.html
+careeros-screens/phase-0-install-and-first-run/65-sign-in.html
+careeros-screens/phase-0-install-and-first-run/66-service-unavailable.html
+careeros-screens/phase-0-install-and-first-run/67-not-found.html
+careeros-screens/phase-0-install-and-first-run/index.html
+careeros-screens/phase-1-personal-intelligence
+careeros-screens/phase-1-personal-intelligence/15-dashboard.html
+careeros-screens/phase-1-personal-intelligence/16-skill-tree.html
+careeros-screens/phase-1-personal-intelligence/17-skill-detail.html
+careeros-screens/phase-1-personal-intelligence/18-evidence-explorer.html
+careeros-screens/phase-1-personal-intelligence/19-repository-analysis.html
+careeros-screens/phase-1-personal-intelligence/21-fact-base.html
+careeros-screens/phase-1-personal-intelligence/51-settings-overview.html
+careeros-screens/phase-1-personal-intelligence/52-ai-providers.html
+careeros-screens/phase-1-personal-intelligence/53-embeddings.html
+careeros-screens/phase-1-personal-intelligence/54-integrations.html
+careeros-screens/phase-1-personal-intelligence/62-system-and-workers.html
+careeros-screens/phase-1-personal-intelligence/index.html
+careeros-screens/phase-2-assessment-arena
+careeros-screens/phase-2-assessment-arena/22-assessment-arena.html
+careeros-screens/phase-2-assessment-arena/23-knowledge-runner.html
+careeros-screens/phase-2-assessment-arena/24-build-code-runner.html
+careeros-screens/phase-2-assessment-arena/28-attempt-result.html
+careeros-screens/phase-2-assessment-arena/29-quest-detail.html
+careeros-screens/phase-2-assessment-arena/31-progression.html
+careeros-screens/phase-2-assessment-arena/index.html
+careeros-screens/phase-3-market-engine
+careeros-screens/phase-3-market-engine/32-market-brief.html
+careeros-screens/phase-3-market-engine/33-skill-demand.html
+careeros-screens/phase-3-market-engine/34-technology-signals.html
+careeros-screens/phase-3-market-engine/55-job-sources.html
+careeros-screens/phase-3-market-engine/56-search-providers.html
+careeros-screens/phase-3-market-engine/index.html
+careeros-screens/phase-4-the-hunt
+careeros-screens/phase-4-the-hunt/36-job-matches.html
+careeros-screens/phase-4-the-hunt/37-match-report.html
+careeros-screens/phase-4-the-hunt/38-company-dossier.html
+careeros-screens/phase-4-the-hunt/39-source-verification.html
+careeros-screens/phase-4-the-hunt/41-resume-studio.html
+careeros-screens/phase-4-the-hunt/42-fact-check.html
+careeros-screens/phase-4-the-hunt/43-cover-letter.html
+careeros-screens/phase-4-the-hunt/44-applications.html
+careeros-screens/phase-4-the-hunt/index.html
+careeros-screens/phase-5-daily-assistant
+careeros-screens/phase-5-daily-assistant/49-daily-brief.html
+careeros-screens/phase-5-daily-assistant/50-inbox-triage.html
+careeros-screens/phase-5-daily-assistant/58-notifications.html
+careeros-screens/phase-5-daily-assistant/index.html
+careeros-screens/phase-6-controlled-execution
+careeros-screens/phase-6-controlled-execution/45-application-detail.html
+careeros-screens/phase-6-controlled-execution/46-approval-queue.html
+careeros-screens/phase-6-controlled-execution/47-interview-prep.html
+careeros-screens/phase-6-controlled-execution/48-outreach-composer.html
+careeros-screens/phase-6-controlled-execution/57-storage.html
+careeros-screens/phase-6-controlled-execution/59-security.html
+careeros-screens/phase-6-controlled-execution/60-data-and-privacy.html
+careeros-screens/phase-6-controlled-execution/63-backup-and-recovery.html
+careeros-screens/phase-6-controlled-execution/64-audit-log.html
+careeros-screens/phase-6-controlled-execution/index.html
+docs
+docs/._codebase
+docs/architecture.md
+docs/audit-log.md
+docs/backup.md
+docs/codebase
+
+=== STACK DETECTION (manifest files) ===
+
+--- Makefile ---
+.PHONY: help install up down logs dev migrate reset test clean
+
+help:
+	@echo "Career OS dev commands"
+	@echo "  make install    Install all workspace deps"
+	@echo "  make up         Start docker services (postgres, redis, api, web)"
+	@echo "  make down       Stop docker services"
+	@echo "  make logs       Tail docker logs"
+	@echo "  make dev        Run api + web + worker in parallel (host)"
+	@echo "  make migrate    Apply pending migrations"
+	@echo "  make reset      Drop + recreate DB (dev only)"
+	@echo "  make test       Run all tests"
+	@echo "  make clean      Remove build artifacts + node_modules"
+
+install:
+	pnpm install
+
+up:
+	pnpm docker:up
+
+down:
+	pnpm docker:down
+
+logs:
+	pnpm docker:logs
+
+dev:
+	pnpm dev
+
+migrate:
+	pnpm migrate
+
+reset:
+	pnpm db:reset
+
+test:
+	pnpm test
+
+clean:
+	rm -rf node_modules apps/*/node_modules packages/*/node_modules
+	rm -rf apps/*/dist apps/*/.next apps/*/.turbo
+	rm -rf packages/*/dist packages/*/.turbo
+
+--- package.json ---
+{
+  "name": "career-os",
+  "version": "0.0.1",
+  "private": true,
+  "packageManager": "pnpm@9.12.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "prepare": "command -v lefthook >/dev/null && lefthook install || true",
+    "build": "turbo run build",
+    "dev": "turbo run dev --parallel",
+    "typecheck": "turbo run typecheck",
+    "lint": "turbo run lint",
+    "test": "vitest run",
+    "test:unit": "vitest run --exclude '**/*.integration.test.ts' --exclude '**/*.e2e.test.ts'",
+    "test:integration": "vitest run integration.test",
+    "test:e2e": "pnpm --filter @careeros/web test:e2e",
+    "test:a11y": "A11Y=1 pnpm --filter @careeros/web test:e2e",
+    "test:evals": "pnpm --filter @careeros/ai test:evals",
+    "verify:esco": "pnpm --filter @careeros/api exec ts-node --project tsconfig.json --transpile-only ../../scripts/verify-esco.ts",
+    "format": "prettier --write \"**/*.{ts,tsx,md,json}\"",
+    "docker:up": "pnpm --filter '@careeros/shared' --filter '@careeros/secrets' --filter '@careeros/auth' --filter '@careeros/ai' build && docker compose --env-file .env -f infra/docker/docker-compose.yml -f infra/docker/docker-compose.override.yml up -d",
+    "docker:rebuild": "pnpm --filter '@careeros/shared' --filter '@careeros/secrets' --filter '@careeros/auth' --filter '@careeros/ai' build && docker compose --env-file .env -f infra/docker/docker-compose.yml -f infra/docker/docker-compose.override.yml up -d --build",
+    "docker:down": "docker compose --env-file .env -f infra/docker/docker-compose.yml -f infra/docker/docker-compose.override.yml down",
+    "docker:logs": "docker compose --env-file .env -f infra/docker/docker-compose.yml -f infra/docker/docker-compose.override.yml logs -f",
+    "docker:ps": "docker compose --env-file .env -f infra/docker/docker-compose.yml -f infra/docker/docker-compose.override.yml ps",
+    "docker:infra": "docker compose --env-file .env $([ -f .env.local ] && echo --env-file .env.local) -f infra/docker/docker-compose.yml -f infra/docker/docker-compose.host-dev.yml up -d postgres redis qdrant minio squid",
+    "docker:infra:down": "docker compose --env-file .env $([ -f .env.local ] && echo --env-file .env.local) -f infra/docker/docker-compose.yml -f infra/docker/docker-compose.host-dev.yml down",
+    "dev:host": "bash scripts/dev-host.sh",
+    "migrate": "pnpm --filter @careeros/api prisma migrate deploy",
+    "migrate:dev": "pnpm --filter @careeros/api prisma migrate dev",
+    "db:reset": "pnpm --filter @careeros/api prisma migrate reset --force"
+  },
+  "devDependencies": {
+    "cheerio": "^1.0.0",
+    "fast-check": "^4.10.2",
+    "playwright": "^1.48.0",
+    "prettier": "^3.3.3",
+    "prettier-plugin-tailwindcss": "^0.6.8",
+    "testcontainers": "^10.13.2",
+    "turbo": "^2.1.3",
+    "typescript": "^5.6.3",
+    "vitest": "^5.0.1"
+  },
+  "pnpm": {
+    "overrides": {
+      "multer": "^2.4.0",
+      "postcss": "^8.5.18"
+    }
+  }
+}
+
+--- pnpm-lock.yaml ---
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+overrides:
+  multer: ^2.4.0
+  postcss: ^8.5.18
+
+importers:
+
+  .:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.7.5
+        version: 22.20.4
+      cheerio:
+        specifier: ^1.0.0
+        version: 1.2.0
+      fast-check:
+        specifier: ^4.10.2
+        version: 4.10.2
+      playwright:
+        specifier: ^1.48.0
+        version: 1.63.0
+      prettier:
+        specifier: ^3.3.3
+        version: 3.9.8
+      prettier-plugin-tailwindcss:
+        specifier: ^0.6.8
+        version: 0.6.14(prettier@3.9.8)
+      testcontainers:
+        specifier: ^10.13.2
+        version: 10.28.0
+      turbo:
+        specifier: ^2.1.3
+        version: 2.11.2
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^5.0.1
+        version: 5.0.1(@opentelemetry/api@1.9.1)(@types/node@22.20.4)(jsdom@25.0.1)(msw@2.15.0(@types/node@22.20.4)(typescript@5.9.3))(vite@8.3.0(@types/node@22.20.4)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
+
+  apps/api:
+    dependencies:
+      '@careeros/ai':
+        specifier: workspace:*
+        version: link:../../packages/ai
+      '@careeros/auth':
+        specifier: workspace:*
+        version: link:../../packages/auth
+      '@careeros/email-parsers':
+        specifier: workspace:*
+        version: link:../../packages/email-parsers
+      '@careeros/embeddings':
+        specifier: workspace:*
+        version: link:../../packages/embeddings
+      '@careeros/job-pipeline':
+        specifier: workspace:*
+        version: link:../../packages/job-pipeline
+      '@careeros/resume-render':
+        specifier: workspace:*
+        version: link:../../packages/resume-render
+      '@careeros/sandbox':
+        specifier: workspace:*
+        version: link:../../packages/sandbox
+      '@careeros/secrets':
+        specifier: workspace:*
+        version: link:../../packages/secrets
+      '@careeros/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      '@nest-lab/throttler-storage-redis':
+        specifier: ^1.2.0
+        version: 1.2.0(@nestjs/common@10.4.22(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@10.4.22)(@nestjs/throttler@6.7.1(@nestjs/common@10.4.22(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@10.4.22)(reflect-metadata@0.2.2))(ioredis@5.11.1)(reflect-metadata@0.2.2)
+      '@nestjs/common':
+        specifier: ^10.4.4
+        version: 10.4.22(reflect-metadata@0.2.2)(rxjs@7.8.2)
+
+[TRUNCATED] Showing first 80 of 14421 lines.
+
+=== ENTRY POINTS ===
+No common entry points found. Check 'main' or 'scripts.start' in manifest files above.
+
+=== LINTING AND FORMATTING CONFIG ===
+Found: .eslintrc.cjs
+Found: .prettierrc
+Found: .editorconfig
+Found: tsconfig.base.json
+
+=== ENVIRONMENT VARIABLE TEMPLATES ===
+--- .env.example ---
+# Career OS: copy to .env and fill in.
+#
+# A-H9: every secret below must be a fresh random value. Compose refuses to
+# start if any required var is missing (`${VAR:?...}` syntax in
+# docker-compose.yml), and startup-check.ts refuses to boot the api if any
+# datastore password is short (< 24 bytes) or matches a known-weak default.
+# Generate:
+#
+#   openssl rand -base64 32   # for POSTGRES_PASSWORD + MINIO_ROOT_PASSWORD
+#   openssl rand -hex 32      # for ENCRYPTION_KEY + SESSION_SECRET
+
+# ─── Runtime ────────────────────────────────────────────────
+NODE_ENV=development
+
+# ─── Postgres (REQUIRED; no defaults, refuses on weak) ─────
+POSTGRES_USER=careeros
+POSTGRES_DB=careeros
+POSTGRES_PASSWORD=REPLACE_ME_WITH_openssl_rand_base64_32
+# Assembled from the values above; keep the password in sync.
+DATABASE_URL=postgresql://careeros:REPLACE_ME_WITH_openssl_rand_base64_32@postgres:5432/careeros?schema=public
+
+# ─── Redis / Qdrant ─────────────────────────────────────────
+REDIS_URL=redis://redis:6379
+QDRANT_URL=http://qdrant:6333
+
+# ─── MinIO (REQUIRED; no defaults, refuses on weak) ────────
+MINIO_ROOT_USER=careeros
+MINIO_ROOT_PASSWORD=REPLACE_ME_WITH_openssl_rand_base64_32
+MINIO_BUCKET=careeros
+
+# ─── App secrets (REQUIRED; startup-check refuses if weak) ─
+# Both must be ≥32 bytes and not equal to any known example value.
+ENCRYPTION_KEY=REPLACE_ME_WITH_openssl_rand_hex_32
+SESSION_SECRET=REPLACE_ME_WITH_openssl_rand_hex_32
+
+# ─── App ────────────────────────────────────────────────────
+API_PORT=3001
+WEB_PORT=3000
+WEB_URL=http://localhost:3000
+API_URL=http://localhost:3001
+TRUSTED_ORIGINS=http://localhost:3000
+
+# ─── Cookie session ─────────────────────────────────────────
+# A-M1: cookie name is hard-coded (`__Host-careeros_session` in prod,
+# `careeros_session` in dev). Env override was removed on purpose.
+SESSION_TTL_HOURS=168
+
+# ─── AI (wizard captures at runtime; no key needed at boot) ─
+# DEEPSEEK_API_KEY=  # optional; otherwise entered in setup wizard
+
+# ─── Logging ────────────────────────────────────────────────
+LOG_LEVEL=info
+LOG_DEBUG=
+
+# ─── Feature flags ──────────────────────────────────────────
+NEXT_TELEMETRY_DISABLED=1
+
+
+=== TODO / FIXME / HACK (production code only, test dirs excluded) ===
+apps/api/src/modules/agent/agent.controller.ts:33: * be < 5 min old (mirrors recovery.controller.ts pattern). TODO(C-P0.3):
+apps/api/src/modules/assessments/assessments.service.ts:1739: * The sandbox call is the real wire from C-P2.4 (replaces the previous TODO).
+apps/api/src/modules/auth/recovery.controller.ts:17: * TODO(C-P0.3): replace with the shared guard once C-P0.3 lands.
+apps/api/src/modules/auth/recovery.controller.ts:35: // TODO(C-P0.3): swap for shared hasFreshReauth() when it lands.
+apps/api/src/modules/dossier/dossier.service.test.ts:460: // Employer-confidential redaction (TODO for C-P0.3 sensitivity-gate)
+apps/api/src/modules/dossier/dossier.service.ts:631: // TODO(C-P0.3): the sensitivity-gate + `User.currentEmployerCompanyId` flag
+apps/api/src/modules/me/me.controller.ts:33: * TODO(C-P0.3): swap for shared hasFreshReauth() when it lands.
+apps/api/src/modules/usage/usage.controller.ts:96: // A-M6: TODO(multitenant): scope AppConfig by userId once multi-user lands.
+apps/api/src/modules/usage/usage.controller.ts:116: // A-M6: TODO(multitenant): scope AppConfig by userId once multi-user lands.
+apps/api/src/modules/usage/usage.controller.ts:137: // A-M6: TODO(multitenant): scope AppConfig by userId once multi-user lands.
+apps/api/src/modules/usage/usage.service.ts:122: * TODO(multitenant): scope AppConfig by userId; drop this guard.
+apps/web/src/components/market-demand/SkillDemandTable.tsx:12: * TODO(api): implement GET /api/market/skill-demand?window=<days>
+apps/web/src/components/market-demand/SkillDemandTable.tsx:85: // ponytail: endpoint missing (see TODO above). Fall back to fixture so
+apps/web/src/components/market-demand/TrendSignalsPanel.tsx:9: * TODO(api): implement GET /api/market/trends
+apps/web/src/components/search-providers/SearchProvidersPanel.tsx:9: * TODO(api): implement GET /api/search-providers
+packages/ai/src/evals/skill-extract.ts:4: // TODO(slice 7b+): grow to 20+ cases (blueprint target) with a mix of clean and
+scripts/browser-agent/linkedin-discover.ts:42: // TODO(D.1): swap in RateLimiter when @careeros/browser-agent ships
+scripts/browser-agent/probe-linkedin-selectors.ts:22: * TODO(D.1): replace the inline `selectorHealth` shim with the real one
+scripts/browser-agent/probe-linkedin-selectors.ts:34: // TODO(D.1): swap in selectorHealth from @careeros/browser-agent
+
+=== GIT RECENT COMMITS (last 20) ===
+47be31a plan: comprehensive pending snapshot (2026-10-02)
+d5f6f7d plan-sync: J1 task-runner real wire shipped e6ec584
+e6ec584 J1: desktop task-runner real Playwright wire (replaces H2 stub)
+c2585e2 plan-sync: I1 D.6 + D.8 shipped 4746494
+4746494 I1: D.6 packaging + D.8 ops (electron-builder + updater + proxy + cleanup + rotation)
+133c8e2 plan-sync: flip H1 + H2 status rows to shipped SHAs
+28d4e29 plan-sync: H1 + H2 shipped
+f65cd96 H2: D.4 Electron desktop scaffold (minimal viable)
+ca93a9c H1: no-analytics-in-web guard test (direct + transitive via lockfile)
+c879c2a plan-sync: flip G1 + G2 + G3 status rows to shipped SHAs
+49292e9 plan-sync: G1 + G2 + G3 shipped
+5f6f76d G3: lefthook + eslint rules + verify-esco script
+4fe6c0f G2: ATS-lint per-rule tests (packages/resume-render)
+2cb812c G1: USAGE_STATS opt-in env stub + startup-check negative-case full grid
+0074e43 plan-sync: grader agents shipped 522932d
+522932d assessments: ship debugging + mock-interview + system-design grader agents
+a413a5a plan-sync: flip batch 2 status rows to shipped SHAs
+11814f9 plan-sync: batch 2 shipped (A, B, C, D)
+cc914a5 D: api container hardening + backup RPO/RTO docs
+88dfc9c C: backup byte-inspection + email-parser fuzz + migration-safety scaffold
+
+=== HIGH-CHURN FILES (last 90 days, top 20) ===
+  21 pnpm-lock.yaml
+  18 apps/api/src/app.module.ts
+  17 plan/COMPLETION_PLAN.md
+  17 apps/api/prisma/schema.prisma
+  15 plan/security.md
+  14 apps/api/package.json
+  14 plan/HANDOFF.md
+  13 plan/DEFERRED.md
+  13 packages/ai/src/index.ts
+  11 plan/SESSION_COORDINATION.md
+   8 package.json
+   8 infra/docker/docker-compose.yml
+   7 apps/api/src/modules/me/me.service.ts
+   7 apps/worker/src/main.ts
+   7 packages/shared/src/index.ts
+   7 apps/api/src/modules/jobs/jobs.service.ts
+   7 packages/job-pipeline/src/index.ts
+   6 apps/api/src/modules/market-brief/market-brief.service.ts
+   6 apps/web/next.config.mjs
+   5 apps/api/src/modules/assessments/assessments.service.ts
+
+=== MONOREPO SIGNALS ===
+Monorepo tool detected: pnpm-workspace.yaml
+Monorepo tool detected: turbo.json
+Sub-package directory found: packages/
+Sub-package directory found: apps/
+
+=== CODE METRICS ===
+Total files scanned: 1107
+Total lines of code: 91231
+
+Files by language:
+  TypeScript: 622
+  Other: 360
+  TypeScript/React: 124
+  JavaScript: 1
+
+Top 10 largest files:
+docs/personal_ai_career_os_blueprint_v1_2_self_hosted_provider_agnostic.docx: 1646.7KB
+docs/personal_ai_career_os_blueprint_rendered_diagrams.docx: 1391.8KB
+pnpm-lock.yaml: 458.3KB
+careeros-screens/phase-0-install-and-first-run/index.html: 410.1KB
+careeros-screens/phase-1-personal-intelligence/index.html: 405.6KB
+careeros-screens/phase-6-controlled-execution/index.html: 395.8KB
+careeros-screens/phase-2-assessment-arena/22-assessment-arena.html: 384.7KB
+careeros-screens/phase-6-controlled-execution/64-audit-log.html: 383.7KB
+careeros-screens/phase-6-controlled-execution/46-approval-queue.html: 383.2KB
+careeros-screens/phase-4-the-hunt/38-company-dossier.html: 382.7KB
+
+=== CI/CD PIPELINES ===
+CI/CD: GitHub Actions
+
+=== CONTAINERS & ORCHESTRATION ===
+No containerization configs detected.
+
+=== SECURITY & COMPLIANCE ===
+Security: SECURITY.md
+
+=== PERFORMANCE & TESTING ===
+No performance testing configs detected.
+
+=== SCAN COMPLETE ===

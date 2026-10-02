@@ -1,0 +1,256 @@
+{
+  "schemaVersion": 1,
+  "kind": "codebase-knowledge-index",
+  "project": "Career OS",
+  "repository": "okayvignesh/careeros",
+  "commit": "47be31a",
+  "generatedAt": "2026-10-02",
+  "summary": "Self-hosted, provider-agnostic Personal AI Career Operating System. pnpm/Turborepo monorepo (Next.js 16, NestJS 10, BullMQ, Electron); Postgres is the system of record, LLMs are not. Alpha, pre-v0.1.",
+  "entrypoints": {
+    "api": "apps/api/src/main.ts",
+    "web": "apps/web/src/app/layout.tsx",
+    "worker": "apps/worker/src/main.ts",
+    "desktop": "apps/desktop/src/main.ts",
+    "agentGateway": "apps/api/src/modules/agent/agent.gateway.ts",
+    "schema": "apps/api/prisma/schema.prisma"
+  },
+  "readingOrder": [
+    "README.md",
+    "AI_CONTEXT.md",
+    "STACK.md",
+    "STRUCTURE.md",
+    "ARCHITECTURE.md",
+    "CONVENTIONS.md",
+    "INTEGRATIONS.md",
+    "TESTING.md",
+    "CONCERNS.md"
+  ],
+  "whereToLook": {
+    "big picture, document index, divergences": "README.md",
+    "compact single-file brief for pasting into a model context": "AI_CONTEXT.md",
+    "languages, runtimes, dependencies, commands, environment": "STACK.md",
+    "directory layout, entry points, module boundaries, naming": "STRUCTURE.md",
+    "system flow, layers, reused patterns, architectural risks": "ARCHITECTURE.md",
+    "naming, formatting/lint, imports, errors and logging, testing rules": "CONVENTIONS.md",
+    "external apis, data stores, secrets, reliability, observability": "INTEGRATIONS.md",
+    "test frameworks, layout, scope, mocking, ci gates, gaps": "TESTING.md",
+    "prioritised risks, technical debt, security, open questions": "CONCERNS.md"
+  },
+  "documents": [
+    {
+      "file": "README.md",
+      "title": "Career OS — Knowledge Base",
+      "topics": [
+        "Executive summary",
+        "Documents",
+        "How to use this knowledge base",
+        "System overview",
+        "Intent vs reality (divergences)",
+        "Coverage and confidence",
+        "Open questions"
+      ],
+      "words": 923,
+      "bytes": 6945,
+      "approxTokens": 1736,
+      "path": "docs/codebase/README.md"
+    },
+    {
+      "file": "AI_CONTEXT.md",
+      "title": "Career OS — AI Context Brief",
+      "topics": [
+        "What it is",
+        "Stack (actual, verified)",
+        "Structure",
+        "Architecture in one paragraph",
+        "Key commands",
+        "Conventions that matter",
+        "Where to look",
+        "Top risks to keep in mind"
+      ],
+      "words": 838,
+      "bytes": 6204,
+      "approxTokens": 1551,
+      "path": "docs/codebase/AI_CONTEXT.md"
+    },
+    {
+      "file": "STACK.md",
+      "title": "Technology Stack",
+      "topics": [
+        "Core Sections (Required)",
+        "Extended Sections"
+      ],
+      "words": 1147,
+      "bytes": 10188,
+      "approxTokens": 2547,
+      "path": "docs/codebase/STACK.md"
+    },
+    {
+      "file": "STRUCTURE.md",
+      "title": "Codebase Structure",
+      "topics": [
+        "Core Sections (Required)",
+        "Extended Sections"
+      ],
+      "words": 1026,
+      "bytes": 9350,
+      "approxTokens": 2338,
+      "path": "docs/codebase/STRUCTURE.md"
+    },
+    {
+      "file": "ARCHITECTURE.md",
+      "title": "Architecture",
+      "topics": [
+        "Core Sections (Required)",
+        "Extended Sections"
+      ],
+      "words": 1124,
+      "bytes": 9679,
+      "approxTokens": 2420,
+      "path": "docs/codebase/ARCHITECTURE.md"
+    },
+    {
+      "file": "CONVENTIONS.md",
+      "title": "Coding Conventions",
+      "topics": [
+        "Core Sections (Required)",
+        "Extended Sections"
+      ],
+      "words": 957,
+      "bytes": 8550,
+      "approxTokens": 2138,
+      "path": "docs/codebase/CONVENTIONS.md"
+    },
+    {
+      "file": "INTEGRATIONS.md",
+      "title": "External Integrations",
+      "topics": [
+        "Core Sections (Required)",
+        "Extended Sections"
+      ],
+      "words": 1091,
+      "bytes": 9601,
+      "approxTokens": 2400,
+      "path": "docs/codebase/INTEGRATIONS.md"
+    },
+    {
+      "file": "TESTING.md",
+      "title": "Testing Patterns",
+      "topics": [
+        "Core Sections (Required)",
+        "Extended Sections"
+      ],
+      "words": 877,
+      "bytes": 7058,
+      "approxTokens": 1765,
+      "path": "docs/codebase/TESTING.md"
+    },
+    {
+      "file": "CONCERNS.md",
+      "title": "Codebase Concerns",
+      "topics": [
+        "Core Sections (Required)"
+      ],
+      "words": 1645,
+      "bytes": 12890,
+      "approxTokens": 3223,
+      "path": "docs/codebase/CONCERNS.md"
+    }
+  ],
+  "stack": [
+    {
+      "name": "TypeScript",
+      "slug": "typescript",
+      "role": "Language",
+      "version": "5.9.3"
+    },
+    {
+      "name": "Node.js",
+      "slug": "nodedotjs",
+      "role": "Runtime",
+      "version": "20+"
+    },
+    {
+      "name": "Next.js",
+      "slug": "nextdotjs",
+      "role": "Web framework",
+      "version": "16.3.6"
+    },
+    {
+      "name": "React",
+      "slug": "react",
+      "role": "UI library",
+      "version": "19.3.0"
+    },
+    {
+      "name": "NestJS",
+      "slug": "nestjs",
+      "role": "API framework",
+      "version": "10.4.4"
+    },
+    {
+      "name": "Prisma",
+      "slug": "prisma",
+      "role": "ORM",
+      "version": "6.19.3"
+    },
+    {
+      "name": "PostgreSQL",
+      "slug": "postgresql",
+      "role": "System of record",
+      "version": "16"
+    },
+    {
+      "name": "Redis",
+      "slug": "redis",
+      "role": "Queues & cache",
+      "version": "7"
+    },
+    {
+      "name": "Qdrant",
+      "slug": "qdrant",
+      "role": "Vector database",
+      "version": "1.12.4"
+    },
+    {
+      "name": "MinIO",
+      "slug": "minio",
+      "role": "Object storage",
+      "version": "2024.10"
+    },
+    {
+      "name": "Docker",
+      "slug": "docker",
+      "role": "Deployment",
+      "version": "Compose v2"
+    },
+    {
+      "name": "Electron",
+      "slug": "electron",
+      "role": "Desktop agent",
+      "version": "31.3.1"
+    },
+    {
+      "name": "Playwright",
+      "slug": "playwright",
+      "role": "E2E & agent automation",
+      "version": "1.63"
+    },
+    {
+      "name": "DeepSeek",
+      "slug": "deepseek",
+      "role": "Default LLM provider",
+      "version": "DeepSeek Chat / Reasoner"
+    },
+    {
+      "name": "Slack",
+      "slug": "slack",
+      "role": "Daily assistant channel",
+      "version": "Web API 7"
+    }
+  ],
+  "signals": {
+    "mermaidDiagrams": 6,
+    "totalApproxTokens": 20118
+  },
+  "usage": "Load this file first to discover the knowledge base, then read documents in readingOrder or by topic. Every non-trivial claim cites committed file paths; [TODO] = unknown from source, [ASK USER] = needs team intent. Docs are Markdown by design so any AI/agent can read them."
+}

@@ -1,0 +1,17 @@
+[
+  { "name": "TypeScript", "slug": "typescript", "role": "Language", "version": "5.9.3" },
+  { "name": "Node.js", "slug": "nodedotjs", "role": "Runtime", "version": "20+" },
+  { "name": "Next.js", "slug": "nextdotjs", "role": "Web framework", "version": "16.3.6" },
+  { "name": "React", "slug": "react", "role": "UI library", "version": "19.3.0" },
+  { "name": "NestJS", "slug": "nestjs", "role": "API framework", "version": "10.4.4" },
+  { "name": "Prisma", "slug": "prisma", "role": "ORM", "version": "6.19.3" },
+  { "name": "PostgreSQL", "slug": "postgresql", "role": "System of record", "version": "16" },
+  { "name": "Redis", "slug": "redis", "role": "Queues & cache", "version": "7" },
+  { "name": "Qdrant", "slug": "qdrant", "role": "Vector database", "version": "1.12.4" },
+  { "name": "MinIO", "slug": "minio", "role": "Object storage", "version": "2024.10" },
+  { "name": "Docker", "slug": "docker", "role": "Deployment", "version": "Compose v2" },
+  { "name": "Electron", "slug": "electron", "role": "Desktop agent", "version": "31.3.1" },
+  { "name": "Playwright", "slug": "playwright", "role": "E2E & agent automation", "version": "1.63" },
+  { "name": "DeepSeek", "slug": "deepseek", "role": "Default LLM provider", "version": "DeepSeek Chat / Reasoner" },
+  { "name": "Slack", "slug": "slack", "role": "Daily assistant channel", "version": "Web API 7" }
+]
