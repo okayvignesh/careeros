@@ -13,6 +13,8 @@
     "@careeros/aggregator": "workspace:*",
     "@careeros/browser-agent": "workspace:*",
     "@careeros/embeddings": "workspace:*",
+    "@careeros/firecrawl": "workspace:*",
+    "@careeros/job-pipeline": "workspace:*",
     "@careeros/secrets": "workspace:*",
     "@careeros/shared": "workspace:*",
     "@octokit/rest": "^21.1.0",

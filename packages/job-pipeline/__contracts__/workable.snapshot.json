@@ -1,0 +1,36 @@
+{
+  "jobs": [
+    {
+      "application_url": "string",
+      "city": "string",
+      "code": "string",
+      "country": "string",
+      "created_at": "string",
+      "department": "string",
+      "description": "string",
+      "education": "string",
+      "employment_type": "string",
+      "experience": "string",
+      "function": "string",
+      "industry": "string",
+      "locations": [
+        {
+          "city": "string",
+          "country": "string",
+          "countryCode": "string",
+          "hidden": "boolean",
+          "region": null
+        }
+      ],
+      "published_on": "string",
+      "shortcode": "string",
+      "shortlink": "string",
+      "state": "string",
+      "telecommuting": "boolean",
+      "title": "string",
+      "url": "string"
+    }
+  ],
+  "name": "string",
+  "description": null
+}

@@ -1,0 +1,16 @@
+{
+  "searchResults": [
+    {
+      "id": 1709,
+      "portalUrl": "https://jobs-preview2test.icims.com/jobs/1709/customer-service-representative/job",
+      "self": "https://api.icims.com/customers/1769/portals/jobs/1709",
+      "updatedDate": "2026-09-30 02:07 PM"
+    },
+    {
+      "id": 1708,
+      "portalUrl": "https://jobs-preview2test.icims.com/jobs/1708/administrative-assistant/job",
+      "self": "https://api.icims.com/customers/1769/portals/jobs/1708",
+      "updatedDate": "2026-09-29 09:00 AM"
+    }
+  ]
+}

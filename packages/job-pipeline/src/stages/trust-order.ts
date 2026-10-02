@@ -30,6 +30,11 @@ import { verify, type VerifyOpts, type VerifyVerdict } from './verify';
 export const TIER_BY_ADAPTER: Readonly<Record<string, 1 | 2 | 3>> = {
   ashby: 1,
   greenhouse: 1,
+  // Lever / SmartRecruiters / Workable are keyless, first-party public ATS
+  // postings APIs — same signal class as Ashby/Greenhouse.
+  lever: 1,
+  smartrecruiters: 1,
+  workable: 1,
   adzuna: 2,
   arbeitnow: 2,
   remotive: 2,
@@ -37,6 +42,11 @@ export const TIER_BY_ADAPTER: Readonly<Record<string, 1 | 2 | 3>> = {
   // exact host/tenant/site canonical, then callers pass `tierOverrides:
   // { workday: 1 }` (mirrors createWorkdayAdapter({ verified: true })).
   workday: 2,
+  // iCIMS / SuccessFactors are partner- or tenant-gated career-site APIs, not
+  // keyless first-party boards: tier 2 until an operator marks the exact
+  // customer/portal or tenant canonical (mirrors `verified: true`).
+  icims: 2,
+  successfactors: 2,
   // Firecrawl is web-discovered: DISCOVERED, never auto-VERIFIED.
   firecrawl: 3,
 };

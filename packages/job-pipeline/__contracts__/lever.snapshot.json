@@ -1,0 +1,29 @@
+{
+  "jobs": [
+    {
+      "additional": "string",
+      "additionalPlain": "string",
+      "applyUrl": "string",
+      "categories": {
+        "allLocations": [
+          "string"
+        ],
+        "location": "string",
+        "team": "string"
+      },
+      "country": "string",
+      "createdAt": "number",
+      "description": "string",
+      "descriptionBody": "string",
+      "descriptionBodyPlain": "string",
+      "descriptionPlain": "string",
+      "hostedUrl": "string",
+      "id": "string",
+      "lists": [],
+      "opening": "string",
+      "openingPlain": "string",
+      "text": "string",
+      "workplaceType": "string"
+    }
+  ]
+}

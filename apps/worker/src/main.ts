@@ -12,6 +12,7 @@ import {
   ALL_COLLECTIONS,
   QUEUE_EMBEDDING,
   QUEUE_GITHUB,
+  RATE_LIMITS,
   type EmbeddingGeneratePayload,
   type GithubSyncPayload,
 } from '@careeros/shared';
@@ -69,6 +70,13 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { installEgressProxy } from '@careeros/shared/net';
 import { registerWorker } from './register-worker.js';
+import {
+  FIRECRAWL_SEARCH_CRON,
+  handleFirecrawlSearch,
+  JOB_FIRECRAWL_SEARCH,
+  QUEUE_FIRECRAWL_SEARCH,
+  type FirecrawlSearchPayload,
+} from './firecrawl-search.worker.js';
 
 const logger = pino({
   name: 'careeros-worker',
@@ -293,8 +301,27 @@ async function bootstrap() {
     logger,
   );
 
+  // F8: candidate-targeted Firecrawl sweep every 6 hours. Static jobId keeps
+  // the schedule idempotent across restarts. `limiter` documents the per-host
+  // Firecrawl ceiling from packages/shared/rate-limits; the handler itself
+  // paces individual search calls and no-ops cleanly when the API key is unset.
+  await registerWorker(
+    {
+      queue: QUEUE_FIRECRAWL_SEARCH,
+      jobName: JOB_FIRECRAWL_SEARCH,
+      connection,
+      schedule: { pattern: FIRECRAWL_SEARCH_CRON },
+      limiter: { max: RATE_LIMITS.firecrawl.callsPerMinute ?? 10, duration: 60_000 },
+      handler: (data: FirecrawlSearchPayload) => handleFirecrawlSearch(prisma, logger, data),
+      unknownJobNameMessage: 'unknown firecrawl-search job name',
+      failedMessage: 'firecrawl-search job failed',
+      completed: { message: 'firecrawl-search job completed', include: 'result' },
+    },
+    logger,
+  );
+
   logger.info(
-    `worker up, listening on queues '${QUEUE_GITHUB}', '${QUEUE_GITLAB}', '${QUEUE_EMBEDDING}', '${QUEUE_RETENTION}', '${QUEUE_CORPUS_REFRESH}', '${QUEUE_MARKET_SNAPSHOT}', '${QUEUE_AUDIT_LOG_RETENTION}', '${QUEUE_GMAIL_WATCH_RENEWAL}', '${QUEUE_SELECTOR_HEALTH}'`,
+    `worker up, listening on queues '${QUEUE_GITHUB}', '${QUEUE_GITLAB}', '${QUEUE_EMBEDDING}', '${QUEUE_RETENTION}', '${QUEUE_CORPUS_REFRESH}', '${QUEUE_MARKET_SNAPSHOT}', '${QUEUE_AUDIT_LOG_RETENTION}', '${QUEUE_GMAIL_WATCH_RENEWAL}', '${QUEUE_SELECTOR_HEALTH}', '${QUEUE_FIRECRAWL_SEARCH}'`,
   );
 }
 

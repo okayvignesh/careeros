@@ -4,15 +4,17 @@ import { type JobSkillExtraction } from '@careeros/shared';
 import { DeepSeekProvider, InjectionBlockedError, renderPrompt, wrapUntrusted } from '@careeros/ai';
 import {
   adapters as allAdapters,
-  normalize,
+  buildCandidateSearchQueries,
+  createFirecrawlAdapter,
   freshness,
   relevance,
-  crossSourceDedupe,
-  verify,
+  planIngest,
   computeMatchResult,
+  MissingCredentialError,
   type JobSourceAdapter,
   type NormalizedJob,
   type MatchResult,
+  type RawJob,
 } from '@careeros/job-pipeline';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UsageService } from '../usage/usage.service';
@@ -123,7 +125,85 @@ export class JobsService {
   async sync(adapterId: string): Promise<JobsSyncStats> {
     const adapter = this.adapters[adapterId];
     if (!adapter) throw new NotFoundException(`Unknown adapter: ${adapterId}`);
+    const raws = await adapter.fetch();
+    return this.ingest(raws, adapterId);
+  }
 
+  /**
+   * F7 candidate-targeted search. Derives bounded Firecrawl queries from the
+   * candidate's career goals, job preferences and demonstrated skills, fetches
+   * through the Firecrawl adapter (banned platforms filtered, `DISCOVERED`
+   * trust kept), then runs the identical ingest funnel as `sync`. A missing
+   * Firecrawl key degrades to a clean zero-stat no-op.
+   */
+  async syncCandidateSearch(
+    userId: string,
+    adapterOverride?: JobSourceAdapter,
+  ): Promise<JobsSyncStats> {
+    const stats: JobsSyncStats = {
+      adapter: 'firecrawl-search',
+      fetched: 0,
+      rawInserted: 0,
+      normalizedInserted: 0,
+      normalizedUpdated: 0,
+      rejected: 0,
+      merged: 0,
+    };
+    const queries = await this.buildCandidateQueries(userId);
+    if (queries.length === 0) {
+      this.logger.warn(`candidate ${userId} has no target roles; firecrawl search skipped`);
+      return stats;
+    }
+    const adapter = adapterOverride ?? createFirecrawlAdapter({ queries });
+    let raws: RawJob[];
+    try {
+      raws = await adapter.fetch();
+    } catch (err) {
+      if (err instanceof MissingCredentialError) {
+        this.logger.warn('firecrawl search skipped: FIRECRAWL_API_KEY not configured');
+        return stats;
+      }
+      throw err;
+    }
+    return this.ingest(raws, 'firecrawl-search');
+  }
+
+  /** Resolve goal + prefs + skills into Firecrawl query strings. */
+  private async buildCandidateQueries(userId: string): Promise<string[]> {
+    const [goal, prefs, skillStates, catalogue] = await Promise.all([
+      this.prisma.careerGoal.findUnique({ where: { userId } }),
+      this.prefs.get(userId),
+      this.prisma.candidateSkillState.findMany({
+        where: { userId },
+        select: { skillId: true, proficiency: true },
+        orderBy: { proficiency: 'desc' },
+        take: 8,
+      }),
+      this.prisma.skill.findMany({ select: { id: true, name: true } }),
+    ]);
+    const nameById = new Map(catalogue.map((s) => [s.id, s.name]));
+    const names = (ids: string[]): string[] =>
+      ids.map((id) => nameById.get(id)).filter((n): n is string => Boolean(n));
+
+    return buildCandidateSearchQueries({
+      targetRoles: prefs.targetRoles.length > 0 ? prefs.targetRoles : (goal?.targetRoles ?? []),
+      locations: prefs.locations.length > 0 ? prefs.locations : (goal?.locations ?? []),
+      remoteOnly: (goal?.remoteOnly ?? false) || prefs.remoteOnly,
+      seniority: goal?.seniority ?? [],
+      mustHaveSkills: names(prefs.mustHaveSkills),
+      dealbreakerSkills: names(prefs.dealbreakerSkills),
+      candidateSkills: skillStates
+        .map((s) => nameById.get(s.skillId))
+        .filter((n): n is string => Boolean(n)),
+    });
+  }
+
+  /**
+   * Shared ingest funnel: append raw → normalize → cross-source dedupe →
+   * verify → persist. Relevance/freshness/match stay read-time stages in
+   * `list` so preference changes re-evaluate without a re-ingest.
+   */
+  private async ingest(raws: RawJob[], adapterId: string): Promise<JobsSyncStats> {
     const stats: JobsSyncStats = {
       adapter: adapterId,
       fetched: 0,
@@ -134,7 +214,6 @@ export class JobsService {
       merged: 0,
     };
 
-    const raws = await adapter.fetch();
     stats.fetched = raws.length;
     if (raws.length === 0) {
       this.logger.warn(`adapter ${adapterId} returned 0 jobs; layout may have changed`);
@@ -173,46 +252,28 @@ export class JobsService {
     const rawResult = await this.prisma.jobRaw.createMany({ data: rawRows });
     stats.rawInserted = rawResult.count;
 
-    // C-P3.2e wiring: normalize → cross-source fuzzy dedupe → verify.
-    // Rejected rows never touch jobs_normalized; every rejected row lands as
-    // one job_reject_log row for the reject-audit UI (web slice deferred).
-    // Flagged + trusted continue into the existing N+1-safe upsert flow.
-    const normalizedAll = raws.map((r) => normalize(r));
-    const dedupeResult = crossSourceDedupe(normalizedAll);
-    stats.merged = dedupeResult.duplicates.length;
+    // C-P3.2e wiring: normalize → cross-source fuzzy dedupe → verify. Shared
+    // with the F8 worker via `planIngest` so the API and cron paths cannot
+    // diverge. Rejected rows never touch jobs_normalized; every rejected row
+    // lands as one job_reject_log row for the reject-audit UI. Flagged +
+    // trusted continue into the existing N+1-safe upsert flow.
+    const plan = planIngest(raws);
+    stats.merged = plan.duplicates.length;
 
-    // Look up jobRawId for each surviving canonicalUrl so the reject-log can
-    // point at the exact provenance row. One extra query per sync (still O(1)
-    // per batch, preserves the C-P3.8b N+1 invariant).
-    const rejectRows: Prisma.JobRejectLogCreateManyInput[] = [];
-    const survivors: NormalizedJob[] = [];
-    for (const n of dedupeResult.unique) {
-      const v = verify(n);
-      if (v.verdict === 'rejected') {
-        rejectRows.push({
-          jobRawId: null, // filled below via the raws map
-          sourceId: extractSourceIdFromTag(n.sourceTag),
-          sourceName: n.primarySource,
-          reason: v.reasons[0] ?? 'unknown',
-          verdict: 'rejected',
-          details: {
-            reasons: v.reasons,
-            canonicalUrl: n.canonicalUrl,
-            title: n.title,
-            company: n.company,
-            rawJd: n.description,
-            sourcePostedAt: n.sourcePostedAt?.toISOString() ?? null,
-          } as Prisma.InputJsonValue,
-        });
-        continue;
-      }
-      survivors.push(n);
-    }
+    const rejectRows: Prisma.JobRejectLogCreateManyInput[] = plan.rejected.map((r) => ({
+      jobRawId: null,
+      sourceId: r.sourceId,
+      sourceName: r.sourceName,
+      reason: r.reason,
+      verdict: 'rejected',
+      details: r.details as Prisma.InputJsonValue,
+    }));
+    const survivors: NormalizedJob[] = plan.normalized;
     // Fold merged loser sourceTags onto each survivor before persist.
     // ponytail: this stage-owned merged-tag map is per-batch; the existing-row
     // update path re-merges with the DB-side sourceIds below to cover the case
     // where the same URL was persisted in a prior sync.
-    const mergedTags = dedupeResult.mergedSourceTagsByWinner;
+    const mergedTags = plan.mergedSourceTagsByWinner;
 
     if (rejectRows.length > 0) {
       await this.prisma.jobRejectLog.createMany({ data: rejectRows });
@@ -570,14 +631,4 @@ export class JobsService {
 
 function uniq<T>(arr: T[]): T[] {
   return Array.from(new Set(arr));
-}
-
-/**
- * `sourceTag = "${sourceName}:${sourceId}"`. Strip the source-name prefix to
- * recover the adapter-native id for reject-log persistence. If the format
- * ever drifts, fall back to the whole tag so we never lose provenance.
- */
-function extractSourceIdFromTag(sourceTag: string): string {
-  const idx = sourceTag.indexOf(':');
-  return idx >= 0 ? sourceTag.slice(idx + 1) : sourceTag;
 }

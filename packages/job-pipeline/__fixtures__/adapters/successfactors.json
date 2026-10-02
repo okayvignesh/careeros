@@ -1,0 +1,25 @@
+{
+  "d": {
+    "results": [
+      {
+        "jobReqId": "10042",
+        "jobTitle": "Senior Backend Engineer",
+        "jobDescription": "<p>Own our distributed platform and ship the boring code.</p>",
+        "location": "Remote - Germany",
+        "jobType": "Regular Full-Time",
+        "createdDateTime": "2026-09-20T08:00:00Z",
+        "lastModifiedDateTime": "2026-09-25T10:30:00Z",
+        "status": "OPEN"
+      },
+      {
+        "jobReqId": "10043",
+        "jobTitle": "Product Designer",
+        "jobDescription": "<p>Design the tools candidates love.</p>",
+        "location": "Berlin, DE",
+        "jobType": "Regular Full-Time",
+        "createdDateTime": "2026-08-01T10:00:00Z",
+        "status": "OPEN"
+      }
+    ]
+  }
+}

@@ -80,6 +80,18 @@ export class JobsController {
     return this.jobs.extractSkillsBatch(userId, parsedLimit);
   }
 
+  /**
+   * F7: run candidate-targeted Firecrawl discovery for the signed-in user.
+   * Scoped to the caller (career goals + prefs drive the query plan).
+   */
+  @Post('admin/jobs/candidate-search')
+  @RequireAdmin()
+  @HttpCode(200)
+  async candidateSearch(@Req() req: Request) {
+    const userId = this.session.requireUserId(req);
+    return this.jobs.syncCandidateSearch(userId);
+  }
+
   @Post('admin/jobs/:id/extract-skills')
   @RequireAdmin()
   @HttpCode(200)

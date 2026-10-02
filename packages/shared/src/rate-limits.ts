@@ -38,6 +38,27 @@ export const RATE_LIMITS = {
     callsPerMinute: 20,
     note: 'Public CXS endpoint: no published limit; conservative courtesy ceiling per host.',
   },
+  'lever': {
+    callsPerMinute: 60,
+    note: 'Public Postings API (v0): read endpoints rate-limited per IP; polite ceiling.',
+  },
+  'smartrecruiters': {
+    callsPerMinute: 60,
+    note: 'Public Posting API: no published limit; conservative courtesy ceiling per company.',
+  },
+  'workable': {
+    callsPerMinute: 10,
+    note: 'Public jobs widget: aggressive per-IP heuristic (soft-bans ~100 requests); keep low.',
+  },
+  'icims': {
+    callsPerMinute: 30,
+    callsPerDay: 10_000,
+    note: 'Partner Job Portal API (Basic auth); Search API is cache-backed, not real-time.',
+  },
+  'successfactors': {
+    callsPerMinute: 60,
+    note: 'Tenant OData v2 API (Basic auth); per-tenant fair-use, no published number.',
+  },
   'slack': { callsPerMinute: 60, note: 'Web API tier 3: 1 req/sec per channel.' },
   'gmail': { note: '250 quota units/sec/user; units-not-requests, so no request ceiling.' },
 } as const satisfies Record<string, ProviderRateLimit>;

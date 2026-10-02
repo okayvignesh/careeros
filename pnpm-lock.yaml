@@ -309,6 +309,12 @@ importers:
       '@careeros/embeddings':
         specifier: workspace:*
         version: link:../../packages/embeddings
+      '@careeros/firecrawl':
+        specifier: workspace:*
+        version: link:../../packages/firecrawl
+      '@careeros/job-pipeline':
+        specifier: workspace:*
+        version: link:../../packages/job-pipeline
       '@careeros/secrets':
         specifier: workspace:*
         version: link:../../packages/secrets

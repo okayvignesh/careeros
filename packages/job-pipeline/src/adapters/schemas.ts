@@ -260,6 +260,163 @@ export const FirecrawlSearchResponseWire = z
   })
   .passthrough();
 
+// ---------- Lever (public Postings API v0) ----------
+// `GET /v0/postings/{site}?mode=json` returns a bare JSON array of postings.
+export const LeverPostingWire = z
+  .object({
+    id: z.string().min(1),
+    text: z.string().min(1),
+    categories: z
+      .object({
+        location: z.string().optional(),
+        team: z.string().optional(),
+        department: z.string().optional(),
+        commitment: z.string().optional(),
+        allLocations: z.array(z.string()).optional(),
+      })
+      .passthrough()
+      .optional(),
+    createdAt: z.number().optional(),
+    hostedUrl: z.string().url().optional(),
+    applyUrl: z.string().url().optional(),
+    description: z.string().optional(),
+    descriptionPlain: z.string().optional(),
+    openingPlain: z.string().optional(),
+    country: z.string().optional(),
+    workplaceType: z.string().optional(),
+    salaryRange: z.unknown().optional(),
+  })
+  .passthrough();
+
+export const LeverBoardWire = z.array(LeverPostingWire);
+
+// ---------- SmartRecruiters (public Posting API v1) ----------
+// `GET /v1/companies/{companyId}/postings` -> { offset, limit, totalFound, content }.
+export const SmartRecruitersPostingWire = z
+  .object({
+    id: z.string().min(1),
+    name: z.string().min(1),
+    uuid: z.string().optional(),
+    refNumber: z.string().optional(),
+    company: z
+      .object({ identifier: z.string().optional(), name: z.string().optional() })
+      .passthrough()
+      .optional(),
+    releasedDate: z.string().optional(),
+    location: z
+      .object({
+        city: z.string().optional(),
+        region: z.string().optional(),
+        country: z.string().optional(),
+        remote: z.boolean().optional(),
+        hybrid: z.boolean().optional(),
+        fullLocation: z.string().optional(),
+      })
+      .passthrough()
+      .optional(),
+    department: z.unknown().optional(),
+    function: z.unknown().optional(),
+    industry: z.unknown().optional(),
+    typeOfEmployment: z.unknown().optional(),
+    experienceLevel: z.unknown().optional(),
+    ref: z.string().optional(),
+    visibility: z.string().optional(),
+    postingUrl: z.string().url().optional(),
+    applyUrl: z.string().url().optional(),
+    jobAd: z.unknown().optional(),
+  })
+  .passthrough();
+
+export const SmartRecruitersResponseWire = z
+  .object({
+    offset: z.number().optional(),
+    limit: z.number().optional(),
+    totalFound: z.number().optional(),
+    content: z.array(SmartRecruitersPostingWire),
+  })
+  .passthrough();
+
+// ---------- Workable (public jobs widget) ----------
+// `GET https://apply.workable.com/api/v1/widget/accounts/{account}?details=true`.
+export const WorkableJobWire = z
+  .object({
+    title: z.string().min(1),
+    shortcode: z.string().min(1),
+    code: z.string().optional(),
+    employment_type: z.string().optional(),
+    telecommuting: z.boolean().optional(),
+    department: z.string().optional(),
+    url: z.string().url().optional(),
+    shortlink: z.string().url().optional(),
+    application_url: z.string().url().optional(),
+    published_on: z.string().optional(),
+    created_at: z.string().optional(),
+    country: z.string().optional(),
+    city: z.string().optional(),
+    state: z.string().optional(),
+    description: z.string().optional(),
+    requirements: z.string().optional(),
+    benefits: z.string().optional(),
+    function: z.string().optional(),
+    industry: z.string().optional(),
+    locations: z.array(z.unknown()).optional(),
+  })
+  .passthrough();
+
+export const WorkableBoardWire = z
+  .object({
+    name: z.string().optional(),
+    description: z.string().nullish(),
+    jobs: z.array(WorkableJobWire),
+  })
+  .passthrough();
+
+// ---------- iCIMS (partner Job Portal API) ----------
+// `GET /customers/{customerId}/search/portals/{portalId}` -> { searchResults }.
+export const IcimsSearchResultWire = z
+  .object({
+    id: z.union([z.number(), z.string()]),
+    portalUrl: z.string().url(),
+    self: z.string().url().optional(),
+    updatedDate: z.string().optional(),
+    jobtitle: z.string().optional(),
+    jobTitle: z.string().optional(),
+    title: z.string().optional(),
+    description: z.string().optional(),
+    company: z.string().optional(),
+    location: z.string().optional(),
+    joblocation: z.string().optional(),
+  })
+  .passthrough();
+
+export const IcimsSearchResponseWire = z
+  .object({
+    searchResults: z.array(IcimsSearchResultWire),
+  })
+  .passthrough();
+
+// ---------- SuccessFactors (tenant OData v2 JobRequisition) ----------
+// `GET /odata/v2/JobRequisition?$top=&$skip=&$format=json` -> { d: { results } }.
+export const SuccessFactorsJobWire = z
+  .object({
+    jobReqId: z.union([z.string(), z.number()]),
+    jobTitle: z.string().optional(),
+    jobDescription: z.string().optional(),
+    location: z.string().optional(),
+    jobType: z.string().optional(),
+    createdDateTime: z.string().optional(),
+    lastModifiedDateTime: z.string().optional(),
+    status: z.string().optional(),
+    jobCode: z.string().optional(),
+  })
+  .passthrough();
+
+export const SuccessFactorsResponseWire = z
+  .object({
+    d: z.object({ results: z.array(SuccessFactorsJobWire) }).passthrough(),
+  })
+  .passthrough();
+
 /**
  * Registry of adapter wire schemas. The workflow / snapshot regeneration walks
  * this map so a new adapter is one entry, not a new script.
@@ -272,6 +429,11 @@ export const adapterWireSchemas = {
   arbeitnow: ArbeitnowResponseWire,
   workday: WorkdayJobsWire,
   firecrawl: FirecrawlSearchResponseWire,
+  lever: LeverBoardWire,
+  smartrecruiters: SmartRecruitersResponseWire,
+  workable: WorkableBoardWire,
+  icims: IcimsSearchResponseWire,
+  successfactors: SuccessFactorsResponseWire,
 } as const;
 
 export type AdapterId = keyof typeof adapterWireSchemas;
@@ -305,7 +467,7 @@ export function snapshotPath(adapterId: string): string {
  */
 export function minimizePayload(
   raw: unknown,
-  jobsKey: 'jobs' | 'results' | 'data' | 'jobPostings',
+  jobsKey: 'jobs' | 'results' | 'data' | 'jobPostings' | 'content' | 'searchResults',
 ): unknown {
   if (raw === null || typeof raw !== 'object') return raw;
   const obj = raw as Record<string, unknown>;

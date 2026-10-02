@@ -45,9 +45,16 @@ describe('trustOrder (C-P3.2b)', () => {
     // MUTATION SMOKE: swap ashby to tier 2 → this fails.
     expect(TIER_BY_ADAPTER.ashby).toBe(1);
     expect(TIER_BY_ADAPTER.greenhouse).toBe(1);
+    // Keyless first-party ATS postings APIs.
+    expect(TIER_BY_ADAPTER.lever).toBe(1);
+    expect(TIER_BY_ADAPTER.smartrecruiters).toBe(1);
+    expect(TIER_BY_ADAPTER.workable).toBe(1);
     expect(TIER_BY_ADAPTER.adzuna).toBe(2);
     expect(TIER_BY_ADAPTER.arbeitnow).toBe(2);
     expect(TIER_BY_ADAPTER.remotive).toBe(2);
+    // Tenant/partner-gated career-site APIs stay tier 2 until verified.
+    expect(TIER_BY_ADAPTER.icims).toBe(2);
+    expect(TIER_BY_ADAPTER.successfactors).toBe(2);
     // MUTATION SMOKE: default unknown to tier 1 → this fails.
     expect(tierFor('agent-scraped')).toBe(3);
     expect(tierFor('greenhouse')).toBe(1);

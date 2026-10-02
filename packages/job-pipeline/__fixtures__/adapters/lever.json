@@ -1,0 +1,36 @@
+[
+  {
+    "id": "58db3f8e-b108-47d1-9e6e-87a1712497cd",
+    "text": "Senior Backend Engineer",
+    "categories": {
+      "location": "Toronto, Ontario",
+      "team": "Platform",
+      "department": "Engineering",
+      "commitment": "Full-time",
+      "allLocations": ["Toronto, Ontario"]
+    },
+    "createdAt": 1499363737955,
+    "hostedUrl": "https://jobs.lever.co/acme/58db3f8e-b108-47d1-9e6e-87a1712497cd",
+    "applyUrl": "https://jobs.lever.co/acme/58db3f8e-b108-47d1-9e6e-87a1712497cd/apply",
+    "descriptionPlain": "Own our distributed platform and ship the boring code.",
+    "description": "<p>Own our distributed platform and ship the boring code.</p>",
+    "country": "CA",
+    "workplaceType": "remote",
+    "salaryRange": { "min": 120000, "max": 180000, "currency": "CAD", "interval": "per-year-salary" }
+  },
+  {
+    "id": "d3afdff4-3005-4d29-a548-3b106436eabe",
+    "text": "Product Designer",
+    "categories": {
+      "location": "San Francisco, CA",
+      "team": "Design",
+      "allLocations": ["San Francisco, CA"]
+    },
+    "createdAt": 1768598306310,
+    "hostedUrl": "https://jobs.lever.co/acme/d3afdff4-3005-4d29-a548-3b106436eabe",
+    "applyUrl": "https://jobs.lever.co/acme/d3afdff4-3005-4d29-a548-3b106436eabe/apply",
+    "descriptionPlain": "Design the tools candidates love.",
+    "country": "US",
+    "workplaceType": "hybrid"
+  }
+]

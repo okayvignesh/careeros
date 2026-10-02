@@ -27,6 +27,7 @@ import {
   type MockInterviewGrade,
   type RubricGrade,
   type RubricGradeResponse,
+  type TaskKind,
 } from '@careeros/shared';
 import { DeepSeekProvider, renderPrompt, wrapUntrusted, type AIProvider, type Sensitivity } from '@careeros/ai';
 import { runSandboxed, type LanguageId, type SandboxResult } from '@careeros/sandbox';
@@ -363,77 +364,21 @@ export class AssessmentsService {
 
     const grading = await this.gradeWithLlmOrFallback(userId, input.answer, q.prompt, q.keyPoints);
 
-    const attempt = await this.prisma.attempt.create({
-      data: {
-        userId,
-        questionId: q.id,
-        kind: 'knowledge',
-        score: grading.score.toFixed(3),
-        reasoning: grading.reasoning,
-        answerJson: { answer: input.answer },
-        gradingJson: { hits: grading.hits, misses: grading.misses, grader: grading.grader },
-        ...(input.durationMs != null ? { durationMs: input.durationMs } : {}),
-      },
-    });
-
-    // Evidence: one row per mapped skill. Correct-hinted signal because the
-    // user got points off keyPoint matches (light structural hints in a way).
-    // Incorrect answers still write an evidence row using the aggregator's
-    // incorrect-with-correction path so the reason log captures the miss.
-    const signal = grading.score >= 0.7 ? 'correct-independent' : 'incorrect-with-correction';
-    const skillDeltas: AttemptResult['skillDeltas'] = [];
-    for (const skillId of q.skillIds) {
-      const skill = await this.prisma.skill.findUnique({ where: { id: skillId } });
-      if (!skill) continue; // skip missing skill IDs; seed drift shouldn't crash the endpoint
-      const beforeState = await this.prisma.candidateSkillState.findUnique({
-        where: { userId_skillId: { userId, skillId } },
-      });
-      await this.prisma.evidence.create({
-        data: {
-          userId,
-          skillId,
-          kind: 'assessment',
-          signal,
-          weightHint: grading.score.toFixed(3),
-          sourceRef: { kind: 'attempt', id: attempt.id },
-          detail: { questionId: q.id, hits: grading.hits, misses: grading.misses },
-        },
-      });
-      const after = await syncSkillState(this.prisma, userId, skillId);
-      skillDeltas.push({
-        skillId,
-        beforeLevel: beforeState?.level ?? 1,
-        afterLevel: after.level,
-        beforeProficiency: beforeState ? Number(beforeState.proficiency) : 0,
-        afterProficiency: after.state.proficiency,
-      });
-
-      await this.reconcileRemediation(userId, skillId, skill.name, grading.score);
-    }
-
-    const xpAwarded = xpFor('knowledge', grading.score);
-    await this.prisma.xpEvent.create({
-      data: { userId, attemptId: attempt.id, reason: 'attempt:knowledge', xp: xpAwarded },
-    });
-
-    const [xpSum, streakState] = await Promise.all([
-      this.prisma.xpEvent.aggregate({ where: { userId }, _sum: { xp: true } }),
-      this.tickStreak(userId, new Date()),
-    ]);
-    const totalXp = xpSum._sum.xp ?? 0;
-
-    return {
-      attemptId: attempt.id,
+    return this.recordAttemptOutcome({
+      userId,
+      attemptKind: 'knowledge',
+      questionId: q.id,
       score: grading.score,
-      hits: grading.hits,
-      misses: grading.misses,
       reasoning: grading.reasoning,
-      xpAwarded,
-      totalXp,
-      ...levelChange(totalXp, xpAwarded),
-      streakDays: streakState.currentDays,
-      skillDeltas,
-    };
+      answerJson: { answer: input.answer },
+      gradingJson: { hits: grading.hits, misses: grading.misses, grader: grading.grader },
+      ...(input.durationMs != null ? { durationMs: input.durationMs } : {}),
+      skillIds: q.skillIds,
+      evidenceSourceRef: (attemptId) => ({ kind: 'attempt', id: attemptId }),
+      evidenceDetail: { questionId: q.id, hits: grading.hits, misses: grading.misses },
+      resultHits: grading.hits,
+      resultMisses: grading.misses,
+    });
   }
 
   async getAttempt(userId: string, id: string): Promise<AttemptResult | null> {
@@ -669,85 +614,34 @@ export class AssessmentsService {
 
     const grading = await this.gradeReviewWithLlmOrFallback(userId, input.findings, q.prompt, q.keyPoints);
 
-    const attempt = await this.prisma.attempt.create({
-      data: {
-        userId,
-        questionId: q.id,
-        kind: 'code-review',
-        score: grading.score.toFixed(3),
-        reasoning: grading.reasoning,
-        answerJson: { findings: input.findings },
-        gradingJson: {
-          hits: grading.hits,
-          misses: grading.misses,
-          falsePositives: grading.falsePositives,
-          precision: grading.precision,
-          recall: grading.recall,
-          grader: grading.grader,
-        },
-        ...(input.durationMs != null ? { durationMs: input.durationMs } : {}),
-      },
-    });
-
-    const signal = grading.score >= 0.7 ? 'correct-independent' : 'incorrect-with-correction';
-    const skillDeltas: AttemptResult['skillDeltas'] = [];
-    for (const skillId of q.skillIds) {
-      const skill = await this.prisma.skill.findUnique({ where: { id: skillId } });
-      if (!skill) continue;
-      const beforeState = await this.prisma.candidateSkillState.findUnique({
-        where: { userId_skillId: { userId, skillId } },
-      });
-      await this.prisma.evidence.create({
-        data: {
-          userId,
-          skillId,
-          kind: 'assessment',
-          signal,
-          weightHint: grading.score.toFixed(3),
-          sourceRef: { kind: 'attempt', id: attempt.id },
-          detail: {
-            questionId: q.id,
-            hits: grading.hits,
-            misses: grading.misses,
-            precision: grading.precision,
-            recall: grading.recall,
-          },
-        },
-      });
-      const after = await syncSkillState(this.prisma, userId, skillId);
-      skillDeltas.push({
-        skillId,
-        beforeLevel: beforeState?.level ?? 1,
-        afterLevel: after.level,
-        beforeProficiency: beforeState ? Number(beforeState.proficiency) : 0,
-        afterProficiency: after.state.proficiency,
-      });
-      await this.reconcileRemediation(userId, skillId, skill.name, grading.score);
-    }
-
-    const xpAwarded = xpFor('code-review', grading.score);
-    await this.prisma.xpEvent.create({
-      data: { userId, attemptId: attempt.id, reason: 'attempt:code-review', xp: xpAwarded },
-    });
-
-    const [xpSum, streakState] = await Promise.all([
-      this.prisma.xpEvent.aggregate({ where: { userId }, _sum: { xp: true } }),
-      this.tickStreak(userId, new Date()),
-    ]);
-    const totalXp = xpSum._sum.xp ?? 0;
-
-    return {
-      attemptId: attempt.id,
+    return this.recordAttemptOutcome({
+      userId,
+      attemptKind: 'code-review',
+      questionId: q.id,
       score: grading.score,
-      hits: grading.hits,
-      misses: grading.misses,
       reasoning: grading.reasoning,
-      xpAwarded,
-      totalXp,
-      ...levelChange(totalXp, xpAwarded),
-      streakDays: streakState.currentDays,
-      skillDeltas,
-    };
+      answerJson: { findings: input.findings },
+      gradingJson: {
+        hits: grading.hits,
+        misses: grading.misses,
+        falsePositives: grading.falsePositives,
+        precision: grading.precision,
+        recall: grading.recall,
+        grader: grading.grader,
+      },
+      ...(input.durationMs != null ? { durationMs: input.durationMs } : {}),
+      skillIds: q.skillIds,
+      evidenceSourceRef: (attemptId) => ({ kind: 'attempt', id: attemptId }),
+      evidenceDetail: {
+        questionId: q.id,
+        hits: grading.hits,
+        misses: grading.misses,
+        precision: grading.precision,
+        recall: grading.recall,
+      },
+      resultHits: grading.hits,
+      resultMisses: grading.misses,
+    });
   }
 
   /**
@@ -892,88 +786,37 @@ export class AssessmentsService {
 
     const grading = await this.gradeSystemDesignWithLlmOrFallback(userId, input.design, q.prompt, constraints);
 
-    // Score bound to the rubric version present at grade time — persists on
-    // gradingJson so historical attempts can be replayed against their rubric.
-    const attempt = await this.prisma.attempt.create({
-      data: {
-        userId,
-        questionId: q.id,
-        kind: 'system-design',
-        score: grading.score.toFixed(3),
-        reasoning: grading.reasoning,
-        answerJson: { design: input.design },
-        gradingJson: {
-          rubricId: SYSTEM_DESIGN_RUBRIC.id,
-          rubricVersion: version,
-          dimensions: grading.dimensions as unknown as Prisma.InputJsonValue,
-          grader: grading.grader,
-        },
-        ...(input.durationMs != null ? { durationMs: input.durationMs } : {}),
-      },
-    });
-
-    const signal = grading.score >= 0.7 ? 'correct-independent' : 'incorrect-with-correction';
-    const skillDeltas: AttemptResult['skillDeltas'] = [];
-    for (const skillId of q.skillIds) {
-      const skill = await this.prisma.skill.findUnique({ where: { id: skillId } });
-      if (!skill) continue;
-      const beforeState = await this.prisma.candidateSkillState.findUnique({
-        where: { userId_skillId: { userId, skillId } },
-      });
-      await this.prisma.evidence.create({
-        data: {
-          userId,
-          skillId,
-          kind: 'assessment',
-          signal,
-          weightHint: grading.score.toFixed(3),
-          sourceRef: { kind: 'attempt', id: attempt.id },
-          detail: {
-            questionId: q.id,
-            rubricVersion: version,
-            dimensions: grading.dimensions as unknown as Prisma.InputJsonValue,
-          },
-        },
-      });
-      const after = await syncSkillState(this.prisma, userId, skillId);
-      skillDeltas.push({
-        skillId,
-        beforeLevel: beforeState?.level ?? 1,
-        afterLevel: after.level,
-        beforeProficiency: beforeState ? Number(beforeState.proficiency) : 0,
-        afterProficiency: after.state.proficiency,
-      });
-      await this.reconcileRemediation(userId, skillId, skill.name, grading.score);
-    }
-
-    const xpAwarded = xpFor('system-design', grading.score);
-    await this.prisma.xpEvent.create({
-      data: { userId, attemptId: attempt.id, reason: 'attempt:system-design', xp: xpAwarded },
-    });
-
-    const [xpSum, streakState] = await Promise.all([
-      this.prisma.xpEvent.aggregate({ where: { userId }, _sum: { xp: true } }),
-      this.tickStreak(userId, new Date()),
-    ]);
-    const totalXp = xpSum._sum.xp ?? 0;
-
     // AttemptResult carries hits/misses; repurpose them to show which dimensions
     // hit level >=4 (hits) vs. <=2 (misses). Result UI surfaces this as-is.
     const hits = grading.dimensions.filter((d) => d.score >= 4).map((d) => `${d.dimensionId}: ${d.score}/5`);
     const misses = grading.dimensions.filter((d) => d.score <= 2).map((d) => `${d.dimensionId}: ${d.score}/5`);
 
-    return {
-      attemptId: attempt.id,
+    // Score bound to the rubric version present at grade time — persists on
+    // gradingJson so historical attempts can be replayed against their rubric.
+    return this.recordAttemptOutcome({
+      userId,
+      attemptKind: 'system-design',
+      questionId: q.id,
       score: grading.score,
-      hits,
-      misses,
       reasoning: grading.reasoning,
-      xpAwarded,
-      totalXp,
-      ...levelChange(totalXp, xpAwarded),
-      streakDays: streakState.currentDays,
-      skillDeltas,
-    };
+      answerJson: { design: input.design },
+      gradingJson: {
+        rubricId: SYSTEM_DESIGN_RUBRIC.id,
+        rubricVersion: version,
+        dimensions: grading.dimensions as unknown as Prisma.InputJsonValue,
+        grader: grading.grader,
+      },
+      ...(input.durationMs != null ? { durationMs: input.durationMs } : {}),
+      skillIds: q.skillIds,
+      evidenceSourceRef: (attemptId) => ({ kind: 'attempt', id: attemptId }),
+      evidenceDetail: {
+        questionId: q.id,
+        rubricVersion: version,
+        dimensions: grading.dimensions as unknown as Prisma.InputJsonValue,
+      },
+      resultHits: hits,
+      resultMisses: misses,
+    });
   }
 
   /**
@@ -1270,68 +1113,6 @@ export class AssessmentsService {
 
     const grading = await this.gradeDebuggingWithLlmOrFallback(userId, input.fix, q.prompt, rootCause, description);
 
-    const attempt = await this.prisma.attempt.create({
-      data: {
-        userId,
-        questionId: q.id,
-        kind: 'debugging',
-        score: grading.score.toFixed(3),
-        reasoning: grading.reasoning,
-        answerJson: { fix: input.fix },
-        gradingJson: {
-          correctness: grading.correctness,
-          minimality: grading.minimality,
-          grader: grading.grader,
-        },
-        ...(input.durationMs != null ? { durationMs: input.durationMs } : {}),
-      },
-    });
-
-    const signal = grading.score >= 0.7 ? 'correct-independent' : 'incorrect-with-correction';
-    const skillDeltas: AttemptResult['skillDeltas'] = [];
-    for (const skillId of q.skillIds) {
-      const skill = await this.prisma.skill.findUnique({ where: { id: skillId } });
-      if (!skill) continue;
-      const beforeState = await this.prisma.candidateSkillState.findUnique({
-        where: { userId_skillId: { userId, skillId } },
-      });
-      await this.prisma.evidence.create({
-        data: {
-          userId,
-          skillId,
-          kind: 'assessment',
-          signal,
-          weightHint: grading.score.toFixed(3),
-          sourceRef: { kind: 'attempt', id: attempt.id },
-          detail: {
-            questionId: q.id,
-            correctness: grading.correctness,
-            minimality: grading.minimality,
-          },
-        },
-      });
-      const after = await syncSkillState(this.prisma, userId, skillId);
-      skillDeltas.push({
-        skillId,
-        beforeLevel: beforeState?.level ?? 1,
-        afterLevel: after.level,
-        beforeProficiency: beforeState ? Number(beforeState.proficiency) : 0,
-        afterProficiency: after.state.proficiency,
-      });
-      await this.reconcileRemediation(userId, skillId, skill.name, grading.score);
-    }
-
-    const xpAwarded = xpFor('debugging', grading.score);
-    await this.prisma.xpEvent.create({
-      data: { userId, attemptId: attempt.id, reason: 'attempt:debugging', xp: xpAwarded },
-    });
-
-    const [xpSum, streakState] = await Promise.all([
-      this.prisma.xpEvent.aggregate({ where: { userId }, _sum: { xp: true } }),
-      this.tickStreak(userId, new Date()),
-    ]);
-    const totalXp = xpSum._sum.xp ?? 0;
-
     // Reuse AttemptResult hits/misses to surface the two component scores.
     const hits: string[] = [];
     const misses: string[] = [];
@@ -1340,18 +1121,29 @@ export class AssessmentsService {
     if (grading.minimality >= 0.7) hits.push(`minimality ${(grading.minimality * 100).toFixed(0)}%`);
     else misses.push(`minimality ${(grading.minimality * 100).toFixed(0)}%`);
 
-    return {
-      attemptId: attempt.id,
+    return this.recordAttemptOutcome({
+      userId,
+      attemptKind: 'debugging',
+      questionId: q.id,
       score: grading.score,
-      hits,
-      misses,
       reasoning: grading.reasoning,
-      xpAwarded,
-      totalXp,
-      ...levelChange(totalXp, xpAwarded),
-      streakDays: streakState.currentDays,
-      skillDeltas,
-    };
+      answerJson: { fix: input.fix },
+      gradingJson: {
+        correctness: grading.correctness,
+        minimality: grading.minimality,
+        grader: grading.grader,
+      },
+      ...(input.durationMs != null ? { durationMs: input.durationMs } : {}),
+      skillIds: q.skillIds,
+      evidenceSourceRef: (attemptId) => ({ kind: 'attempt', id: attemptId }),
+      evidenceDetail: {
+        questionId: q.id,
+        correctness: grading.correctness,
+        minimality: grading.minimality,
+      },
+      resultHits: hits,
+      resultMisses: misses,
+    });
   }
 
   private async gradeDebuggingWithLlmOrFallback(
@@ -1519,82 +1311,31 @@ export class AssessmentsService {
 
     const grading = await this.gradeMockInterviewWithLlmOrFallback(userId, input.answers, scenario, questions);
 
-    const attempt = await this.prisma.attempt.create({
-      data: {
-        userId,
-        questionId: q.id,
-        kind: 'mock-interview',
-        score: grading.score.toFixed(3),
-        reasoning: grading.reasoning,
-        answerJson: { answers: input.answers },
-        gradingJson: {
-          questions: grading.questions as unknown as Prisma.InputJsonValue,
-          grader: grading.grader,
-        },
-        ...(input.durationMs != null ? { durationMs: input.durationMs } : {}),
-      },
-    });
-
-    const signal = grading.score >= 0.7 ? 'correct-independent' : 'incorrect-with-correction';
-    const skillDeltas: AttemptResult['skillDeltas'] = [];
-    for (const skillId of q.skillIds) {
-      const skill = await this.prisma.skill.findUnique({ where: { id: skillId } });
-      if (!skill) continue;
-      const beforeState = await this.prisma.candidateSkillState.findUnique({
-        where: { userId_skillId: { userId, skillId } },
-      });
-      await this.prisma.evidence.create({
-        data: {
-          userId,
-          skillId,
-          kind: 'assessment',
-          signal,
-          weightHint: grading.score.toFixed(3),
-          sourceRef: { kind: 'attempt', id: attempt.id },
-          detail: {
-            questionId: q.id,
-            perQuestion: grading.questions as unknown as Prisma.InputJsonValue,
-          },
-        },
-      });
-      const after = await syncSkillState(this.prisma, userId, skillId);
-      skillDeltas.push({
-        skillId,
-        beforeLevel: beforeState?.level ?? 1,
-        afterLevel: after.level,
-        beforeProficiency: beforeState ? Number(beforeState.proficiency) : 0,
-        afterProficiency: after.state.proficiency,
-      });
-      await this.reconcileRemediation(userId, skillId, skill.name, grading.score);
-    }
-
-    const xpAwarded = xpFor('mock-interview', grading.score);
-    await this.prisma.xpEvent.create({
-      data: { userId, attemptId: attempt.id, reason: 'attempt:mock-interview', xp: xpAwarded },
-    });
-
-    const [xpSum, streakState] = await Promise.all([
-      this.prisma.xpEvent.aggregate({ where: { userId }, _sum: { xp: true } }),
-      this.tickStreak(userId, new Date()),
-    ]);
-    const totalXp = xpSum._sum.xp ?? 0;
-
     // Reuse AttemptResult hits/misses to surface per-question pass/fail summary.
     const hits = grading.questions.filter((qg) => qg.score >= 0.7).map((qg) => `Q${qg.index + 1}: ${(qg.score * 100).toFixed(0)}%`);
     const misses = grading.questions.filter((qg) => qg.score < 0.7).map((qg) => `Q${qg.index + 1}: ${(qg.score * 100).toFixed(0)}%`);
 
-    return {
-      attemptId: attempt.id,
+    return this.recordAttemptOutcome({
+      userId,
+      attemptKind: 'mock-interview',
+      questionId: q.id,
       score: grading.score,
-      hits,
-      misses,
       reasoning: grading.reasoning,
-      xpAwarded,
-      totalXp,
-      ...levelChange(totalXp, xpAwarded),
-      streakDays: streakState.currentDays,
-      skillDeltas,
-    };
+      answerJson: { answers: input.answers },
+      gradingJson: {
+        questions: grading.questions as unknown as Prisma.InputJsonValue,
+        grader: grading.grader,
+      },
+      ...(input.durationMs != null ? { durationMs: input.durationMs } : {}),
+      skillIds: q.skillIds,
+      evidenceSourceRef: (attemptId) => ({ kind: 'attempt', id: attemptId }),
+      evidenceDetail: {
+        questionId: q.id,
+        perQuestion: grading.questions as unknown as Prisma.InputJsonValue,
+      },
+      resultHits: hits,
+      resultMisses: misses,
+    });
   }
 
   /**
@@ -1774,91 +1515,40 @@ export class AssessmentsService {
     const sandboxResult = await this.runSandbox({ language, code: program, timeoutMs });
     const grading = scoreBuildRun(sandboxResult);
 
-    const attempt = await this.prisma.attempt.create({
-      data: {
-        userId,
-        questionId: q.id,
-        kind: 'build',
-        score: grading.score.toFixed(3),
-        reasoning: grading.reasoning,
-        answerJson: { code: input.code },
-        gradingJson: {
-          passed: grading.passed,
-          failed: grading.failed,
-          total: grading.total,
-          sandbox: {
-            status: sandboxResult.status,
-            exitCode: sandboxResult.exitCode,
-            wallTimeMs: sandboxResult.wallTimeMs,
-            ...(sandboxResult.killedBy ? { killedBy: sandboxResult.killedBy } : {}),
-          },
-          grader: 'sandbox' as const,
-        },
-        ...(input.durationMs != null ? { durationMs: input.durationMs } : {}),
-      },
-    });
-
-    const signal = grading.score >= 0.7 ? 'correct-independent' : 'incorrect-with-correction';
-    const skillDeltas: AttemptResult['skillDeltas'] = [];
-    for (const skillId of q.skillIds) {
-      const skill = await this.prisma.skill.findUnique({ where: { id: skillId } });
-      if (!skill) continue;
-      const beforeState = await this.prisma.candidateSkillState.findUnique({
-        where: { userId_skillId: { userId, skillId } },
-      });
-      await this.prisma.evidence.create({
-        data: {
-          userId,
-          skillId,
-          kind: 'assessment',
-          signal,
-          weightHint: grading.score.toFixed(3),
-          sourceRef: { kind: 'attempt', id: attempt.id },
-          detail: {
-            questionId: q.id,
-            passed: grading.passed,
-            failed: grading.failed,
-            total: grading.total,
-            sandboxStatus: sandboxResult.status,
-          },
-        },
-      });
-      const after = await syncSkillState(this.prisma, userId, skillId);
-      skillDeltas.push({
-        skillId,
-        beforeLevel: beforeState?.level ?? 1,
-        afterLevel: after.level,
-        beforeProficiency: beforeState ? Number(beforeState.proficiency) : 0,
-        afterProficiency: after.state.proficiency,
-      });
-      await this.reconcileRemediation(userId, skillId, skill.name, grading.score);
-    }
-
-    const xpAwarded = xpFor('build', grading.score);
-    await this.prisma.xpEvent.create({
-      data: { userId, attemptId: attempt.id, reason: 'attempt:build', xp: xpAwarded },
-    });
-
-    const [xpSum, streakState] = await Promise.all([
-      this.prisma.xpEvent.aggregate({ where: { userId }, _sum: { xp: true } }),
-      this.tickStreak(userId, new Date()),
-    ]);
-    const totalXp = xpSum._sum.xp ?? 0;
-
     const hits = grading.passedNames.map((n) => `pass: ${n}`);
     const misses = grading.failedNames.map((n) => `fail: ${n}`);
-    return {
-      attemptId: attempt.id,
+    return this.recordAttemptOutcome({
+      userId,
+      attemptKind: 'build',
+      questionId: q.id,
       score: grading.score,
-      hits,
-      misses,
       reasoning: grading.reasoning,
-      xpAwarded,
-      totalXp,
-      ...levelChange(totalXp, xpAwarded),
-      streakDays: streakState.currentDays,
-      skillDeltas,
-    };
+      answerJson: { code: input.code },
+      gradingJson: {
+        passed: grading.passed,
+        failed: grading.failed,
+        total: grading.total,
+        sandbox: {
+          status: sandboxResult.status,
+          exitCode: sandboxResult.exitCode,
+          wallTimeMs: sandboxResult.wallTimeMs,
+          ...(sandboxResult.killedBy ? { killedBy: sandboxResult.killedBy } : {}),
+        },
+        grader: 'sandbox' as const,
+      },
+      ...(input.durationMs != null ? { durationMs: input.durationMs } : {}),
+      skillIds: q.skillIds,
+      evidenceSourceRef: (attemptId) => ({ kind: 'attempt', id: attemptId }),
+      evidenceDetail: {
+        questionId: q.id,
+        passed: grading.passed,
+        failed: grading.failed,
+        total: grading.total,
+        sandboxStatus: sandboxResult.status,
+      },
+      resultHits: hits,
+      resultMisses: misses,
+    });
   }
 
   /** Hand-seeded build-task so `nextBuildTask` works before any LLM provider is wired. */
@@ -2049,37 +1739,26 @@ export class AssessmentsService {
       for (const s of q.skillIds) allSkills.add(s);
 
       const grading = await this.gradeWithLlmOrFallback(userId, answers[i] ?? '', q.prompt, q.keyPoints);
-      const attempt = await this.prisma.attempt.create({
-        data: {
-          userId,
-          questionId: q.id,
-          kind: 'knowledge',
-          score: grading.score.toFixed(3),
-          reasoning: grading.reasoning,
-          answerJson: { answer: answers[i], bossBattleId: id },
-          gradingJson: { hits: grading.hits, misses: grading.misses, grader: grading.grader, boss: true },
-        },
+      // Per-question attempt + evidence, but XP/remediation are settled once for
+      // the encounter below (award:false, reconcile:false).
+      const recorded = await this.recordAttemptOutcome({
+        userId,
+        attemptKind: 'knowledge',
+        questionId: q.id,
+        score: grading.score,
+        reasoning: grading.reasoning,
+        answerJson: { answer: answers[i], bossBattleId: id },
+        gradingJson: { hits: grading.hits, misses: grading.misses, grader: grading.grader, boss: true },
+        skillIds: q.skillIds,
+        evidenceSourceRef: (attemptId) => ({ kind: 'attempt', id: attemptId, bossBattleId: id }),
+        evidenceDetail: { questionId: q.id, hits: grading.hits, misses: grading.misses, boss: true },
+        reconcile: false,
+        award: false,
+        resultHits: [],
+        resultMisses: [],
       });
-      attemptIds.push(attempt.id);
+      attemptIds.push(recorded.attemptId);
       perQuestionScores.push(grading.score);
-
-      // Evidence per skill on each Q — normal knowledge-attempt flow.
-      for (const skillId of q.skillIds) {
-        const skill = await this.prisma.skill.findUnique({ where: { id: skillId } });
-        if (!skill) continue;
-        await this.prisma.evidence.create({
-          data: {
-            userId,
-            skillId,
-            kind: 'assessment',
-            signal: grading.score >= 0.7 ? 'correct-independent' : 'incorrect-with-correction',
-            weightHint: grading.score.toFixed(3),
-            sourceRef: { kind: 'attempt', id: attempt.id, bossBattleId: id },
-            detail: { questionId: q.id, hits: grading.hits, misses: grading.misses, boss: true },
-          },
-        });
-        await syncSkillState(this.prisma, userId, skillId);
-      }
     }
 
     const overall = perQuestionScores.reduce((a, s) => a + s, 0) / Math.max(1, perQuestionScores.length);
@@ -2498,6 +2177,130 @@ export class AssessmentsService {
       sensitivity: 'personal',
       fallback: () => gradeKnowledge(answer, keyPoints),
     });
+  }
+
+  /**
+   * The shared attempt-outcome ritual every assessment type runs: persist the
+   * attempt, write one evidence row per mapped skill (skipping unknown skill
+   * ids so seed drift can't crash the endpoint), sync the aggregated skill
+   * state, reconcile remediation on a fail, award XP, tick the streak, and pack
+   * the AttemptResult the runner UI consumes.
+   *
+   * Per-type variation stays at the call site: the attempt/grading JSON, the
+   * skill ids, the evidence source + detail payloads, and the result hits/misses
+   * summary. `reconcile: false` + `award: false` let boss-battle batch several
+   * attempts and settle XP/remediation once for the encounter.
+   */
+  private async recordAttemptOutcome(input: {
+    userId: string;
+    attemptKind: TaskKind;
+    questionId: string;
+    score: number;
+    reasoning: string;
+    answerJson: Prisma.InputJsonValue;
+    gradingJson: Prisma.InputJsonValue;
+    durationMs?: number;
+    skillIds: string[];
+    evidenceSourceRef: (attemptId: string) => Prisma.InputJsonValue;
+    evidenceDetail: Prisma.InputJsonValue;
+    xpReason?: string;
+    xpAmount?: number;
+    reconcile?: boolean;
+    award?: boolean;
+    resultHits: string[];
+    resultMisses: string[];
+  }): Promise<AttemptResult> {
+    const attempt = await this.prisma.attempt.create({
+      data: {
+        userId: input.userId,
+        questionId: input.questionId,
+        kind: input.attemptKind,
+        score: input.score.toFixed(3),
+        reasoning: input.reasoning,
+        answerJson: input.answerJson,
+        gradingJson: input.gradingJson,
+        ...(input.durationMs != null ? { durationMs: input.durationMs } : {}),
+      },
+    });
+
+    // Correct-hinted signal because the user got points off the rubric; a fail
+    // still writes evidence via the incorrect-with-correction path so the reason
+    // log captures the miss.
+    const signal = input.score >= 0.7 ? 'correct-independent' : 'incorrect-with-correction';
+    const skillDeltas: AttemptResult['skillDeltas'] = [];
+    for (const skillId of input.skillIds) {
+      const skill = await this.prisma.skill.findUnique({ where: { id: skillId } });
+      if (!skill) continue;
+      const beforeState = await this.prisma.candidateSkillState.findUnique({
+        where: { userId_skillId: { userId: input.userId, skillId } },
+      });
+      await this.prisma.evidence.create({
+        data: {
+          userId: input.userId,
+          skillId,
+          kind: 'assessment',
+          signal,
+          weightHint: input.score.toFixed(3),
+          sourceRef: input.evidenceSourceRef(attempt.id),
+          detail: input.evidenceDetail,
+        },
+      });
+      const after = await syncSkillState(this.prisma, input.userId, skillId);
+      skillDeltas.push({
+        skillId,
+        beforeLevel: beforeState?.level ?? 1,
+        afterLevel: after.level,
+        beforeProficiency: beforeState ? Number(beforeState.proficiency) : 0,
+        afterProficiency: after.state.proficiency,
+      });
+      if (input.reconcile !== false) {
+        await this.reconcileRemediation(input.userId, skillId, skill.name, input.score);
+      }
+    }
+
+    if (input.award === false) {
+      return {
+        attemptId: attempt.id,
+        score: input.score,
+        hits: input.resultHits,
+        misses: input.resultMisses,
+        reasoning: input.reasoning,
+        xpAwarded: 0,
+        totalXp: 0,
+        ...levelChange(0, 0),
+        streakDays: 0,
+        skillDeltas,
+      };
+    }
+
+    const xpAwarded = input.xpAmount ?? xpFor(input.attemptKind, input.score);
+    await this.prisma.xpEvent.create({
+      data: {
+        userId: input.userId,
+        attemptId: attempt.id,
+        reason: input.xpReason ?? `attempt:${input.attemptKind}`,
+        xp: xpAwarded,
+      },
+    });
+
+    const [xpSum, streakState] = await Promise.all([
+      this.prisma.xpEvent.aggregate({ where: { userId: input.userId }, _sum: { xp: true } }),
+      this.tickStreak(input.userId, new Date()),
+    ]);
+    const totalXp = xpSum._sum.xp ?? 0;
+
+    return {
+      attemptId: attempt.id,
+      score: input.score,
+      hits: input.resultHits,
+      misses: input.resultMisses,
+      reasoning: input.reasoning,
+      xpAwarded,
+      totalXp,
+      ...levelChange(totalXp, xpAwarded),
+      streakDays: streakState.currentDays,
+      skillDeltas,
+    };
   }
 
   private async tickStreak(userId: string, at: Date) {

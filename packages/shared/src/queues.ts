@@ -38,3 +38,18 @@ export interface EmbeddingGeneratePayload {
   sensitivity: 'public' | 'personal' | 'confidential' | 'employer-confidential';
   meta?: Record<string, string | number | boolean>;
 }
+
+// F8: scheduled candidate-targeted Firecrawl search. The handler iterates
+// every candidate with career goals when `userId` is omitted; a manual run may
+// scope to one user.
+export const QUEUE_FIRECRAWL_SEARCH = 'firecrawl-search';
+
+export const JOB_FIRECRAWL_SEARCH = 'search';
+
+export type FirecrawlSearchJobName = typeof JOB_FIRECRAWL_SEARCH;
+
+export interface FirecrawlSearchPayload {
+  reason: 'scheduled' | 'manual';
+  /** Omit for the scheduled all-candidates sweep. */
+  userId?: string;
+}

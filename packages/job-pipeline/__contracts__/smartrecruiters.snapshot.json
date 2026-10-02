@@ -1,0 +1,63 @@
+{
+  "content": [
+    {
+      "company": {
+        "identifier": "string",
+        "name": "string"
+      },
+      "customField": [
+        {
+          "fieldId": "string",
+          "fieldLabel": "string",
+          "valueId": "string",
+          "valueLabel": "string"
+        }
+      ],
+      "defaultJobAd": "boolean",
+      "department": {
+        "id": "string",
+        "label": "string"
+      },
+      "experienceLevel": {
+        "id": "string",
+        "label": "string"
+      },
+      "function": {
+        "id": "string",
+        "label": "string"
+      },
+      "id": "string",
+      "industry": {
+        "id": "string",
+        "label": "string"
+      },
+      "jobAdId": "string",
+      "language": {
+        "code": "string",
+        "label": "string",
+        "labelNative": "string"
+      },
+      "location": {
+        "city": "string",
+        "country": "string",
+        "fullLocation": "string",
+        "hybrid": "boolean",
+        "region": "string",
+        "remote": "boolean"
+      },
+      "name": "string",
+      "ref": "string",
+      "refNumber": "string",
+      "releasedDate": "string",
+      "typeOfEmployment": {
+        "id": "string",
+        "label": "string"
+      },
+      "uuid": "string",
+      "visibility": "string"
+    }
+  ],
+  "offset": "number",
+  "limit": "number",
+  "totalFound": "number"
+}
