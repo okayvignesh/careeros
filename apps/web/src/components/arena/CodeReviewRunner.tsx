@@ -30,7 +30,8 @@ export function CodeReviewRunner() {
   const [findings, setFindings] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const startedAt = useRef<number>(Date.now());
+  // Set when the task loads; 0 is a sentinel that is never read before then.
+  const startedAt = useRef<number>(0);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {

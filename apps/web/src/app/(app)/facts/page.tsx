@@ -10,7 +10,7 @@ export default function FactsPage() {
           Verified facts
         </h1>
         <p className="max-w-2xl text-[14px] leading-relaxed text-fg-muted">
-          The candidate twin's ground truth. Every generated document may only rephrase these
+          The candidate twin&apos;s ground truth. Every generated document may only rephrase these
           facts. Toggle a row off if it becomes wrong.
         </p>
       </header>

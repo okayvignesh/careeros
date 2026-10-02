@@ -7,15 +7,6 @@ import { ThinkingOrb } from 'thinking-orbs';
 import { Button } from '@careeros/ui';
 import { ErrorBanner } from './AccountForm';
 
-interface ExtractedFacts {
-  headline: string | null;
-  location: string | null;
-  employment: unknown[];
-  education: unknown[];
-  skills: unknown[];
-  projects: unknown[];
-}
-
 const MAX_BYTES = 10 * 1024 * 1024;
 const ACCEPTED = '.pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 

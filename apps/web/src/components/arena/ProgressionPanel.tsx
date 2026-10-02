@@ -41,7 +41,6 @@ export function ProgressionPanel() {
   }, []);
 
   useEffect(() => {
-    setSeries(null);
     apiGet<TimeseriesPoint[]>(`/assessments/progression/timeseries?days=${windowDays}`)
       .then(setSeries)
       .catch((e) => setError((e as Error).message));
@@ -120,7 +119,12 @@ export function ProgressionPanel() {
               <button
                 key={d}
                 type="button"
-                onClick={() => setWindowDays(d as WindowDays)}
+                onClick={() => {
+                  if (d === windowDays) return;
+                  // Reset to the skeleton while the new window is fetched.
+                  setSeries(null);
+                  setWindowDays(d as WindowDays);
+                }}
                 className={cn(
                   'rounded-md px-2 py-1 text-[11px] font-medium transition-colors',
                   d === windowDays

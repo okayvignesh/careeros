@@ -67,6 +67,7 @@ import {
 } from '@careeros/browser-agent';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { installEgressProxy } from '@careeros/shared/net';
 
 const logger = pino({
   name: 'careeros-worker',
@@ -105,6 +106,9 @@ async function ensureCollections() {
 }
 
 async function bootstrap() {
+  // A-H8/T6: route Node global fetch through the Squid allowlist before any
+  // outbound call. Fails closed if a proxy is configured but cannot be built.
+  installEgressProxy();
   const seed = await seedSkills(prisma);
   logger.info(seed, 'skills seed ready');
 

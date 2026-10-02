@@ -17,7 +17,10 @@ External contributions are welcome but not expected until v1.0.
 
 ## Development setup
 
-1. `pnpm install`
+1. `pnpm install` (this runs `prisma generate` for `@careeros/api` via its
+   `postinstall`, so the generated client exists before `pnpm typecheck`).
+   If you ever see phantom `Prisma.*` type errors, regenerate manually:
+   `pnpm --filter @careeros/api prisma generate`.
 2. `cp .env.example .env` and generate strong secrets:
    `openssl rand -hex 32` for both `MASTER_KEY` and `SESSION_SECRET`.
 3. `pnpm docker:up` (Postgres + Redis + Qdrant + MinIO + Squid).

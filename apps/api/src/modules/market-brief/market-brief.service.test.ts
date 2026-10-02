@@ -1,7 +1,20 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BadRequestException } from '@nestjs/common';
 import type { FactCheckResult, MarketBriefContent } from '@careeros/shared';
 import { MarketBriefService, splitSentences } from './market-brief.service';
+
+// The service reads the wall clock (`new Date()` in `generate`, `Date.now()` in
+// `loadFilteredPool`). The fixtures below are dated relative to
+// 2026-09-27T12:00:00Z, so freeze the system clock there; otherwise the 7-day
+// window slides with the real date and `newCount` drifts.
+const NOW = new Date('2026-09-27T12:00:00Z');
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(NOW);
+});
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 // -----------------------------------------------------------------------------
 // Test doubles

@@ -59,6 +59,12 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      # Defence in depth: the api `postinstall` runs `prisma generate`, but
+      # make the generated client explicit so a cache/install hiccup can't
+      # resurface hundreds of phantom `Prisma.*` errors in tsc.
+      - name: Generate Prisma client
+        run: pnpm --filter @careeros/api exec prisma generate
+
       - name: Typecheck
         run: pnpm -r typecheck
 

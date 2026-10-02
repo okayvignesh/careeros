@@ -4,6 +4,7 @@ import { NestFactory } from '@nestjs/core';
 import { Logger } from 'nestjs-pino';
 import helmet from 'helmet';
 import type { RequestHandler, Response } from 'express';
+import { installEgressProxy } from '@careeros/shared/net';
 import { AppModule } from './app.module';
 import { LockoutExceptionFilter } from './common/filters/lockout.filter';
 import { runStartupChecks } from './startup-check';
@@ -80,6 +81,10 @@ export function buildSecurityMiddleware(): RequestHandler[] {
 }
 
 async function bootstrap() {
+  // A-H8/T6: Node global fetch ignores proxy env vars by default; install the
+  // undici dispatcher BEFORE any outbound call so egress goes through Squid.
+  // Fails closed if a proxy is configured but the agent cannot be built.
+  installEgressProxy();
   runStartupChecks();
 
   // E.2: `rawBody: true` keeps `req.rawBody` populated so the Slack webhook

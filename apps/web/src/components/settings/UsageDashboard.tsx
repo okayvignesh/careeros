@@ -315,10 +315,6 @@ function BudgetPanel({
   const [draft, setDraft] = useState('');
   const [inputErr, setInputErr] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (budget && !editing) setDraft(budget.monthlyLimitUsd?.toString() ?? '');
-  }, [budget, editing]);
-
   function submit() {
     setInputErr(null);
     const trimmed = draft.trim();
@@ -351,7 +347,11 @@ function BudgetPanel({
         </div>
         {!editing ? (
           <button
-            onClick={() => setEditing(true)}
+            onClick={() => {
+              // Seed the draft from the loaded budget when entering edit mode.
+              setDraft(budget?.monthlyLimitUsd?.toString() ?? '');
+              setEditing(true);
+            }}
             className="text-[12px] text-fg-muted transition-colors hover:text-fg"
           >
             {budget?.monthlyLimitUsd == null ? 'Set limit' : 'Edit'}

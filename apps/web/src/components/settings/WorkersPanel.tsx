@@ -208,8 +208,8 @@ function QueueRow({
 function FailedList({ jobs }: { jobs: FailedJob[] }) {
   return (
     <div className="flex flex-col gap-1.5 border-t border-[hsl(var(--border))] pt-3">
-      {jobs.map((j) => (
-        <div key={j.id ?? Math.random()} className="flex flex-col gap-0.5 rounded-[var(--radius)] bg-[hsl(var(--bg))] px-3 py-2 text-[12px]">
+      {jobs.map((j, i) => (
+        <div key={j.id ?? `job-${i}`} className="flex flex-col gap-0.5 rounded-[var(--radius)] bg-[hsl(var(--bg))] px-3 py-2 text-[12px]">
           <div className="flex items-center justify-between">
             <span className="font-mono text-fg-subtle">
               {j.name} · {j.id ?? '—'}

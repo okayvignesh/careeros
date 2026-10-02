@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
-import { SsrfBlockedError } from '@careeros/shared';
+import { SsrfBlockedError } from '@careeros/shared/net';
 import { RawJobSchema } from '../types';
 import { createArbeitnowAdapter, mapArbeitnow } from './arbeitnow';
 import { MalformedResponseError } from './errors';

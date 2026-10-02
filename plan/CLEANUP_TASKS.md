@@ -95,6 +95,8 @@ Branch: `cleanup/health-review-2026-10-02`. Base commit: `47be31a`.
 | T24 | `packages/job-pipeline` build fails (investigate root cause) | `packages/job-pipeline/**` | Package builds clean | `pnpm --filter @careeros/job-pipeline build` | TODO |
 | T25 | Worker typecheck errors (test typing: `audit-log-retention.test.ts`, `gitlab-sync.test.ts`; `interview-prep.service.test.ts` Buffer) | apps/worker tests, apps/api test | Worker + api tests typecheck | turbo typecheck | DONE |
 | T26 | Pre-existing date-window test failures in `apps/api/src/modules/market-brief/market-brief.service.test.ts` (expected `newCount` 5, got 1; fixtures are relative to "today" = 2026-10-02) | market-brief test + fixtures | Test is time-independent (frozen clock or explicit dates) and passes | `pnpm --filter @careeros/api test` | TODO |
+| T27 | 4 adapter tests fail: `SsrfBlockedError` is `undefined` because `packages/job-pipeline/src/adapters/*.test.ts` import it from the `@careeros/shared` barrel, which excludes `./net` | `adzuna/arbeitnow/ashby/greenhouse.test.ts` | Import from `@careeros/shared/net`; tests pass | `pnpm test` | TODO |
+| T28 | New eslint 9 flat config (T18) surfaces 28 pre-existing `apps/web` lint errors (`react-hooks/set-state-in-effect` ×21, `react-hooks/purity` (Math.random in render) ×6, `react/no-unescaped-entities` ×1) | `apps/web/src/**` | Real defects fixed (purity/entities); any remaining rule scoped with a written reason, no blanket disables | `pnpm --filter @careeros/web lint` | TODO |
 
 ## Tier 6 — Job acquisition expansion: Firecrawl + Workday + other sources
 
@@ -127,3 +129,6 @@ Goal: let Career OS **search and crawl job listings online** and ingest full job
 - **Server restart** wiped the APFS verify copy's `node_modules`; rebuild scheduled before the next central verification.
 - **Central verification (Wave 1-3):** all 13 packages build; `turbo run typecheck` 26/28 tasks pass. Remaining: `@careeros/worker` (T11 — v5 vs v6 Prisma client, ungenerated) and `@careeros/api` (3 leftover T23 test-typing errors). Wave 4 dispatched to close both.
 - **U6 resolved** (owner): Tier 6 scope = public career sites/ATS + Firecrawl; LinkedIn/Indeed/Naukri/Glassdoor server-side scraping stays banned.
+- **Milestone: typecheck green.** After T11 + T23 remainder, `turbo run typecheck` = **28/28**, all 13 packages build for the first time. Lockfile regenerated (T16). Committed on the branch: `63ebb81` (code) + `85ed76b` (KB).
+- **Wave 5 dispatched:** T6 (wire undici `EnvHttpProxyAgent` so Squid actually gates `fetch`; fix the smoke test), T18 (eslint 9 peer), T20 (wire `prisma generate` into clean-clone/CI). Test-suite baseline running.
+- **Wave 5-6 complete + verified:** T6/T20/T18/T26/T27/T28 all DONE. Central gate: `turbo typecheck` 28/28, all packages build, **unit+integration 1582 passed / 0 failed (27 skipped)**, `apps/web` lint 0 errors. Committed as the second cleanup checkpoint. Live-Docker egress smoke (T6) still outstanding. Follow-up T29: migrate web fetch-on-mount to a data hook (21 documented `set-state-in-effect` warnings).
