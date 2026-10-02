@@ -1,0 +1,24 @@
+{
+  "name": "@careeros/desktop",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Career OS desktop companion agent (Electron). Pairs to the API, drives Playwright locally.",
+  "main": "./dist/main.js",
+  "scripts": {
+    "build": "tsc && node scripts/copy-renderer.mjs",
+    "dev": "pnpm build && electron ./dist/main.js",
+    "typecheck": "tsc --noEmit",
+    "start": "electron ./dist/main.js"
+  },
+  "dependencies": {
+    "@careeros/browser-agent": "workspace:*",
+    "keytar": "^7.9.0",
+    "socket.io-client": "^4.7.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.5",
+    "electron": "^31.3.1",
+    "electron-updater": "^6.3.9",
+    "typescript": "^5.6.3"
+  }
+}

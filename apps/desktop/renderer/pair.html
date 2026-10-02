@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Career OS Agent</title>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'" />
+    <style>
+      body {
+        font-family: -apple-system, Segoe UI, system-ui, sans-serif;
+        margin: 0;
+        padding: 24px;
+        background: #0b0b0f;
+        color: #e5e7eb;
+      }
+      h1 {
+        font-size: 16px;
+        margin: 0 0 8px;
+        font-weight: 600;
+      }
+      p {
+        margin: 0 0 16px;
+        color: #9ca3af;
+        font-size: 13px;
+        line-height: 1.4;
+      }
+      input {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 10px 12px;
+        font-size: 20px;
+        letter-spacing: 6px;
+        text-align: center;
+        background: #1a1a21;
+        color: #f3f4f6;
+        border: 1px solid #2b2b35;
+        border-radius: 6px;
+        outline: none;
+      }
+      input:focus {
+        border-color: #3b82f6;
+      }
+      button {
+        width: 100%;
+        margin-top: 12px;
+        padding: 10px;
+        font-size: 14px;
+        background: #2563eb;
+        color: white;
+        border: 0;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      button:disabled {
+        background: #374151;
+        cursor: not-allowed;
+      }
+      .status {
+        margin-top: 12px;
+        font-size: 13px;
+        min-height: 1.2em;
+      }
+      .status.ok { color: #4ade80; }
+      .status.err { color: #f87171; }
+    </style>
+  </head>
+  <body>
+    <h1>Pair this device</h1>
+    <p>Enter the 6-digit code from your Career OS web settings. The agent will connect to your account and run tasks on this machine.</p>
+    <input id="code" maxlength="6" inputmode="numeric" autocomplete="off" placeholder="000000" />
+    <button id="submit">Pair</button>
+    <div id="status" class="status"></div>
+    <script src="pair.js"></script>
+  </body>
+</html>
