@@ -70,6 +70,8 @@ Everything not listed is unclaimed.
 | G1 apps/api grab-bag (USAGE_STATS + startup-check grid; 3 already-shipped, 1 blocked) | shipped 2cb812c | 37/37; career_goals encryption needs schema (cross-session request filed) |
 | G2 ATS-lint per-rule tests | shipped 4fe6c0f | 5/5 new, 28/28 package |
 | G3 lefthook + eslint rules + verify-esco (5 new, 3 already-shipped) | shipped 5f6f76d | 0 new deps; root package.json surgically staged |
+| H1 no-analytics-in-web guard (direct + transitive via lockfile) | shipped ca93a9c | 3/3; 35-item blocklist; 0 new deps |
+| H2 D.4 Electron scaffold minimal (apps/desktop) | shipped f65cd96 | 10/10; builds + typecheck clean; D.6/D.8/task-runner wire still deferred |
 
 ### session-ai-infra
 
