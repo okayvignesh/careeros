@@ -285,6 +285,10 @@ jobs:
             echo "NEXT_PUBLIC_API_URL=http://localhost:3001"
             echo "WEB_URL=http://localhost:3000"
             echo "TRUSTED_ORIGINS=http://localhost:3000"
+            # The e2e suite visits many pages; each triggers the web tier's
+            # server-side /setup/state call, which would otherwise trip the
+            # 100/min throttle and fail the middleware closed (429).
+            echo "THROTTLE_LIMIT=100000"
           } >> "$GITHUB_ENV"
 
       - name: Wait for Postgres

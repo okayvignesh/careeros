@@ -20,7 +20,16 @@ import { RecoveryCodesController } from './recovery.controller';
     // (see auth/throttle.decorator.ts).
     ThrottlerModule.forRootAsync({
       useFactory: () => ({
-        throttlers: [{ ttl: 60_000, limit: 100 }],
+        // Defaults match plan/security.md item 4 (100 req/min/IP). Overridable
+        // so the e2e CI job (which visits many pages, each triggering the web
+        // tier's server-side /setup/state call) can raise the cap without
+        // weakening production defaults.
+        throttlers: [
+          {
+            ttl: Number(process.env.THROTTLE_TTL_MS ?? 60_000),
+            limit: Number(process.env.THROTTLE_LIMIT ?? 100),
+          },
+        ],
         storage: new ThrottlerStorageRedisService(
           new Redis(process.env.REDIS_URL ?? 'redis://redis:6379', {
             maxRetriesPerRequest: 3,
