@@ -41,10 +41,13 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      - name: Build desktop package
-        # Build only. electron-builder's own GitHub publisher targets
-        # `v${version}`; this workflow releases under the `desktop-v*` tag, so
-        # we attach the artifacts to that tag's release below instead.
+      - name: Build desktop app
+        run: pnpm --filter @careeros/desktop build
+
+      - name: Package (no publish)
+        # electron-builder's own GitHub publisher targets `v${version}`; this
+        # workflow releases under the `desktop-v*` tag and attaches the
+        # artifacts to that tag's release below instead.
         run: pnpm --filter @careeros/desktop exec electron-builder --config electron-builder.yml --publish never
 
       - name: Attach artifacts to the release
