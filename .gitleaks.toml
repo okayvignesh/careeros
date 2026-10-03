@@ -32,4 +32,9 @@ regexes = [
   '''xoxb-test-token''',
   '''gh[ps]_[A-Za-z0-9]{36,}-test''',
   '''deepseek-test-key-\d+''',
+  # Test fixtures that look like real credentials but are inert:
+  # - a dummy GitLab PAT in the GitLab card tests
+  # - SuccessFactors API hostnames (trigger generic-api-key entropy)
+  '''glpat-abcdefghijklmnopqrst''',
+  '''api[0-9]+\.successfactors\.com''',
 ]
