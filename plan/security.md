@@ -292,3 +292,14 @@ Runs before Nest bootstrap. Any failure = process exit 1 with a clear message po
 - **Every item above has explicit acceptance criteria.** A phase is not "done" for a security item until every checkbox is ticked AND a test exists to prevent regression.
 - **Security-relevant PRs require a checklist in the description** — which items touched, how tested.
 - **`docs/security.md`** (user-facing) mirrors this file in operator-friendly language.
+
+## Accepted transitive advisories
+
+The `pnpm audit --prod --audit-level=high` CI gate is enforced via `pnpm.overrides` in the root `package.json` for every transitive advisory that has a patched release. The two high-severity advisories below have **no patched version available** and no non-breaking upgrade path, so they are recorded as accepted via `pnpm.auditConfig.ignoreGhsas`. They are the *only* ignored advisories; anything fixable is overridden, not silenced.
+
+| Package | GHSA | Advisory | Why accepted | Exposure | Review |
+|---|---|---|---|---|---|
+| `node-forge` | `GHSA-86w9-cpqp-85rv` | RSA PKCS#1 v1.5 signature verification accepts extra nested `DigestAlgorithm` elements | No patched release exists (`patched: <0.0.0`). Pulled in only by the Expo CLI toolchain (`expo > @expo/cli > @expo/code-signing-certificates`) in `apps/mobile`, used at build time to sign update manifests for our own keys — never to verify attacker-supplied signatures. | Build-time only, not shipped in the server runtime | Re-check on every `expo`/`@expo/cli` bump; drop once upstream patches. |
+| `braces` | `GHSA-vfj7-8cjw-p6xm` | Stack-exhaustion DoS via deeply nested glob patterns | No patched release exists (`patched: <0.0.0`). Transitive dev-only dependency of the NestJS CLI file watcher (`@nestjs/cli > @angular-devkit/core > chokidar`) on `apps/api`. Glob patterns are repo-authored build inputs, never user input. | Dev/CLI only, not present in production runtime | Re-check on every `@nestjs/cli` bump; drop once upstream patches. |
+
+Last reviewed: 2026-10-03.

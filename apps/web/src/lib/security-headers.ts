@@ -42,9 +42,14 @@ export const STATIC_SECURITY_HEADERS: Readonly<Record<string, string>> = {
 };
 
 /**
- * Build the web CSP. `script-src` uses a nonce + `strict-dynamic`; Next dev
- * additionally needs `'unsafe-eval'` (HMR) and `'unsafe-inline'`. Production
- * never emits `'unsafe-inline'` for scripts.
+ * Build the web CSP. `script-src` uses `'self'` + a per-request nonce (no
+ * `'unsafe-inline'` in production). We deliberately do NOT add
+ * `'strict-dynamic'`: Next loads route chunks dynamically without the nonce,
+ * and `strict-dynamic` disables host allowlisting, so it blocks every
+ * `/_next/static/chunks/*.js` and the app never hydrates. `'self'` + nonce
+ * still blocks inline injection. Next dev additionally needs `'unsafe-eval'`
+ * (HMR) and `'unsafe-inline'`. Production never emits `'unsafe-inline'` for
+ * scripts.
  *
  * `style-src` keeps `'unsafe-inline'`: React sets inline `style` attributes and
  * framer-motion animates through the CSSOM, both of which the nonce cannot
@@ -55,7 +60,7 @@ export function buildCsp(nonce: string, apiOrigin?: string): string {
   const connect = ["'self'", apiOrigin].filter(Boolean).join(' ');
   return [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${dev ? " 'unsafe-eval' 'unsafe-inline'" : ''}`,
+    `script-src 'self' 'nonce-${nonce}'${dev ? " 'unsafe-eval' 'unsafe-inline'" : ''}`,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
