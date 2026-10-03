@@ -26,6 +26,10 @@ COPY --chown=careeros:careeros . .
 
 RUN pnpm install --frozen-lockfile || pnpm install
 
+# Drop the pnpm content-addressable store (not needed at runtime; Trivy scans
+# it and flags cached dev/build dep tarballs).
+RUN rm -rf /app/.local/share/pnpm/store
+
 # Worker reads through the same Prisma client the api generates.
 RUN pnpm --filter @careeros/api prisma generate
 

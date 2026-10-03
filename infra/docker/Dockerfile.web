@@ -21,6 +21,10 @@ COPY --chown=careeros:careeros packages/ui/package.json packages/ui/
 
 RUN pnpm install --frozen-lockfile || pnpm install
 
+# Drop the pnpm content-addressable store (not needed at runtime; Trivy scans
+# it and flags cached dev/build dep tarballs).
+RUN rm -rf /app/.local/share/pnpm/store
+
 COPY --chown=careeros:careeros . .
 
 EXPOSE 3000

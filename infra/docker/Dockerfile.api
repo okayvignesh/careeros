@@ -37,6 +37,11 @@ COPY --chown=careeros:careeros . .
 
 RUN pnpm install --frozen-lockfile || pnpm install
 
+# Drop the pnpm content-addressable store: it caches tarballs for every package
+# (incl. dev/build deps) and is not needed at runtime. Trivy otherwise scans it
+# and reports CVEs for packages the app never loads.
+RUN rm -rf /app/.local/share/pnpm/store
+
 RUN pnpm --filter @careeros/api prisma generate
 
 EXPOSE 3001
