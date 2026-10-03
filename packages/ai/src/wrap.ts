@@ -42,12 +42,37 @@ const END_TAG = '</untrusted>';
 
 // -- audit hook -------------------------------------------------------------
 
-type WrapAuditHook = (event: {
+/**
+ * Optional per-call context threaded into the audit event. `userId` enables the
+ * dedicated `llm_injection_log` row to attribute the flag to a user; `promptId`
+ * ties it to the prompt that was about to consume the content. `includeRawSnippet`
+ * opts into storing the raw excerpt (encrypted at rest downstream) — off by
+ * default so the audit store does not become a content silo.
+ */
+export interface WrapAuditContext {
+  userId?: string | null;
+  promptId?: string | null;
+  includeRawSnippet?: boolean;
+}
+
+export interface WrapAuditEvent {
   code: string;
   sourceKind: UntrustedSourceKind;
   severity: Severity;
+  /** Heuristic 0..1: 1 for blocked, scaled by hit count for suspect. */
+  score: number;
   hits: InjectionHit[];
-}) => void;
+  /** What the boundary did: content was wrapped or (blocked) rejected. */
+  action: 'wrapped' | 'blocked';
+  /** sha256 hex of the raw source, truncated to 32 chars. */
+  contentHash: string;
+  snippet: string | null;
+  snippetOffset: { start: number; end: number } | null;
+  userId: string | null;
+  promptId: string | null;
+}
+
+export type WrapAuditHook = (event: WrapAuditEvent) => void;
 
 let auditHook: WrapAuditHook | null = null;
 
@@ -56,12 +81,46 @@ export function setWrapAuditHook(hook: WrapAuditHook | null): void {
   auditHook = hook;
 }
 
-function audit(sourceKind: UntrustedSourceKind, severity: Severity, hits: InjectionHit[]): void {
+export function injectionScore(severity: Severity, hits: InjectionHit[]): number {
+  if (severity === 'blocked') return 1;
+  if (severity === 'clean') return 0;
+  return Math.min(0.75, 0.25 + 0.15 * hits.length);
+}
+
+function audit(
+  raw: string,
+  sourceKind: UntrustedSourceKind,
+  severity: Severity,
+  hits: InjectionHit[],
+  action: 'wrapped' | 'blocked',
+  ctx: WrapAuditContext,
+): void {
   const code =
     severity === 'blocked'
       ? 'security.audit.injection_blocked'
       : 'security.audit.injection_suspect';
-  const evt = { code, sourceKind, severity, hits };
+  const contentHash = createHash('sha256').update(raw, 'utf8').digest('hex').slice(0, 32);
+  const first = hits[0];
+  const offset =
+    first && first.index >= 0
+      ? { start: first.index, end: first.index + first.match.length }
+      : null;
+  const evt: WrapAuditEvent = {
+    code,
+    sourceKind,
+    severity,
+    score: injectionScore(severity, hits),
+    hits,
+    action,
+    contentHash,
+    snippet:
+      ctx.includeRawSnippet && offset
+        ? raw.slice(Math.max(0, offset.start - 60), Math.min(raw.length, offset.end + 60))
+        : null,
+    snippetOffset: offset,
+    userId: ctx.userId ?? null,
+    promptId: ctx.promptId ?? null,
+  };
   try {
     auditHook?.(evt);
   } catch {
@@ -85,12 +144,17 @@ function audit(sourceKind: UntrustedSourceKind, severity: Severity, hits: Inject
  * decision — the one place that decides what may go to an external provider is
  * the api's `SensitivityGateService` (backed by AppConfig policy).
  */
-export function wrapUntrusted(raw: string, sourceKind: UntrustedSourceKind): Wrapped {
+export function wrapUntrusted(
+  raw: string,
+  sourceKind: UntrustedSourceKind,
+  ctx: WrapAuditContext = {},
+): Wrapped {
   const trimmed = raw ?? '';
   const sensitivity = classifySensitivity(trimmed, { source: sourceKind });
   const scan = scanForInjection(trimmed);
   if (scan.severity !== 'clean') {
-    audit(sourceKind, scan.severity, scan.hits);
+    const action = scan.severity === 'blocked' ? 'blocked' : 'wrapped';
+    audit(trimmed, sourceKind, scan.severity, scan.hits, action, ctx);
     if (scan.severity === 'blocked') {
       throw new InjectionBlockedError(sourceKind, scan.hits.map((h) => h.kind));
     }

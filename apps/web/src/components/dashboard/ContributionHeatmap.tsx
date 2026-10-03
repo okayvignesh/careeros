@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Github, RefreshCw } from 'lucide-react';
 import { ThinkingOrb } from 'thinking-orbs';
 import { apiGet, apiPost } from '@/lib/api-client';
+import { useApi } from '@/lib/use-api';
 
 interface Day {
   date: string;
@@ -35,40 +36,32 @@ const LEVEL_FILL = [
 ];
 
 export function ContributionHeatmap() {
-  const [cal, setCal] = useState<Calendar | null>(null);
-  const [state, setState] = useState<'loading' | 'empty' | 'ready' | 'error'>('loading');
-  const [err, setErr] = useState<string | null>(null);
   const [resyncing, setResyncing] = useState(false);
 
-  async function load() {
-    setState('loading');
-    setErr(null);
-    try {
-      const r = await apiGet<Calendar | null>('/integrations/github/contributions');
-      if (!r || r.weeks.length === 0) {
-        setState('empty');
-      } else {
-        setCal(r);
-        setState('ready');
-      }
-    } catch (e) {
-      setErr((e as Error).message);
-      setState('error');
-    }
-  }
+  const load = useCallback(
+    () => apiGet<Calendar | null>('/integrations/github/contributions'),
+    [],
+  );
+  const { data: cal, error: err, loading, setError, refetch } = useApi(load);
 
-  useEffect(() => {
-    void load();
-  }, []);
+  // Derive the view state instead of mirroring it in an effect. `loading` only
+  // covers the initial mount; a resync keeps the existing calendar visible.
+  const state: 'loading' | 'empty' | 'ready' | 'error' = err
+    ? 'error'
+    : cal && cal.weeks.length > 0
+      ? 'ready'
+      : loading
+        ? 'loading'
+        : 'empty';
 
   async function resync() {
     setResyncing(true);
     try {
       await apiPost('/integrations/github/resync', {});
       // The worker runs async; poll once after a delay so the freshest calendar shows up.
-      setTimeout(load, 4000);
+      setTimeout(() => void refetch(), 4000);
     } catch (e) {
-      setErr((e as Error).message);
+      if (!cal) setError((e as Error).message);
     } finally {
       setResyncing(false);
     }

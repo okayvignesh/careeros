@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@careeros/shared": "workspace:*",
+    "js-tiktoken": "^1.0.21",
     "zod": "^3.23.8"
   },
   "devDependencies": {

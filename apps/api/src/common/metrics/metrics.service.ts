@@ -37,6 +37,12 @@ export class MetricsService {
 
   readonly jobsProcessedTotal: Counter<string>;
   readonly auditEventsTotal: Counter<string>;
+  /** Audit rows lost to queue overflow or a DB write failure (item 9). */
+  readonly llmAuditDroppedTotal: Counter<string>;
+  /** Injection flags persisted to `llm_injection_log` (item 5). */
+  readonly llmInjectionFlagsTotal: Counter<string>;
+  /** Injection-log rows that could not be persisted. */
+  readonly injectionLogDroppedTotal: Counter<string>;
 
   constructor() {
     this.registry = new Registry();
@@ -112,6 +118,27 @@ export class MetricsService {
       name: 'careeros_audit_events_total',
       help: 'Audit-log events written, labelled by action.',
       labelNames: ['action'],
+      registers: [this.registry],
+    });
+
+    this.llmAuditDroppedTotal = new Counter({
+      name: 'careeros_llm_audit_dropped_total',
+      help: 'LLM audit rows dropped, labelled by reason (db_error|queue_full).',
+      labelNames: ['reason'],
+      registers: [this.registry],
+    });
+
+    this.llmInjectionFlagsTotal = new Counter({
+      name: 'careeros_llm_injection_flags_total',
+      help: 'Injection flags persisted, labelled by severity/action.',
+      labelNames: ['severity', 'action'],
+      registers: [this.registry],
+    });
+
+    this.injectionLogDroppedTotal = new Counter({
+      name: 'careeros_injection_log_dropped_total',
+      help: 'Injection-log rows dropped before persist.',
+      labelNames: ['reason'],
       registers: [this.registry],
     });
   }

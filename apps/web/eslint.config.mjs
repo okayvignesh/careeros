@@ -16,14 +16,10 @@ const config = [
   { ignores: ['.next/**', 'out/**', 'build/**', 'next-env.d.ts', '**/._*'] },
   {
     rules: {
-      // `react-hooks/set-state-in-effect` flags the ubiquitous fetch-on-mount
-      // pattern — `useEffect(() => { void load(); }, [load])` — because the
-      // async loader ends up calling setState. That pattern is legitimate in
-      // these panels, and the clean fix is to migrate them to a data-fetching
-      // hook (SWR / React Query) or `use()`, which is follow-up work outside
-      // this cleanup's scope. Keep it as a warning so genuinely synchronous
-      // setState-in-effect calls are still surfaced.
-      'react-hooks/set-state-in-effect': 'warn',
+      // Panels fetch through `@/lib/use-api`, whose effect commits state only
+      // from promise callbacks. Keep the rule strict so a synchronous
+      // setState-in-effect can't sneak back in.
+      'react-hooks/set-state-in-effect': 'error',
     },
   },
 ];

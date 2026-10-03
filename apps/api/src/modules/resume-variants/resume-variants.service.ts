@@ -148,7 +148,7 @@ export class ResumeVariantsService {
       .join('\n');
 
     // Job description is untrusted (third-party listing).
-    const descWrapped = wrapUntrusted(job.description, 'job-description');
+    const descWrapped = wrapUntrusted(job.description, 'job-description', { userId });
     const rendered = renderPrompt('tailored-resume-writer', {
       jobTitle: job.title,
       jobCompany: job.company,
@@ -165,6 +165,12 @@ export class ResumeVariantsService {
         ],
         schema: rendered.schema,
         temperature: 0.2,
+        meta: {
+          promptId: rendered.id,
+          promptVersion: rendered.version,
+          promptHash: rendered.hash,
+          sensitivity: 'personal',
+        },
       }),
     )) as TailoredResumeContent;
 
@@ -282,6 +288,7 @@ export class ResumeVariantsService {
     const outcome = await runFactCheck({
       provider,
       claims,
+      sensitivity: 'personal',
       runWithUserLimit: (fn) => this.usage.runWithUserLimit(userId, fn),
     });
 

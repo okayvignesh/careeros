@@ -3,10 +3,22 @@
 // similarity via Qdrant (fuzzy near-duplicate catch), and inserts survivors
 // into `question_bank`. Idempotent — re-running the same Sunday twice
 // inserts nothing new.
+//
+// Dedupe vectors come from the process-wide EmbeddingProvider seam: semantic
+// when `EMBEDDING_MODE=local` (default) and the bge-small weights load, else the
+// deterministic fallback. `corpus_questions` vectors indexed before this switch
+// are deterministic and not comparable with new semantic vectors until the
+// collection is rebuilt (delete `corpus_questions`, then re-run the refresh job —
+// there is no per-row corpus re-embed path).
 import { createHash } from 'node:crypto';
 import type { Logger } from 'pino';
-import type { QdrantStore } from '@careeros/embeddings';
-import { embedDeterministic } from '@careeros/embeddings';
+import {
+  createEmbeddingProvider,
+  resolveEmbeddingMode,
+  type EmbeddingLogger,
+  type EmbeddingProvider,
+  type QdrantStore,
+} from '@careeros/embeddings';
 import type { CorpusAdapter, CorpusItem } from './types';
 import { adapters as defaultAdapters } from './registry';
 import { DEFAULT_DUPLICATE_THRESHOLD } from './dedupe';
@@ -19,6 +31,26 @@ export const CORPUS_REFRESH_CRON = '0 4 * * 0';
  *  data so per-user filters never accidentally scope corpus lookups. */
 export const CORPUS_COLLECTION = 'corpus_questions';
 export const CORPUS_COLLECTION_DIM = 384;
+
+/**
+ * Process-wide provider, constructed lazily on the first refresh so the model
+ * pipeline is loaded once per worker run. The first run's logger carries any
+ * fallback warning. `createEmbeddingProvider` is lazy — no network until the
+ * first `embed()`.
+ */
+let provider: EmbeddingProvider | undefined;
+
+function getEmbeddingProvider(logger: EmbeddingLogger): EmbeddingProvider {
+  if (!provider) {
+    const cacheDir = process.env.EMBEDDING_MODEL_CACHE_DIR;
+    provider = createEmbeddingProvider({
+      mode: resolveEmbeddingMode(process.env.EMBEDDING_MODE),
+      ...(cacheDir ? { cacheDir } : {}),
+      logger,
+    });
+  }
+  return provider;
+}
 
 /** Structural type — narrow to the two operations we call. Tests stub. */
 export interface CorpusQuestionRepo {
@@ -74,6 +106,8 @@ export interface RefreshResult {
 export interface RefreshOptions {
   adapters?: CorpusAdapter[];
   threshold?: number;
+  /** Override the process-wide embedder (tests). Defaults to the singleton. */
+  provider?: EmbeddingProvider;
 }
 
 /**
@@ -106,6 +140,7 @@ export async function refreshCorpus(
 ): Promise<RefreshResult> {
   const adapters = opts.adapters ?? defaultAdapters;
   const threshold = opts.threshold ?? DEFAULT_DUPLICATE_THRESHOLD;
+  const embed = opts.provider ?? getEmbeddingProvider(logger);
 
   await qdrant.ensureCollection(CORPUS_COLLECTION, CORPUS_COLLECTION_DIM);
 
@@ -123,7 +158,7 @@ export async function refreshCorpus(
     try {
       for await (const item of adapter.fetch()) {
         summary.fetched++;
-        const inserted = await ingestOne(prisma, qdrant, item, adapter, threshold);
+        const inserted = await ingestOne(prisma, qdrant, embed, item, adapter, threshold);
         if (inserted === 'hash-dup') summary.dedupedHash++;
         else if (inserted === 'embed-dup') summary.dedupedEmbed++;
         else summary.inserted++;
@@ -156,6 +191,7 @@ type IngestOutcome = 'inserted' | 'hash-dup' | 'embed-dup';
 async function ingestOne(
   prisma: CorpusQuestionRepo,
   qdrant: CorpusQdrant,
+  embed: EmbeddingProvider,
   item: CorpusItem,
   adapter: CorpusAdapter,
   threshold: number,
@@ -165,7 +201,7 @@ async function ingestOne(
   if (existing) return 'hash-dup';
 
   // 2. Fuzzy dedupe. Encode → Qdrant top-3 → threshold check.
-  const vector = embedDeterministic(item.body);
+  const vector = await embed.embed(item.body);
   const neighbours = await qdrant.search(CORPUS_COLLECTION, vector, 3);
   if (neighbours.some((n) => n.score >= threshold)) return 'embed-dup';
 

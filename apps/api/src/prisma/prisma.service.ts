@@ -17,13 +17,16 @@ const KEY = loadMasterKey();
  * middleware left. `resume.service.ts`'s in-transaction manual encrypt is now
  * redundant but harmless (it produces a marker; `encryptRow` no-ops on markers).
  */
-type FieldSpec = { column: string; kind: 'string' | 'json' };
+export type FieldSpec = { column: string; kind: 'string' | 'json' };
 
-const ENCRYPTED_FIELDS: Record<string, FieldSpec[]> = {
+export const ENCRYPTED_FIELDS: Record<string, FieldSpec[]> = {
   ResumeFact: [{ column: 'content', kind: 'json' }],
   // A-M4: raw source excerpts logged for eval review. Row still exposes
   // snippetHash + snippetOffset in cleartext for low-privilege lookups.
   LlmHallucinationLog: [{ column: 'snippet', kind: 'string' }],
+  // ai-safety item 5: raw excerpt around the injection hit. Encrypted at rest;
+  // snippetHash + snippetOffset remain cleartext identifiers.
+  LlmInjectionLog: [{ column: 'snippet', kind: 'string' }],
   // security.md item 5: user-authored free-text fields that quote PII.
   // We never query/filter on these columns in the application, so losing
   // predicate pushdown is fine. The `by` + `status` + `id` columns stay
@@ -119,6 +122,11 @@ export function buildPrismaClient(metrics?: MetricsService) {
 
 export type ExtendedPrismaClient = ReturnType<typeof buildPrismaClient>;
 
+/** Prisma delegate name for a generated model name: `ResumeFact` -> `resumeFact`. */
+export function prismaDelegateName(model: string): string {
+  return model.length === 0 ? model : model.charAt(0).toLowerCase() + model.slice(1);
+}
+
 /**
  * Nest DI wrapper. Keeps `PrismaService` as the single injection token every
  * consumer already uses (`private readonly prisma: PrismaService`). Under the
@@ -131,6 +139,14 @@ export type ExtendedPrismaClient = ReturnType<typeof buildPrismaClient>;
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   private extended: ExtendedPrismaClient | undefined;
 
+  /**
+   * Non-extended client. Master-key rotation must read/write raw ciphertext,
+   * but the extension decrypts on read and re-encrypts with the CURRENT env key
+   * on write — the exact opposite of what rotation needs. This accessor is the
+   * unextended base instance, so model operations bypass field encryption.
+   */
+  readonly rawClient: PrismaClient;
+
   // C-P4.8: metrics service is optional so this class still constructs in
   // tests that don't wire the MetricsModule. In app boot it's always
   // injected because MetricsModule is @Global().
@@ -140,6 +156,10 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
     // Build the extension immediately so consumer access via the Proxy below
     // works even before `onModuleInit` (Nest constructs before init).
     this.extended = buildPrismaClient(this.metrics);
+
+    // Capture the real (unextended) instance before returning the Proxy, so
+    // `prisma.rawClient` always resolves to raw-ciphertext access.
+    this.rawClient = this;
 
     // Return a Proxy so `this.prisma.<model>.<op>(...)` and `this.prisma.$transaction(...)`
     // route through the extended client (which runs the encryption + metrics extension),

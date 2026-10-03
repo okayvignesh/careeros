@@ -3,11 +3,14 @@ import { assertPublicUrl, assertPublicUrlShape } from '@careeros/shared/net';
 import type { AssertPublicUrlOptions } from '@careeros/shared/net';
 import type {
   AIProvider,
+  CallValidation,
   ChatMessage,
+  LlmCallMeta,
   ProviderCapabilities,
   ProviderProbeResult,
 } from '../provider';
-import { LLMProviderError } from '../errors';
+import { LLMProviderError, TokenCapExceededError } from '../errors';
+import { estimateMessagesTokens } from '../tokenize';
 import { providerFetch } from './fetch';
 import { zodToJsonSchemaObject } from './json-schema';
 import {
@@ -28,9 +31,25 @@ export interface LlmCallRecord {
   latencyMs: number;
   ok: boolean;
   error?: string;
+  /** Per-call audit context (ai-safety.md item 9) supplied by the caller. */
+  promptId?: string | null;
+  promptVersion?: string | null;
+  promptHash?: string | null;
+  sensitivity?: string | null;
+  agentRole?: string | null;
+  /** Pre-flight `js-tiktoken` estimate (audit only; authoritative count is usage). */
+  estimatedPromptTokens?: number | null;
+  /** Structured-output validation outcome for this attempt. */
+  validation?: CallValidation | null;
+  cacheHit?: boolean;
 }
 
 export type LlmCallHook = (record: LlmCallRecord) => void | Promise<void>;
+
+/** Default per-call input cap (ai-safety.md item 9): 32k input + 4k output. */
+export const DEFAULT_MAX_INPUT_TOKENS = 32_000;
+/** Default max output tokens when a caller does not override. */
+export const DEFAULT_MAX_OUTPUT_TOKENS = 4_096;
 
 export interface OpenAICompatibleConfig {
   /** Provider id used for audit rows + pricing lookup, e.g. 'openai'. */
@@ -42,6 +61,8 @@ export interface OpenAICompatibleConfig {
   onCall?: LlmCallHook | undefined;
   allowlist?: string[] | undefined;
   maxTokens?: number | undefined;
+  /** Pre-flight input-token cap. Defaults to {@link DEFAULT_MAX_INPUT_TOKENS}. */
+  maxInputTokens?: number | undefined;
   capabilities?: ProviderCapabilities | undefined;
   /**
    * `json_schema` sends a strict schema derived from the Zod schema when
@@ -94,6 +115,7 @@ export class OpenAICompatibleProvider implements AIProvider {
   protected readonly apiKey: string | undefined;
   protected readonly allowlist: string[];
   protected readonly defaultMaxTokens: number;
+  protected readonly maxInputTokens: number;
   protected readonly onCall: LlmCallHook | undefined;
   private readonly structuredMode: 'json_object' | 'json_schema';
   private readonly lookup: AssertPublicUrlOptions['lookup'];
@@ -106,7 +128,8 @@ export class OpenAICompatibleProvider implements AIProvider {
     this.chatModel = cfg.chatModel;
     this.apiKey = cfg.apiKey;
     this.allowlist = cfg.allowlist ?? [];
-    this.defaultMaxTokens = cfg.maxTokens ?? 4096;
+    this.defaultMaxTokens = cfg.maxTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
+    this.maxInputTokens = cfg.maxInputTokens ?? DEFAULT_MAX_INPUT_TOKENS;
     this.capabilities = cfg.capabilities ?? OPENAI_COMPATIBLE_DEFAULT_CAPABILITIES;
     this.structuredMode = cfg.structuredMode ?? 'json_object';
     this.lookup = cfg.lookup;
@@ -136,18 +159,22 @@ export class OpenAICompatibleProvider implements AIProvider {
     messages: ChatMessage[];
     temperature?: number;
     maxTokens?: number;
+    meta?: LlmCallMeta;
   }): Promise<string> {
-    const res = await this.request(
-      '/chat/completions',
-      {
-        model: this.chatModel,
-        messages: input.messages,
-        temperature: input.temperature ?? 0.2,
-        max_tokens: input.maxTokens ?? this.defaultMaxTokens,
-      },
-      'chat',
-    );
-    return res.choices[0]?.message?.content ?? '';
+    const maxTokens = input.maxTokens ?? this.defaultMaxTokens;
+    const estimated = this.preflight(input.messages, maxTokens);
+    const r = await this.send('/chat/completions', {
+      model: this.chatModel,
+      messages: input.messages,
+      temperature: input.temperature ?? 0.2,
+      max_tokens: maxTokens,
+    });
+    if (!r.ok) {
+      this.emit(this.record(r.latencyMs, 'chat', null, null, null, false, r.error, 'not_applicable', estimated, input.meta));
+      throw r.cause;
+    }
+    this.emit(this.record(r.latencyMs, 'chat', r.json.usage?.prompt_tokens ?? null, r.json.usage?.completion_tokens ?? null, r.json.usage?.total_tokens ?? null, true, undefined, 'not_applicable', estimated, input.meta));
+    return r.json.choices[0]?.message?.content ?? '';
   }
 
   async chatStructured<S extends z.ZodTypeAny>(input: {
@@ -155,33 +182,74 @@ export class OpenAICompatibleProvider implements AIProvider {
     schema: S;
     temperature?: number;
     maxTokens?: number;
+    meta?: LlmCallMeta;
   }): Promise<z.output<S>> {
+    const maxTokens = input.maxTokens ?? this.defaultMaxTokens;
+    const estimated = this.preflight(input.messages, maxTokens);
     const body = {
       model: this.chatModel,
       messages: input.messages,
       temperature: input.temperature ?? 0,
       response_format: this.responseFormat(input.schema),
-      max_tokens: input.maxTokens ?? this.defaultMaxTokens,
+      max_tokens: maxTokens,
     };
-    const res = await this.request('/chat/completions', body, 'chatStructured');
-    const raw = res.choices[0]?.message?.content ?? '{}';
+    const first = await this.send('/chat/completions', body);
+    if (!first.ok) {
+      this.emit(this.record(first.latencyMs, 'chatStructured', null, null, null, false, first.error, 'failed', estimated, input.meta));
+      throw first.cause;
+    }
+    const raw = first.json.choices[0]?.message?.content ?? '{}';
+    const tokens = this.tokensOf(first.json);
     try {
-      return parseStructured(input.schema, raw);
+      const parsed = parseStructured(input.schema, raw);
+      this.emit(this.record(first.latencyMs, 'chatStructured', tokens.prompt, tokens.completion, tokens.total, true, undefined, 'passed', estimated, input.meta));
+      return parsed;
     } catch (err) {
-      if (!isSchemaParseFailure(err)) throw err;
+      const parseFailure = isSchemaParseFailure(err);
+      this.emit(this.record(first.latencyMs, 'chatStructured', tokens.prompt, tokens.completion, tokens.total, parseFailure, parseFailure ? undefined : (err as Error).message, 'failed', estimated, input.meta));
+      if (!parseFailure) throw err;
       const retryMessages = structuredRetryMessages(input.messages, raw, schemaErrorMessage(err));
-      const retryRes = await this.request(
-        '/chat/completions',
-        { ...body, messages: retryMessages },
-        'chatStructured:retry',
-      );
-      const retryRaw = retryRes.choices[0]?.message?.content ?? '{}';
+      const retry = await this.send('/chat/completions', { ...body, messages: retryMessages });
+      if (!retry.ok) {
+        this.emit(this.record(retry.latencyMs, 'chatStructured:retry', null, null, null, false, retry.error, 'failed', estimated, input.meta));
+        throw retry.cause;
+      }
+      const retryRaw = retry.json.choices[0]?.message?.content ?? '{}';
+      const retryTokens = this.tokensOf(retry.json);
       try {
-        return parseStructured(input.schema, retryRaw);
+        const parsed = parseStructured(input.schema, retryRaw);
+        this.emit(this.record(retry.latencyMs, 'chatStructured:retry', retryTokens.prompt, retryTokens.completion, retryTokens.total, true, undefined, 'passed', estimated, input.meta));
+        return parsed;
       } catch (err2) {
+        this.emit(this.record(retry.latencyMs, 'chatStructured:retry', retryTokens.prompt, retryTokens.completion, retryTokens.total, true, undefined, 'failed', estimated, input.meta));
         throw structuredFailure(err2);
       }
     }
+  }
+
+  /**
+   * Pre-flight cap (ai-safety.md item 9): reject before any egress when the
+   * estimated prompt + requested output exceeds the per-call input cap. Returns
+   * the estimate so it can be persisted on the audit row.
+   */
+  protected preflight(messages: ChatMessage[], maxOutputTokens: number): number {
+    const estimated = estimateMessagesTokens(messages, this.chatModel);
+    if (estimated + maxOutputTokens > this.maxInputTokens) {
+      throw new TokenCapExceededError(estimated, maxOutputTokens, this.maxInputTokens);
+    }
+    return estimated;
+  }
+
+  private tokensOf(json: OpenAIResponse): {
+    prompt: number | null;
+    completion: number | null;
+    total: number | null;
+  } {
+    return {
+      prompt: json.usage?.prompt_tokens ?? null,
+      completion: json.usage?.completion_tokens ?? null,
+      total: json.usage?.total_tokens ?? null,
+    };
   }
 
   async probe(): Promise<ProviderProbeResult> {
@@ -224,12 +292,20 @@ export class OpenAICompatibleProvider implements AIProvider {
     return { type: 'json_object' };
   }
 
-  protected async request(
+  /**
+   * Raw HTTP send. Does NOT emit an audit row — callers own the emit so they can
+   * attach the correct structured-validation verdict (a schema failure is not an
+   * HTTP failure). Kept separate from `request` so the wizard test methods keep
+   * their existing one-emit-per-HTTP-request behavior.
+   */
+  protected async send(
     path: string,
     body: Record<string, unknown>,
-    callKind: string,
     signal?: AbortSignal,
-  ): Promise<OpenAIResponse> {
+  ): Promise<
+    | { ok: true; json: OpenAIResponse; latencyMs: number }
+    | { ok: false; latencyMs: number; error: string; cause: unknown }
+  > {
     await this.ensureBaseUrlSafe();
     const t0 = Date.now();
     const headers: Record<string, string> = { 'content-type': 'application/json' };
@@ -252,34 +328,69 @@ export class OpenAICompatibleProvider implements AIProvider {
       const json = (await res.json()) as OpenAIResponse;
       if (!res.ok) {
         const upstream = json.error?.message ?? `HTTP ${res.status}`;
-        throw new LLMProviderError('LLM provider error', upstream);
+        return {
+          ok: false,
+          latencyMs: Date.now() - t0,
+          error: upstream,
+          cause: new LLMProviderError('LLM provider error', upstream),
+        };
       }
-      this.emit({
-        provider: this.name,
-        model: this.chatModel,
-        callKind,
-        promptTokens: json.usage?.prompt_tokens ?? null,
-        completionTokens: json.usage?.completion_tokens ?? null,
-        totalTokens: json.usage?.total_tokens ?? null,
-        latencyMs: Date.now() - t0,
-        ok: true,
-      });
-      return json;
+      return { ok: true, json, latencyMs: Date.now() - t0 };
     } catch (err) {
       const raw = err instanceof LLMProviderError ? err.upstream : (err as Error).message;
-      this.emit({
-        provider: this.name,
-        model: this.chatModel,
-        callKind,
-        promptTokens: null,
-        completionTokens: null,
-        totalTokens: null,
-        latencyMs: Date.now() - t0,
-        ok: false,
-        error: raw,
-      });
-      throw err;
+      return { ok: false, latencyMs: Date.now() - t0, error: raw, cause: err };
     }
+  }
+
+  /** Send + emit in one step. Used by the wizard capability test calls. */
+  protected async request(
+    path: string,
+    body: Record<string, unknown>,
+    callKind: string,
+    signal?: AbortSignal,
+    meta?: LlmCallMeta,
+  ): Promise<OpenAIResponse> {
+    const r = await this.send(path, body, signal);
+    if (!r.ok) {
+      this.emit(this.record(r.latencyMs, callKind, null, null, null, false, r.error, 'not_applicable', null, meta));
+      throw r.cause;
+    }
+    this.emit(this.record(r.latencyMs, callKind, r.json.usage?.prompt_tokens ?? null, r.json.usage?.completion_tokens ?? null, r.json.usage?.total_tokens ?? null, true, undefined, 'not_applicable', null, meta));
+    return r.json;
+  }
+
+  /** Build one audit row, stamping caller-supplied prompt context + provider facts. */
+  protected record(
+    latencyMs: number,
+    callKind: string,
+    promptTokens: number | null,
+    completionTokens: number | null,
+    totalTokens: number | null,
+    ok: boolean,
+    error: string | undefined,
+    validation: CallValidation,
+    estimatedPromptTokens: number | null,
+    meta: LlmCallMeta | undefined,
+  ): LlmCallRecord {
+    return {
+      provider: this.name,
+      model: this.chatModel,
+      callKind,
+      promptTokens,
+      completionTokens,
+      totalTokens,
+      latencyMs,
+      ok,
+      ...(error ? { error } : {}),
+      promptId: meta?.promptId ?? null,
+      promptVersion: meta?.promptVersion ?? null,
+      promptHash: meta?.promptHash ?? null,
+      sensitivity: meta?.sensitivity ?? null,
+      agentRole: meta?.agentRole ?? null,
+      estimatedPromptTokens,
+      validation,
+      ...(meta?.cacheHit !== undefined ? { cacheHit: meta.cacheHit } : {}),
+    };
   }
 
   protected emit(record: LlmCallRecord): void {

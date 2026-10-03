@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback } from 'react';
 import { Briefcase, GraduationCap, Sparkles, Trash2, Wrench } from 'lucide-react';
 import { Button, Tip, cn } from '@careeros/ui';
 import { apiDelete, apiGet, apiPatch } from '@/lib/api-client';
 import { Loader } from '@/components/Loader';
+import { useApi } from '@/lib/use-api';
 
 interface Fact {
   id: string;
@@ -24,21 +25,14 @@ const KIND_ICON: Record<string, typeof Wrench> = {
 };
 
 export function FactBase() {
-  const [facts, setFacts] = useState<Fact[] | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-
-  async function load() {
-    try {
-      const r = await apiGet<Fact[]>('/me/facts');
-      setFacts(r);
-    } catch (e) {
-      setErr((e as Error).message);
-    }
-  }
-
-  useEffect(() => {
-    void load();
-  }, []);
+  const load = useCallback(() => apiGet<Fact[]>('/me/facts'), []);
+  const {
+    data: facts,
+    error: err,
+    setData: setFacts,
+    setError: setErr,
+    refetch,
+  } = useApi(load);
 
   async function toggle(f: Fact) {
     setFacts((prev) =>
@@ -48,7 +42,7 @@ export function FactBase() {
       await apiPatch<Fact>(`/me/facts/${f.id}`, { verified: !f.verified });
     } catch (e) {
       setErr((e as Error).message);
-      void load();
+      void refetch();
     }
   }
 
@@ -59,7 +53,7 @@ export function FactBase() {
       await apiDelete<null>(`/me/facts/${f.id}`);
     } catch (e) {
       setErr((e as Error).message);
-      void load();
+      void refetch();
     }
   }
 

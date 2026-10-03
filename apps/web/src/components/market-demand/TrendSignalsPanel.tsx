@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { apiGet } from '@/lib/api-client';
 import { Loader } from '@/components/Loader';
 import { UnavailableNotice } from '@/components/UnavailableNotice';
+import { useApi } from '@/lib/use-api';
 import { Sparkline } from './Sparkline';
 import { trendSignalsView, type TrendSignalsView } from './market-data';
 
@@ -29,24 +30,13 @@ const trajectoryClass = {
 } as const;
 
 export function TrendSignalsPanel() {
-  const [data, setData] = useState<TrendSignalsView | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    try {
-      const res = await apiGet<unknown>('/me/market/trends');
-      const view = trendSignalsView(res);
-      setData(view);
-      if (view.signals.length > 0 && view.signals[0]) setSelectedId(view.signals[0].id);
-    } catch (e) {
-      setError((e as Error).message);
-    }
+    const res = await apiGet<unknown>('/me/market/trends');
+    return trendSignalsView(res);
   }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const { data, error } = useApi<TrendSignalsView>(load);
 
   if (error) {
     return <UnavailableNotice feature="Trend signals" />;

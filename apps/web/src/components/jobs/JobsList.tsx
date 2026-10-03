@@ -7,6 +7,7 @@ import { ArrowUpRight, FileText, Mail, RefreshCw, Sliders, Sparkles, Target, X }
 import { ThinkingOrb } from 'thinking-orbs';
 import { Button } from '@careeros/ui';
 import { apiGet, apiPost } from '@/lib/api-client';
+import { useApi } from '@/lib/use-api';
 
 interface JobListItem {
   id: string;
@@ -69,31 +70,25 @@ export function JobsList() {
   const router = useRouter();
   const search = useSearchParams();
   const skillFilter = search.get('skill') ?? '';
-  const [data, setData] = useState<ListResponse | null>(null);
   const [adapters, setAdapters] = useState<AdapterInfo[]>([]);
-  const [error, setError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const [lastSync, setLastSync] = useState<SyncStats | null>(null);
   const [lastExtract, setLastExtract] = useState<SkillExtractionStats | null>(null);
 
-  const load = useCallback(async () => {
-    try {
-      const url = skillFilter
-        ? `/jobs?limit=50&skill=${encodeURIComponent(skillFilter)}`
-        : '/jobs?limit=50';
-      setData(await apiGet<ListResponse>(url));
-    } catch (e) {
-      setError((e as Error).message);
-    }
+  const load = useCallback(() => {
+    const url = skillFilter
+      ? `/jobs?limit=50&skill=${encodeURIComponent(skillFilter)}`
+      : '/jobs?limit=50';
+    return apiGet<ListResponse>(url);
   }, [skillFilter]);
+  const { data, error, setError, refetch } = useApi(load);
 
   useEffect(() => {
-    void load();
     apiGet<AdapterInfo[]>('/admin/jobs/adapters')
       .then(setAdapters)
       .catch(() => setAdapters([]));
-  }, [load]);
+  }, []);
 
   async function extractSkills() {
     setExtracting(true);
@@ -101,7 +96,7 @@ export function JobsList() {
     try {
       const stats = await apiPost<SkillExtractionStats>('/admin/jobs/extract-skills?limit=20');
       setLastExtract(stats);
-      await load();
+      await refetch();
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -119,7 +114,7 @@ export function JobsList() {
     try {
       const stats = await apiPost<SyncStats>('/admin/jobs/sync/remotive');
       setLastSync(stats);
-      await load();
+      await refetch();
     } catch (e) {
       setError((e as Error).message);
     } finally {

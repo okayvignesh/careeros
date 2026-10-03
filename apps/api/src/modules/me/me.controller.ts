@@ -13,6 +13,7 @@ import { clientIp } from '../../common/client-ip';
 import { AuthService } from '../auth/auth.service';
 import { SessionService } from '../auth/session.service';
 import { MeService } from './me.service';
+import { MasterKeyRotationService } from './master-key-rotation.service';
 
 /**
  * F.8 (Wave F / P6): data-portability endpoints.
@@ -30,8 +31,18 @@ import { MeService } from './me.service';
  *                    SetNull unlinks audit-adjacent rows per F.6).
  *                    Returns 204.
  *
- * Fresh re-auth pattern mirrors recovery.controller.ts + agent.controller.ts;
- * TODO(C-P0.3): swap for shared hasFreshReauth() when it lands.
+ *   POST /me/security/rotate-key  auth + fresh re-auth
+ *                    Body: { newKey: "<64 hex or 44 base64>" }
+ *                    Re-encrypts every encrypted_secret row + every
+ *                    ENCRYPTED_FIELDS column from the running key to newKey,
+ *                    one transaction per row. Returns the rotation progress
+ *                    (counts + failure metadata, never secrets). The operator
+ *                    swaps ENCRYPTION_KEY + restarts only after success.
+ *
+ * export/delete use the sealed-cookie age check below (mirrors
+ * recovery.controller.ts + agent.controller.ts; TODO(C-P0.3): swap for shared
+ * hasFreshReauth() when it lands). rotate-key already uses the shared
+ * SensitivityGateService.hasFreshReauth in MasterKeyRotationService.
  */
 const FRESH_REAUTH_MAX_AGE_MS = 5 * 60 * 1000;
 
@@ -39,6 +50,7 @@ const FRESH_REAUTH_MAX_AGE_MS = 5 * 60 * 1000;
 export class MeController {
   constructor(
     private readonly me: MeService,
+    private readonly rotation: MasterKeyRotationService,
     private readonly session: SessionService,
     private readonly auth: AuthService,
     private readonly prisma: PrismaService,
@@ -105,6 +117,45 @@ export class MeController {
     });
     // Explicit `void` so nest's HttpCode 204 has no body per HTTP spec.
     void this.auth; // keep AuthService in the injected list for future
+  }
+
+  /**
+   * Rotate the master ENCRYPTION_KEY. The service enforces fresh re-auth
+   * (SensitivityGateService) and validates the new key's format before any
+   * row is touched. A stopped run is reported as data, not an exception: the
+   * operator keeps the old key and re-runs after fixing the reported row.
+   */
+  @Post('security/rotate-key')
+  @HttpCode(200)
+  async rotateMasterKey(
+    @Req() req: Request,
+    @Body() body: { newKey?: string },
+  ) {
+    const sealed = this.session.read(req);
+    if (!sealed) throw new ForbiddenException('Not signed in');
+    if (!body?.newKey || typeof body.newKey !== 'string') {
+      throw new BadRequestException('newKey required');
+    }
+    const progress = await this.rotation.rotate({
+      userId: sealed.userId,
+      newKey: body.newKey,
+    });
+    await audit(
+      this.prisma,
+      sealed.userId,
+      req,
+      progress.stopped ? 'security.master_key.rotation_failed' : 'security.master_key.rotated',
+      {
+        scanned: progress.scanned,
+        rotated: progress.rotated,
+        alreadyRotated: progress.alreadyRotated,
+        skippedPlaintext: progress.skippedPlaintext,
+        failed: progress.failed,
+        // Failure carries no ciphertext/plaintext, only source + id + message.
+        failure: progress.failure,
+      },
+    );
+    return progress;
   }
 }
 

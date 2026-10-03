@@ -3,7 +3,14 @@ export type {
   ProviderCapabilities,
   ProviderProbeResult,
   ChatMessage,
+  LlmCallMeta,
+  CallValidation,
 } from './provider';
+export {
+  DEFAULT_MAX_INPUT_TOKENS,
+  DEFAULT_MAX_OUTPUT_TOKENS,
+} from './providers/openai-compatible';
+export { estimateTokens, estimateMessagesTokens, encodingNameForModel } from './tokenize';
 export {
   DeepSeekProvider,
   OpenAICompatibleProvider,
@@ -28,19 +35,23 @@ export {
   type ProviderFactory,
   type ProviderInfo,
 } from './registry';
-export { estimateCostUsd } from './pricing';
+export { estimateCostUsd, estimateCostBreakdown, PRICING_VERSION, type CostBreakdown } from './pricing';
 export {
   wrapUntrusted,
   UNTRUSTED_SYSTEM_CLAUSE,
   setWrapAuditHook,
+  injectionScore,
   type UntrustedSourceKind,
   type Wrapped,
+  type WrapAuditContext,
+  type WrapAuditEvent,
 } from './wrap';
 export {
   LLMProviderError,
   StructuredOutputError,
   InjectionBlockedError,
   SensitivityBlockedError,
+  TokenCapExceededError,
 } from './errors';
 export {
   classifySensitivity,
@@ -62,6 +73,8 @@ export {
   setInjectionAuditHook,
   type InjectionScanResult,
   type InjectionHit,
+  type InjectionAuditContext,
+  type InjectionAuditEvent,
   type Severity as InjectionSeverity,
 } from './injection-scan';
 export { findHallucinations, type HallucinationReport } from './hallucination';

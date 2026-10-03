@@ -5,6 +5,7 @@ import { AlertOctagon, PauseCircle, PlayCircle, RefreshCw } from 'lucide-react';
 import { ThinkingOrb } from 'thinking-orbs';
 import { Button, cn } from '@careeros/ui';
 import { apiGet, apiPost } from '@/lib/api-client';
+import { useApi } from '@/lib/use-api';
 
 interface QueueStat {
   name: string;
@@ -30,25 +31,17 @@ interface FailedJob {
 const COUNT_KEYS: Array<keyof QueueStat['counts']> = ['waiting', 'active', 'completed', 'failed', 'delayed'];
 
 export function WorkersPanel() {
-  const [stats, setStats] = useState<QueueStat[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [openFailed, setOpenFailed] = useState<string | null>(null);
   const [failedJobs, setFailedJobs] = useState<FailedJob[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
 
-  const refresh = useCallback(async () => {
-    try {
-      setStats(await apiGet<QueueStat[]>('/system/workers'));
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }, []);
+  const refresh = useCallback(() => apiGet<QueueStat[]>('/system/workers'), []);
+  const { data: stats, error, setError, refetch } = useApi<QueueStat[]>(refresh);
 
   useEffect(() => {
-    void refresh();
-    const t = setInterval(refresh, 5000);
+    const t = setInterval(() => void refetch(), 5000);
     return () => clearInterval(t);
-  }, [refresh]);
+  }, [refetch]);
 
   async function loadFailed(name: string) {
     setOpenFailed(name);
@@ -63,7 +56,7 @@ export function WorkersPanel() {
     setBusy(`retry:${name}`);
     try {
       await apiPost(`/system/workers/${name}/retry`);
-      await refresh();
+      await refetch();
       if (openFailed === name) await loadFailed(name);
     } finally {
       setBusy(null);
@@ -74,7 +67,7 @@ export function WorkersPanel() {
     setBusy(`pause:${name}`);
     try {
       await apiPost(`/system/workers/${name}/${paused ? 'resume' : 'pause'}`);
-      await refresh();
+      await refetch();
     } finally {
       setBusy(null);
     }

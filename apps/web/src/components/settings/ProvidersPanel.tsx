@@ -1,10 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useState, type FormEvent } from 'react';
 import { CheckCircle2, KeyRound, PlugZap, Server, Sparkles, XCircle, type LucideIcon } from 'lucide-react';
 import { ThinkingOrb } from 'thinking-orbs';
 import { Button, Input, cn } from '@careeros/ui';
 import { apiGet, apiPost } from '@/lib/api-client';
+import { useApi } from '@/lib/use-api';
 
 type ProviderName = 'deepseek' | 'openai' | 'anthropic' | 'ollama' | 'azure' | 'openrouter' | 'custom';
 
@@ -36,31 +37,19 @@ const PROVIDER_OPTIONS: Array<{ id: ProviderName; label: string; hint: string }>
 ];
 
 export function ProvidersPanel() {
-  const [rows, setRows] = useState<ConfiguredProvider[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [probe, setProbe] = useState<ProbeResult | null>(null);
   const [probing, setProbing] = useState(false);
 
-  const refresh = useCallback(async () => {
-    try {
-      const list = await apiGet<ConfiguredProvider[]>('/providers');
-      setRows(list);
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }, []);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
+  const refresh = useCallback(() => apiGet<ConfiguredProvider[]>('/providers'), []);
+  const { data: rows, error, setError, refetch } = useApi<ConfiguredProvider[]>(refresh);
 
   async function onSetDefault(id: string) {
     setBusyId(id);
     setError(null);
     try {
       await apiPost(`/providers/${id}/default`);
-      await refresh();
+      await refetch();
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -127,7 +116,7 @@ export function ProvidersPanel() {
         {probe && <ProbeResultRow result={probe} />}
       </section>
 
-      <AddProviderForm onSaved={refresh} />
+      <AddProviderForm onSaved={refetch} />
     </div>
   );
 }

@@ -6,6 +6,7 @@ import { ThinkingOrb } from 'thinking-orbs';
 import { Button, cn } from '@careeros/ui';
 import { Loader } from '@/components/Loader';
 import { UnavailableNotice } from '@/components/UnavailableNotice';
+import { useApi } from '@/lib/use-api';
 import {
   type AgentDevice,
   type PairingCode,
@@ -23,8 +24,6 @@ import {
  * younger than 5 min, so a 403 surfaces the re-auth message verbatim.
  */
 export function DevicesPanel() {
-  const [devices, setDevices] = useState<AgentDevice[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [pairing, setPairing] = useState<PairingCode | null>(null);
@@ -32,18 +31,8 @@ export function DevicesPanel() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
-  const refresh = useCallback(async () => {
-    try {
-      setDevices(await listAgentDevices());
-      setError(null);
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }, []);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
+  const refresh = useCallback(() => listAgentDevices(), []);
+  const { data: devices, error, refetch } = useApi<AgentDevice[]>(refresh);
 
   // Keep "last seen" labels current without re-fetching.
   useEffect(() => {
@@ -69,7 +58,7 @@ export function DevicesPanel() {
     try {
       await revokeAgentDevice(id);
       setConfirmingId(null);
-      await refresh();
+      await refetch();
     } catch (e) {
       setActionError((e as Error).message);
     } finally {

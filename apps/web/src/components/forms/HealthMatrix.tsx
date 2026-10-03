@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback } from 'react';
 import Link from 'next/link';
 import { ArrowRight, CheckCircle2, Database, HardDrive, RefreshCw, Sparkles, XCircle, Zap, type LucideIcon } from 'lucide-react';
 import { ThinkingOrb } from 'thinking-orbs';
 import { motion } from 'framer-motion';
 import { Button } from '@careeros/ui';
 import { apiPost } from '@/lib/api-client';
+import { useApi } from '@/lib/use-api';
 import { ErrorBanner } from './AccountForm';
 
 interface Check {
@@ -37,28 +38,10 @@ const LABELS: Record<string, { name: string; blurb: string }> = {
 const ORDER = ['postgres', 'redis', 'qdrant', 'ai'];
 
 export function HealthMatrix() {
-  const [state, setState] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
-  const [result, setResult] = useState<HealthResponse | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-
-  async function run() {
-    setState('running');
-    setErr(null);
-    try {
-      const r = await apiPost<HealthResponse>('/setup/health/verify', {});
-      setResult(r);
-      setState(r.status === 'ok' ? 'done' : 'error');
-    } catch (e) {
-      setErr((e as Error).message);
-      setState('error');
-    }
-  }
-
-  useEffect(() => {
-    void run();
-  }, []);
-
-  const allOk = state === 'done';
+  const run = useCallback(() => apiPost<HealthResponse>('/setup/health/verify', {}), []);
+  const { data: result, error: err, loading, refetch } = useApi(run);
+  const running = loading;
+  const allOk = result?.status === 'ok';
 
   return (
     <div className="flex flex-col gap-5">
@@ -67,7 +50,7 @@ export function HealthMatrix() {
           const c = result?.checks[key];
           const meta = LABELS[key]!;
           const Icon = ICONS[key]!;
-          const pending = state === 'running' && !c;
+          const pending = loading && !c;
           return (
             <motion.div
               key={key}
@@ -118,9 +101,9 @@ export function HealthMatrix() {
       {err && <ErrorBanner message={err} />}
 
       <div className="flex items-center gap-3">
-        <Button variant="secondary" onClick={run} disabled={state === 'running'}>
-          <RefreshCw className={`h-4 w-4 ${state === 'running' ? 'animate-spin' : ''}`} />
-          {state === 'running' ? 'Checking…' : 'Retry'}
+        <Button variant="secondary" onClick={() => void refetch()} disabled={running}>
+          <RefreshCw className={`h-4 w-4 ${running ? 'animate-spin' : ''}`} />
+          {running ? 'Checking…' : 'Retry'}
         </Button>
         {allOk && (
           <Link href="/setup/13-recovery">

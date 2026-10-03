@@ -138,7 +138,7 @@ export class CoverLettersService {
       .map((f) => `- id=${f.id} kind=${f.kind} ${summariseFact(f.content)}`)
       .join('\n');
 
-    const descWrapped = wrapUntrusted(job.description, 'job-description');
+    const descWrapped = wrapUntrusted(job.description, 'job-description', { userId });
     const rendered = renderPrompt('cover-letter-writer', {
       jobTitle: job.title,
       jobCompany: job.company,
@@ -154,6 +154,12 @@ export class CoverLettersService {
         ],
         schema: rendered.schema,
         temperature: 0.3,
+        meta: {
+          promptId: rendered.id,
+          promptVersion: rendered.version,
+          promptHash: rendered.hash,
+          sensitivity: 'personal',
+        },
       }),
     )) as CoverLetterContent;
 
@@ -240,6 +246,7 @@ export class CoverLettersService {
     const outcome = await runFactCheck({
       provider,
       claims,
+      sensitivity: 'personal',
       runWithUserLimit: (fn) => this.usage.runWithUserLimit(userId, fn),
     });
 

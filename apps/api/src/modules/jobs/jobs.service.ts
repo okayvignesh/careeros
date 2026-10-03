@@ -592,7 +592,7 @@ export class JobsService {
     job: { title: string; company: string; description: string },
     catalogueRendered: string,
   ): Promise<JobSkillExtraction> {
-    const wrapped = wrapUntrusted(job.description, 'job-description');
+    const wrapped = wrapUntrusted(job.description, 'job-description', { userId });
     const rendered = renderPrompt('job-skill-extract', {
       catalogue: catalogueRendered,
       title: job.title,
@@ -608,6 +608,12 @@ export class JobsService {
         ],
         schema: rendered.schema,
         temperature: 0,
+        meta: {
+          promptId: rendered.id,
+          promptVersion: rendered.version,
+          promptHash: rendered.hash,
+          sensitivity: 'public',
+        },
       }),
     )) as JobSkillExtraction;
   }

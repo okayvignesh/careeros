@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback } from 'react';
 import Link from 'next/link';
 import { ArrowRight, CheckCircle2, RefreshCw, XCircle, Circle } from 'lucide-react';
 import { ThinkingOrb } from 'thinking-orbs';
 import { motion } from 'framer-motion';
 import { Button } from '@careeros/ui';
 import { apiPost } from '@/lib/api-client';
+import { useApi } from '@/lib/use-api';
 import { ErrorBanner } from './AccountForm';
 
 interface Capability {
@@ -30,35 +31,17 @@ const LABELS: Array<{ key: keyof ProbeResult; name: string; blurb: string }> = [
 ];
 
 export function CapabilityProbe() {
-  const [state, setState] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
-  const [result, setResult] = useState<ProbeResult | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-
-  async function run() {
-    setState('running');
-    setErr(null);
-    try {
-      const r = await apiPost<ProbeResult>('/setup/provider/probe', {});
-      setResult(r);
-      setState(Object.values(r).every((c) => c.ok) ? 'done' : 'error');
-    } catch (e) {
-      setErr((e as Error).message);
-      setState('error');
-    }
-  }
-
-  useEffect(() => {
-    void run();
-  }, []);
-
-  const allOk = state === 'done';
+  const run = useCallback(() => apiPost<ProbeResult>('/setup/provider/probe', {}), []);
+  const { data: result, error: err, loading, refetch } = useApi(run);
+  const running = loading;
+  const allOk = !!result && Object.values(result).every((c) => c.ok);
 
   return (
     <div className="flex flex-col gap-5">
       <div className="panel divide-y divide-[hsl(var(--border))]">
         {LABELS.map(({ key, name, blurb }, i) => {
           const c = result?.[key];
-          const pending = state === 'running' && !c;
+          const pending = loading && !c;
           return (
             <motion.div
               key={key}
@@ -110,9 +93,9 @@ export function CapabilityProbe() {
       {err && <ErrorBanner message={err} />}
 
       <div className="flex items-center gap-3">
-        <Button variant="secondary" onClick={run} disabled={state === 'running'}>
-          <RefreshCw className={`h-4 w-4 ${state === 'running' ? 'animate-spin' : ''}`} />
-          {state === 'running' ? 'Testing…' : 'Retry probe'}
+        <Button variant="secondary" onClick={() => void refetch()} disabled={running}>
+          <RefreshCw className={`h-4 w-4 ${running ? 'animate-spin' : ''}`} />
+          {running ? 'Testing…' : 'Retry probe'}
         </Button>
         {allOk && (
           <Link href="/setup/05-embedding">

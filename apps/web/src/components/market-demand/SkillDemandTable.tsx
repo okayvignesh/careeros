@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { apiGet } from '@/lib/api-client';
 import { Loader } from '@/components/Loader';
 import { UnavailableNotice } from '@/components/UnavailableNotice';
+import { useApi } from '@/lib/use-api';
 import { Sparkline } from './Sparkline';
 import { GapBadge } from './GapBadge';
 import { skillDemandView, type SkillDemandView } from './market-data';
@@ -22,23 +23,14 @@ const WINDOW_DAYS = 30;
 export type { SkillDemandRow } from '@careeros/shared';
 
 export function SkillDemandTable() {
-  const [data, setData] = useState<SkillDemandView | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [cluster, setCluster] = useState('All');
   const [onlyGaps, setOnlyGaps] = useState(false);
 
   const load = useCallback(async () => {
-    try {
-      const res = await apiGet<unknown>(`/me/market/skill-demand?window=${WINDOW_DAYS}`);
-      setData(skillDemandView(res));
-    } catch (e) {
-      setError((e as Error).message);
-    }
+    const res = await apiGet<unknown>(`/me/market/skill-demand?window=${WINDOW_DAYS}`);
+    return skillDemandView(res);
   }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const { data, error } = useApi<SkillDemandView>(load);
 
   const filtered = useMemo(() => {
     if (!data) return [];

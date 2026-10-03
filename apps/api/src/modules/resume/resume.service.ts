@@ -166,7 +166,7 @@ export class ResumeService {
     // batch to skip within).
     let wrapped: ReturnType<typeof wrapUntrusted>;
     try {
-      wrapped = wrapUntrusted(text, 'resume');
+      wrapped = wrapUntrusted(text, 'resume', { userId });
     } catch (err) {
       if (err instanceof InjectionBlockedError) {
         await this.auditInjectionBlocked(userId, err);
@@ -197,6 +197,12 @@ export class ResumeService {
         ],
         schema: rendered.schema,
         temperature: 0,
+        meta: {
+          promptId: rendered.id,
+          promptVersion: rendered.version,
+          promptHash: rendered.hash,
+          sensitivity: 'personal',
+        },
       }),
     );
 

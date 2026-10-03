@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import type { PrismaService } from '../../prisma/prisma.service';
 import type { UsageService } from '../usage/usage.service';
@@ -166,5 +166,85 @@ describe('OutreachService state transitions', () => {
     };
     const svc = new OutreachService(fakePrisma(row), fakeUsage(), fakeUsageCache(), fakeSensitivity());
     await expect(svc.approve('u-1', 'o-1')).rejects.toBeInstanceOf(NotFoundException);
+  });
+});
+
+// ai-safety item 6: the shared fact-check gate blocks unbacked outreach drafts
+// before persist, with an actionable `reason` and no DB row.
+describe('OutreachService.compose fact-check gate', () => {
+  function composePrisma() {
+    const created: unknown[] = [];
+    return {
+      created,
+      evidence: {
+        findMany: async () => [
+          { id: 'e-1', kind: 'evidence', detail: { summary: 'Led a 12-service migration' }, sourceRef: { url: 'https://x.test' } },
+        ],
+      },
+      outreachMessage: {
+        create: async ({ data }: { data: unknown }) => {
+          created.push(data);
+          return { id: 'o-1', subject: (data as { subject: string }).subject, body: (data as { body: string }).body };
+        },
+      },
+      // compose() never reaches these, but the service type expects the model.
+      normalizedJob: {},
+    } as unknown as PrismaService & { created: unknown[] };
+  }
+
+  function stubProvider(script: unknown[]) {
+    const calls: unknown[] = [];
+    let i = 0;
+    return {
+      calls,
+      chatStructured: async (input: unknown) => {
+        calls.push(input);
+        const out = script[i++];
+        if (out instanceof Error) throw out;
+        return out;
+      },
+    };
+  }
+
+  function service(prisma: ReturnType<typeof composePrisma>) {
+    return new OutreachService(prisma, fakeUsage(), fakeUsageCache(), fakeSensitivity());
+  }
+
+  const draft = {
+    subject: 'Quick question about the platform role',
+    body: 'Hi Jane,\n\nI led a 12-service migration at my last role and would love to compare notes.\n\nWould 15 minutes work?',
+    factRefs: ['e-1'],
+  };
+  const input = {
+    userId: 'u-1',
+    templateId: 'cold-reach',
+    recipient: { email: 'jane@acme.com', name: 'Jane', company: 'Acme' },
+  };
+
+  it('rejects + does not persist when the fact-check flags the body', async () => {
+    const prisma = composePrisma();
+    const svc = service(prisma);
+    const provider = stubProvider([
+      draft,
+      { results: [{ bulletIndex: 0, supported: false, reason: 'claim exceeds cited evidence' }] },
+    ]);
+    vi.spyOn(svc as never as { loadProvider: () => Promise<unknown> }, 'loadProvider').mockResolvedValue(provider);
+
+    const out = await svc.compose(input);
+    expect(out.ok).toBe(false);
+    expect(out.outreachMessageId).toBeNull();
+    expect(out.reason).toContain('claim exceeds cited evidence');
+    expect(prisma.created).toHaveLength(0);
+  });
+
+  it('persists when the body is supported', async () => {
+    const prisma = composePrisma();
+    const svc = service(prisma);
+    const provider = stubProvider([draft, { results: [{ bulletIndex: 0, supported: true, reason: 'ok' }] }]);
+    vi.spyOn(svc as never as { loadProvider: () => Promise<unknown> }, 'loadProvider').mockResolvedValue(provider);
+
+    const out = await svc.compose(input);
+    expect(out.ok).toBe(true);
+    expect(prisma.created).toHaveLength(1);
   });
 });

@@ -140,3 +140,14 @@ describe('prisma.service.extends skip guard', () => {
     expect(typeof runE2E).toBe('boolean');
   });
 });
+
+// Always runs: the rotation service depends on `rawClient` bypassing the
+// field-encryption extension. A Proxy `has`-trap regression that routed it
+// through the extended client would silently decrypt/re-encrypt on read/write.
+describe('PrismaService.rawClient (unextended accessor)', () => {
+  it('exposes a client with model delegates that is not the extended proxy', () => {
+    const svc = new PrismaService();
+    expect(typeof svc.rawClient.encryptedSecret.findMany).toBe('function');
+    expect(svc.rawClient).not.toBe(svc as unknown as typeof svc.rawClient);
+  });
+});

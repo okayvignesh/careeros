@@ -8,6 +8,7 @@ import type { RequestHandler, Response } from 'express';
 import { installEgressProxy } from '@careeros/shared/net';
 import { AppModule } from './app.module';
 import { LockoutExceptionFilter } from './common/filters/lockout.filter';
+import { TokenCapExceptionFilter } from './common/filters/token-cap.filter';
 import {
   OPENAPI_JSON_PATH,
   OPENAPI_JSON_ROUTE,
@@ -106,7 +107,8 @@ async function bootstrap() {
   for (const mw of buildSecurityMiddleware()) app.use(mw);
 
   // A-C1: Retry-After header on LockoutError (429) responses.
-  app.useGlobalFilters(new LockoutExceptionFilter());
+  // ai-safety #9: pre-flight token-cap rejections map to an actionable 413.
+  app.useGlobalFilters(new LockoutExceptionFilter(), new TokenCapExceptionFilter());
 
   app.enableCors({
     origin: (process.env.TRUSTED_ORIGINS ?? '').split(',').filter(Boolean),

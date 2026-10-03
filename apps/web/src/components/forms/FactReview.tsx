@@ -39,13 +39,18 @@ export function FactReview() {
       return;
     }
     const parsed = JSON.parse(raw) as ExtractedFacts;
-    setFacts(parsed);
     const initial: Selected = {};
     parsed.employment.forEach((_, i) => (initial[`emp-${i}`] = true));
     parsed.education.forEach((_, i) => (initial[`edu-${i}`] = true));
     parsed.skills.forEach((_, i) => (initial[`skill-${i}`] = true));
     parsed.projects.forEach((_, i) => (initial[`proj-${i}`] = true));
-    setSel(initial);
+    // The wizard payload is browser-only, so it can't seed a lazy useState
+    // initializer (SSR/hydration would mismatch). Commit from a microtask so
+    // the effect body performs no synchronous setState.
+    queueMicrotask(() => {
+      setFacts(parsed);
+      setSel(initial);
+    });
   }, [router]);
 
   function toggle(id: string) {

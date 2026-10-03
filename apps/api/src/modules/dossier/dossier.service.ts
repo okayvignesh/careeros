@@ -316,7 +316,7 @@ export class DossierService {
     const wrapped: EngineeringBlogPost[] = [];
     for (const p of posts) {
       try {
-        wrapUntrusted(`${p.title}\n${p.summary}`, 'company-page');
+        wrapUntrusted(`${p.title}\n${p.summary}`, 'company-page', { userId });
         wrapped.push(p);
       } catch (err) {
         if (err instanceof InjectionBlockedError) {
@@ -494,7 +494,9 @@ export class DossierService {
     const wrappedFacts: Array<{ id: string; wrapped: string }> = [];
     for (const f of facts) {
       try {
-        const w = wrapUntrusted(`[id=${f.id}] ${f.content}`, f.sourceKind);
+        const w = wrapUntrusted(`[id=${f.id}] ${f.content}`, f.sourceKind, {
+          userId: input.userId,
+        });
         wrappedFacts.push({ id: f.id, wrapped: w.content });
       } catch (err) {
         if (err instanceof InjectionBlockedError) {
@@ -533,6 +535,7 @@ export class DossierService {
         ],
         schema: SynthesisSchema,
         temperature: 0,
+        meta: { sensitivity: input.redactSensitive ? 'public' : 'personal' },
       }),
     )) as z.infer<typeof SynthesisSchema>;
 

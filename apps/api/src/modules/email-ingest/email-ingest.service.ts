@@ -156,7 +156,7 @@ export class EmailIngestService implements OnModuleDestroy {
     // reaches the parser. We MUST call this on the raw HTML so the wrap
     // audit hook fires exactly as it does on job descriptions.
     try {
-      wrapUntrusted(fetched.html, 'email');
+      wrapUntrusted(fetched.html, 'email', { userId });
     } catch (err) {
       if (err instanceof InjectionBlockedError) {
         await this.audit(userId, 'security.audit.injection_blocked', {

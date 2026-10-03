@@ -1,15 +1,48 @@
-// embedding.generate job handler. Chunks the input text, embeds each chunk, and
-// upserts to the target Qdrant collection. Idempotent by content hash: repeating
-// the same (sourceId, chunk_idx, hash) upsert is a no-op even across worker restarts.
+// embedding.generate job handler. Chunks the input text, embeds each chunk through
+// the process-wide EmbeddingProvider seam, and upserts to the target Qdrant
+// collection. Idempotent by content hash: repeating the same
+// (sourceId, chunk_idx, hash) upsert is a no-op even across worker restarts.
+//
+// Vectors are semantic only when `EMBEDDING_MODE=local` (the default) and the
+// bge-small-en weights are available; offline the provider permanently falls back
+// to the deterministic embedder with a warning. Vectors written before the provider
+// switch are deterministic — re-enqueue their `embedding.generate` jobs (settings
+// "Re-embed" / `POST /embeddings/reembed`) so they become semantic.
 import { createHash } from 'node:crypto';
 import type { Logger } from 'pino';
-import { QdrantStore, embedDeterministic } from '@careeros/embeddings';
+import {
+  createEmbeddingProvider,
+  resolveEmbeddingMode,
+  type EmbeddingLogger,
+  type EmbeddingProvider,
+  type QdrantStore,
+} from '@careeros/embeddings';
 import {
   ALL_COLLECTIONS,
   chunkText,
   type BasePointPayload,
   type EmbeddingGeneratePayload,
 } from '@careeros/shared';
+
+/**
+ * Process-wide provider, constructed lazily on the first job so the model
+ * pipeline is loaded once per worker and the first job's logger carries any
+ * fallback warning. `createEmbeddingProvider` does not touch the network until
+ * the first `embed()`.
+ */
+let provider: EmbeddingProvider | undefined;
+
+function getEmbeddingProvider(logger: EmbeddingLogger): EmbeddingProvider {
+  if (!provider) {
+    const cacheDir = process.env.EMBEDDING_MODEL_CACHE_DIR;
+    provider = createEmbeddingProvider({
+      mode: resolveEmbeddingMode(process.env.EMBEDDING_MODE),
+      ...(cacheDir ? { cacheDir } : {}),
+      logger,
+    });
+  }
+  return provider;
+}
 
 export async function handleEmbeddingGenerate(
   qdrant: QdrantStore,
@@ -31,8 +64,14 @@ export async function handleEmbeddingGenerate(
     return { chunks: 0, skipped: 0 };
   }
 
+  const embed = getEmbeddingProvider(child);
   const now = new Date().toISOString();
-  const points = chunks.map((c) => {
+  const points: Array<{
+    id: string;
+    vector: number[];
+    payload: BasePointPayload & Record<string, unknown>;
+  }> = [];
+  for (const c of chunks) {
     const hash = createHash('sha256').update(c.text).digest('hex').slice(0, 16);
     const pointId = deterministicUuid(`${collection}:${sourceId}:${c.idx}:${hash}`);
     const payload: BasePointPayload & Record<string, unknown> = {
@@ -45,8 +84,8 @@ export async function handleEmbeddingGenerate(
       timestamp: now,
       ...(meta ?? {}),
     };
-    return { id: pointId, vector: embedDeterministic(c.text), payload };
-  });
+    points.push({ id: pointId, vector: await embed.embed(c.text), payload });
+  }
 
   await qdrant.upsert(collection, points);
   child.info({ chunks: points.length }, 'embedded + upserted');

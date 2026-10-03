@@ -1,8 +1,31 @@
 import type { z } from 'zod';
+import type { Sensitivity } from './sensitivity';
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
+}
+
+/**
+ * Response-validation outcome recorded on the audit row (ai-safety.md item 9).
+ * `not_applicable` covers prose / wizard test calls that have no schema.
+ */
+export type CallValidation = 'passed' | 'failed' | 'not_applicable';
+
+/**
+ * Per-call audit context. Optional so providers stay usable without it, but
+ * every domain call site passes it so `llm_calls` rows carry the prompt id/hash
+ * and sensitivity class that produced them. `estimatedPromptTokens` and cost
+ * fields are filled by the provider / auditor, not the caller.
+ */
+export interface LlmCallMeta {
+  promptId?: string;
+  promptVersion?: string;
+  promptHash?: string;
+  sensitivity?: Sensitivity;
+  agentRole?: string;
+  /** Reserved for a future response cache; recorded as-is when set. */
+  cacheHit?: boolean;
 }
 
 /**
@@ -59,6 +82,7 @@ export interface AIProvider {
     messages: ChatMessage[];
     temperature?: number;
     maxTokens?: number;
+    meta?: LlmCallMeta;
   }): Promise<string>;
 
   chatStructured<S extends z.ZodTypeAny>(input: {
@@ -66,6 +90,7 @@ export interface AIProvider {
     schema: S;
     temperature?: number;
     maxTokens?: number;
+    meta?: LlmCallMeta;
   }): Promise<z.output<S>>;
 
   probe(): Promise<ProviderProbeResult>;

@@ -8,6 +8,7 @@
 // lives in `injection-scan.prompt.ts` for the borderline path (item 5, later).
 //
 // Blueprint AI-Safety Item 5.
+import { createHash } from 'node:crypto';
 
 export type Severity = 'clean' | 'suspect' | 'blocked';
 
@@ -109,12 +110,27 @@ export function scanForInjection(text: string): InjectionScanResult {
 
 // -- audit hook -------------------------------------------------------------
 
-type InjectionAuditHook = (event: {
+export interface InjectionAuditContext {
+  userId?: string | null;
+  promptId?: string | null;
+  includeRawSnippet?: boolean;
+}
+
+export interface InjectionAuditEvent {
   code: string;
   kind: string;
   severity: Severity;
+  score: number;
   hits: InjectionHit[];
-}) => void;
+  action: 'scanned';
+  contentHash: string | null;
+  snippet: string | null;
+  snippetOffset: { start: number; end: number } | null;
+  userId: string | null;
+  promptId: string | null;
+}
+
+type InjectionAuditHook = (event: InjectionAuditEvent) => void;
 
 let auditHook: InjectionAuditHook | null = null;
 
@@ -123,10 +139,44 @@ export function setInjectionAuditHook(hook: InjectionAuditHook | null): void {
   auditHook = hook;
 }
 
-function audit(kind: string, severity: Severity, hits: InjectionHit[]): void {
+function scoreFor(severity: Severity, hits: InjectionHit[]): number {
+  if (severity === 'blocked') return 1;
+  if (severity === 'clean') return 0;
+  return Math.min(0.75, 0.25 + 0.15 * hits.length);
+}
+
+function audit(
+  kind: string,
+  severity: Severity,
+  hits: InjectionHit[],
+  text?: string,
+  ctx: InjectionAuditContext = {},
+): void {
   const code =
     severity === 'blocked' ? 'security.audit.injection_blocked' : 'security.audit.injection_suspect';
-  const evt = { code, kind, severity, hits };
+  const contentHash =
+    text !== undefined ? createHash('sha256').update(text, 'utf8').digest('hex').slice(0, 32) : null;
+  const first = hits[0];
+  const offset =
+    text !== undefined && first && first.index >= 0
+      ? { start: first.index, end: first.index + first.match.length }
+      : null;
+  const evt: InjectionAuditEvent = {
+    code,
+    kind,
+    severity,
+    score: scoreFor(severity, hits),
+    hits,
+    action: 'scanned',
+    contentHash,
+    snippet:
+      ctx.includeRawSnippet && text !== undefined && offset
+        ? text.slice(Math.max(0, offset.start - 60), Math.min(text.length, offset.end + 60))
+        : null,
+    snippetOffset: offset,
+    userId: ctx.userId ?? null,
+    promptId: ctx.promptId ?? null,
+  };
   try {
     auditHook?.(evt);
   } catch {
@@ -145,8 +195,12 @@ function audit(kind: string, severity: Severity, hits: InjectionHit[]): void {
  * throw+wrap path lives in `wrap.ts::wrapUntrusted`, which every ingest
  * caller uses; this helper exists for standalone scanners.
  */
-export function auditScan(kind: string, text: string): InjectionScanResult {
+export function auditScan(
+  kind: string,
+  text: string,
+  ctx: InjectionAuditContext = {},
+): InjectionScanResult {
   const scan = scanForInjection(text);
-  if (scan.severity !== 'clean') audit(kind, scan.severity, scan.hits);
+  if (scan.severity !== 'clean') audit(kind, scan.severity, scan.hits, text, ctx);
   return scan;
 }

@@ -99,6 +99,11 @@ export interface RunFactCheckOptions {
   runWithUserLimit?: <T>(fn: () => Promise<T>) => Promise<T>;
   /** Prompt id override. Default `resume-bullet-fact-check` (only one shipping). */
   promptId?: string;
+  /**
+   * Sensitivity class of the audited content, recorded on the `llm_calls` audit
+   * row (ai-safety.md item 9). Callers that know the label pass it through.
+   */
+  sensitivity?: import('../sensitivity').Sensitivity;
 }
 
 /**
@@ -131,6 +136,12 @@ export async function runFactCheck(
         ],
         schema: rendered.schema,
         temperature: 0,
+        meta: {
+          promptId: rendered.id,
+          promptVersion: rendered.version,
+          promptHash: rendered.hash,
+          ...(opts.sensitivity ? { sensitivity: opts.sensitivity } : {}),
+        },
       }),
     )) as FactCheckResult;
     const verdicts = new Map<number, Verdict>();

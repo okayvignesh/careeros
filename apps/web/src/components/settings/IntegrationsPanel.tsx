@@ -1,10 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useState, type FormEvent } from 'react';
 import { CheckCircle2, KeyRound, RefreshCw, Trash2, XCircle } from 'lucide-react';
 import { ThinkingOrb } from 'thinking-orbs';
 import { Button, Input, cn } from '@careeros/ui';
 import { apiDelete, apiGet, apiPost } from '@/lib/api-client';
+import { useApi } from '@/lib/use-api';
 
 interface IntegrationRow {
   kind: string;
@@ -14,20 +15,8 @@ interface IntegrationRow {
 }
 
 export function IntegrationsPanel() {
-  const [rows, setRows] = useState<IntegrationRow[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const refresh = useCallback(async () => {
-    try {
-      setRows(await apiGet<IntegrationRow[]>('/integrations'));
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }, []);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
+  const refresh = useCallback(() => apiGet<IntegrationRow[]>('/integrations'), []);
+  const { data: rows, error, refetch } = useApi<IntegrationRow[]>(refresh);
 
   const github = rows?.find((r) => r.kind === 'github') ?? null;
 
@@ -38,7 +27,7 @@ export function IntegrationsPanel() {
           {error}
         </div>
       )}
-      {rows === null ? <Skeleton /> : <GithubCard row={github} onChanged={refresh} />}
+      {rows === null ? <Skeleton /> : <GithubCard row={github} onChanged={refetch} />}
       <PendingRow label="Slack" scheduled="P5" />
       <PendingRow label="Gmail" scheduled="P5" />
     </div>

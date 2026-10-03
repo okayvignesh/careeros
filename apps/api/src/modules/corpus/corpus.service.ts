@@ -126,7 +126,7 @@ export class CorpusService {
     provider: AIProvider,
     question: string,
   ): Promise<KeyPointsExtraction | null> {
-    const wrapped = wrapUntrusted(question, 'readme');
+    const wrapped = wrapUntrusted(question, 'readme', { userId });
     const rendered = renderPrompt('keypoints-extractor', { question: wrapped.content });
     // A-M9: per-user LLM concurrency ceiling.
     const result = (await this.usage.runWithUserLimit(userId, () =>
@@ -137,6 +137,12 @@ export class CorpusService {
         ],
         schema: rendered.schema,
         temperature: 0.2,
+        meta: {
+          promptId: rendered.id,
+          promptVersion: rendered.version,
+          promptHash: rendered.hash,
+          sensitivity: 'public',
+        },
       }),
     )) as KeyPointsExtraction;
     return result;

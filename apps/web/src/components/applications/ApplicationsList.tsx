@@ -1,11 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import Link from 'next/link';
 import { ArrowUpRight, FileText, Mail, Trash2 } from 'lucide-react';
 import { Button } from '@careeros/ui';
 import { STATE_LABEL, type ApplicationState } from '@careeros/shared';
 import { apiDelete, apiGet, apiPatch } from '@/lib/api-client';
+import { useApi } from '@/lib/use-api';
 
 interface ApplicationEvent {
   id: string;
@@ -34,28 +35,17 @@ interface Application {
 }
 
 export function ApplicationsList() {
-  const [apps, setApps] = useState<Application[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    try {
-      setApps(await apiGet<Application[]>('/me/applications'));
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const load = useCallback(() => apiGet<Application[]>('/me/applications'), []);
+  const { data: apps, error, setError, refetch } = useApi(load);
 
   async function transition(id: string, toState: ApplicationState) {
     setBusyId(id);
     setError(null);
     try {
       await apiPatch<Application>(`/me/applications/${id}/transition`, { toState });
-      await load();
+      await refetch();
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -69,7 +59,7 @@ export function ApplicationsList() {
     setError(null);
     try {
       await apiDelete(`/me/applications/${id}`);
-      await load();
+      await refetch();
     } catch (e) {
       setError((e as Error).message);
     } finally {

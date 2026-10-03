@@ -1,5 +1,9 @@
+// Default the module-level provider to the offline deterministic backend so the
+// real `createEmbeddingProvider()` seam is exercised without downloading weights.
+process.env.EMBEDDING_MODE ??= 'deterministic';
+
 import { describe, expect, it, vi } from 'vitest';
-import { embedDeterministic } from '@careeros/embeddings';
+import { embedDeterministic, type EmbeddingProvider } from '@careeros/embeddings';
 import { hashPrompt } from './hash';
 import type { CorpusAdapter, CorpusItem } from './types';
 import {
@@ -181,6 +185,33 @@ describe('refreshCorpus', () => {
     expect(goodSummary.inserted).toBe(1);
     expect(result.totals.inserted).toBe(1);
     expect(logger.error).toHaveBeenCalled();
+  });
+
+  it('routes dedupe vectors through the injected EmbeddingProvider seam', async () => {
+    const item = makeItem('What is idempotency and why does it matter for workers?');
+    const calls: string[] = [];
+    const provider: EmbeddingProvider = {
+      mode: 'deterministic',
+      model: 'spy',
+      dim: 384,
+      async embed(text: string) {
+        calls.push(text);
+        return embedDeterministic(text);
+      },
+    };
+    const prisma = fakePrisma();
+    const qdrant = fakeQdrant();
+
+    const result = await refreshCorpus(prisma, qdrant, logger, {
+      adapters: [fakeAdapter('seam', [item])],
+      provider,
+    });
+
+    expect(calls).toEqual([item.body]);
+    expect(result.totals.inserted).toBe(1);
+    // The provider's vector is what landed in Qdrant.
+    const stored = [...qdrant.points.values()][0]!;
+    expect(stored.vector).toEqual(embedDeterministic(item.body));
   });
 });
 

@@ -26,6 +26,7 @@ model User {
   auditEvents     AuditEvent[]
   llmCalls        LlmCall[]
   llmHallucinationLogs LlmHallucinationLog[]
+  llmInjectionLogs LlmInjectionLog[]
   evidence        Evidence[]
   candidateSkillStates CandidateSkillState[]
   skillStateEvents SkillStateEvent[]
@@ -694,26 +695,77 @@ model LlmHallucinationLog {
 /// Per-call audit + cost accounting for every provider LLM invocation.
 /// Non-blocking write; ok to lose a row under crash. Retention: 90 days (enforced by cron in P6).
 model LlmCall {
-  id               String   @id @default(uuid()) @db.Uuid
-  userId           String?  @db.Uuid
-  provider         String   /// "deepseek" | future
-  model            String
-  callKind         String   /// "chat" | "chatStructured" | "test:chat" | "test:structured" | "test:tools" | "test:streaming"
-  promptTokens     Int?
-  completionTokens Int?
-  totalTokens      Int?
-  costUsd          Decimal? @db.Decimal(10, 6)
-  latencyMs        Int
-  ok               Boolean
-  error            String?
-  timestamp        DateTime @default(now()) @db.Timestamptz(6)
+  id                    String   @id @default(uuid()) @db.Uuid
+  userId                String?  @db.Uuid
+  provider              String   /// "deepseek" | future
+  model                 String
+  callKind              String   /// "chat" | "chatStructured" | "test:chat" | "test:structured" | "test:tools" | "test:streaming"
+  /// Prompt-registry identity (ai-safety.md item 9). Null for wizard/test calls.
+  promptId              String?
+  promptVersion         String?
+  promptHash            String?
+  /// Sensitivity class of the payload at dispatch (public|personal|confidential|employer-confidential).
+  sensitivity           String?
+  /// Agent role when the call came from an agent, else null.
+  agentRole             String?
+  promptTokens          Int?
+  completionTokens      Int?
+  totalTokens           Int?
+  /// Pre-flight js-tiktoken estimate; the authoritative count is `promptTokens`.
+  estimatedPromptTokens Int?
+  costInput             Decimal? @db.Decimal(10, 6)
+  costOutput            Decimal? @db.Decimal(10, 6)
+  costUsd               Decimal? @db.Decimal(10, 6)
+  /// Pricing-sheet version used for the cost split.
+  pricingVersion        String?
+  latencyMs             Int
+  ok                    Boolean
+  /// Structured-output validation verdict: passed | failed | not_applicable.
+  validation            String?
+  cacheHit              Boolean  @default(false)
+  error                 String?
+  timestamp             DateTime @default(now()) @db.Timestamptz(6)
 
   user              User?                @relation(fields: [userId], references: [id], onDelete: SetNull)
   hallucinationLogs LlmHallucinationLog[]
+  injectionLogs     LlmInjectionLog[]
 
   @@index([userId, timestamp])
   @@index([timestamp])
+  @@index([promptId, timestamp])
+  @@index([sensitivity, timestamp])
   @@map("llm_calls")
+}
+
+/// Dedicated prompt-injection audit trail (ai-safety.md item 5). One row per
+/// suspect/blocked flag at the wrap/scan boundary, regardless of whether the
+/// caller already wrote a domain `audit_log` row. `snippet` is the raw excerpt
+/// around the first hit and is encrypted at rest via ENCRYPTED_FIELDS;
+/// `snippetHash` + `snippetOffset` stay cleartext so the audit UI can locate the
+/// fragment without decrypting.
+model LlmInjectionLog {
+  id            String   @id @default(uuid()) @db.Uuid
+  userId        String?  @db.Uuid
+  llmCallId     String?  @db.Uuid
+  /// UntrustedSourceKind, e.g. "job-description" | "email" | "readme".
+  sourceKind    String
+  promptId      String?
+  severity      String   /// clean | suspect | blocked
+  score         Float?   @db.Real /// heuristic 0..1 derived from hit count/kind
+  action        String   /// wrapped | blocked | dropped
+  hits          String[] @default([]) /// rule kinds that fired
+  snippet       String?  /// encrypted at rest (ENCRYPTED_FIELDS)
+  snippetHash   String?  /// sha256 hex of the source, truncated to 32 chars
+  snippetOffset Json?    /// { start, end } byte offsets of the first hit
+  timestamp     DateTime @default(now()) @db.Timestamptz(6)
+
+  user    User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  llmCall LlmCall? @relation(fields: [llmCallId], references: [id], onDelete: SetNull)
+
+  @@index([userId, timestamp])
+  @@index([sourceKind, timestamp])
+  @@index([severity, timestamp])
+  @@map("llm_injection_log")
 }
 
 /// Append-only audit log. Insert-only in application; no UPDATE/DELETE granted to app role.

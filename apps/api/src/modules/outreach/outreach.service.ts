@@ -95,6 +95,7 @@ export class OutreachService {
       recipientContext: wrapUntrusted(
         formatRecipientContext(input.recipient),
         'user-input',
+        { userId: input.userId },
       ).content,
       evidenceCatalog: renderEvidenceCatalog(evidence),
     });
@@ -108,6 +109,12 @@ export class OutreachService {
         schema: rendered.schema,
         temperature: 0.5,
         maxTokens: 1100,
+        meta: {
+          promptId: rendered.id,
+          promptVersion: rendered.version,
+          promptHash: rendered.hash,
+          sensitivity: 'personal',
+        },
       }),
     )) as OutreachDraft;
 
@@ -131,6 +138,7 @@ export class OutreachService {
       const outcome = await runFactCheck({
         claims: [claim],
         provider,
+        sensitivity: 'personal',
         runWithUserLimit: (fn) => this.usage.runWithUserLimit(input.userId, fn),
       }).catch((err) => {
         this.logger.warn(`outreach fact-check crashed: ${(err as Error).message}`);

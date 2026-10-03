@@ -2,6 +2,7 @@ import { type z } from 'zod';
 import type {
   AIProvider,
   ChatMessage,
+  LlmCallMeta,
   ProviderCapabilities,
   ProviderProbeResult,
 } from '../provider';
@@ -133,6 +134,7 @@ export class FallbackProvider implements AIProvider {
     messages: ChatMessage[];
     temperature?: number;
     maxTokens?: number;
+    meta?: LlmCallMeta;
   }): Promise<string> {
     return this.run((provider) => provider.chat(input));
   }
@@ -142,6 +144,7 @@ export class FallbackProvider implements AIProvider {
     schema: S;
     temperature?: number;
     maxTokens?: number;
+    meta?: LlmCallMeta;
   }): Promise<z.output<S>> {
     return this.run((provider) => provider.chatStructured(input));
   }

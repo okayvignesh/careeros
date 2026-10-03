@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback } from 'react';
 import { apiGet } from '@/lib/api-client';
 import { Loader } from '@/components/Loader';
 import { UnavailableNotice } from '@/components/UnavailableNotice';
+import { useApi } from '@/lib/use-api';
 import { quotaShare, quotaTone } from './quota-tone';
 import { providersView, workloadsView } from './providers-data';
 
@@ -38,26 +39,16 @@ const barToneClass = {
 } as const;
 
 export function SearchProvidersPanel() {
-  const [providers, setProviders] = useState<ReturnType<typeof providersView> | null>(null);
-  const [workloads, setWorkloads] = useState<ReturnType<typeof workloadsView>>([]);
-  const [error, setError] = useState<string | null>(null);
-
   const load = useCallback(async () => {
-    try {
-      const [p, w] = await Promise.all([
-        apiGet<unknown>('/me/search-providers'),
-        apiGet<unknown>('/me/search-providers/workloads'),
-      ]);
-      setProviders(providersView(p));
-      setWorkloads(workloadsView(w));
-    } catch (e) {
-      setError((e as Error).message);
-    }
+    const [p, w] = await Promise.all([
+      apiGet<unknown>('/me/search-providers'),
+      apiGet<unknown>('/me/search-providers/workloads'),
+    ]);
+    return { providers: providersView(p), workloads: workloadsView(w) };
   }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const { data, error } = useApi(load);
+  const providers = data?.providers ?? null;
+  const workloads = data?.workloads ?? [];
 
   if (error) {
     return <UnavailableNotice feature="Search providers" />;

@@ -1,11 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { AlertTriangle, ArrowRight, CheckCircle2, Flame, Sparkles, Swords, Trophy, type LucideIcon } from 'lucide-react';
 import { Button } from '@careeros/ui';
 import { apiGet, apiPost } from '@/lib/api-client';
+import { useApi } from '@/lib/use-api';
 
 interface LevelInfo {
   level: number;
@@ -38,31 +39,23 @@ interface EligibleBoss {
 }
 
 export function ArenaOverview() {
-  const [p, setP] = useState<Progression | null>(null);
-  const [tasks, setTasks] = useState<RemediationTask[]>([]);
-  const [boss, setBoss] = useState<EligibleBoss | null>(null);
   const [startingBoss, setStartingBoss] = useState(false);
   const [completingId, setCompletingId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const router = useRouter();
 
-  const loadTasks = useCallback(async () => {
-    try {
-      setTasks(await apiGet<RemediationTask[]>('/assessments/remediation'));
-    } catch (e) {
-      setError((e as Error).message);
-    }
+  const load = useCallback(async () => {
+    const [progression, tasks] = await Promise.all([
+      apiGet<Progression>('/assessments/progression'),
+      apiGet<RemediationTask[]>('/assessments/remediation'),
+    ]);
+    const boss = await apiGet<EligibleBoss>('/assessments/boss/eligible').catch(() => null);
+    return { progression, tasks, boss };
   }, []);
 
-  useEffect(() => {
-    apiGet<Progression>('/assessments/progression')
-      .then(setP)
-      .catch((e) => setError((e as Error).message));
-    void loadTasks();
-    apiGet<EligibleBoss>('/assessments/boss/eligible')
-      .then(setBoss)
-      .catch(() => setBoss(null));
-  }, [loadTasks]);
+  const { data, error, setError, refetch } = useApi(load);
+  const p = data?.progression ?? null;
+  const tasks = data?.tasks ?? [];
+  const boss = data?.boss ?? null;
 
   async function startBoss() {
     if (!boss?.milestone) return;
@@ -82,7 +75,7 @@ export function ArenaOverview() {
     setCompletingId(id);
     try {
       await apiPost(`/assessments/remediation/${id}/complete`);
-      await loadTasks();
+      await refetch();
     } catch (e) {
       setError((e as Error).message);
     } finally {

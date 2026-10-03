@@ -192,6 +192,7 @@ export async function runAgent<
       schema: agent.outputSchema,
       ...(agent.temperature !== undefined ? { temperature: agent.temperature } : {}),
       ...(agent.maxTokens !== undefined ? { maxTokens: agent.maxTokens } : {}),
+      meta: { promptId: agent.id, agentRole: agent.id, ...(promptVersion ? { promptVersion } : {}) },
     });
     const latencyMs = Date.now() - start;
     // ponytail: provider.chatStructured does not surface token counts on its

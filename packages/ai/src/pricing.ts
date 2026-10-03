@@ -5,6 +5,20 @@
 // provider docs when rates move.
 type PriceRow = { inputPer1M: number; outputPer1M: number };
 
+/**
+ * Bumped whenever a rate in `PRICES` changes. Persisted per `llm_calls` row so a
+ * historical cost can be re-derived against the sheet that produced it
+ * (ai-safety.md item 9).
+ */
+export const PRICING_VERSION = '2026-10-03';
+
+export interface CostBreakdown {
+  costInput: number;
+  costOutput: number;
+  costTotal: number;
+  pricingVersion: string;
+}
+
 const PRICES: Record<string, Record<string, PriceRow>> = {
   // https://api-docs.deepseek.com/quick_start/pricing
   deepseek: {
@@ -33,4 +47,30 @@ export function estimateCostUsd(
   const p = PRICES[provider]?.[model];
   if (!p) return null;
   return (promptTokens * p.inputPer1M + completionTokens * p.outputPer1M) / 1_000_000;
+}
+
+/**
+ * Split cost into its input/output components for the audit ledger. Returns null
+ * when the provider/model has no published rate (so the row records "unknown"
+ * rather than a fabricated split).
+ */
+export function estimateCostBreakdown(
+  provider: string,
+  model: string,
+  promptTokens: number,
+  completionTokens: number,
+): CostBreakdown | null {
+  if (provider === 'ollama') {
+    return { costInput: 0, costOutput: 0, costTotal: 0, pricingVersion: 'local' };
+  }
+  const p = PRICES[provider]?.[model];
+  if (!p) return null;
+  const costInput = (promptTokens * p.inputPer1M) / 1_000_000;
+  const costOutput = (completionTokens * p.outputPer1M) / 1_000_000;
+  return {
+    costInput,
+    costOutput,
+    costTotal: costInput + costOutput,
+    pricingVersion: PRICING_VERSION,
+  };
 }

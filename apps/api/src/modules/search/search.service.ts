@@ -1,6 +1,19 @@
+// Semantic search over Qdrant. Query text is embedded through the process-wide
+// EmbeddingProvider seam (semantic under `EMBEDDING_MODE=local`, deterministic
+// fallback offline). Stored vectors written before this switch are deterministic
+// and won't match semantic queries until re-embedded: settings "Re-embed"
+// (`POST /embeddings/reembed`) for resume facts; rebuild `corpus_questions` for
+// corpus questions (no per-row path — see refresh.worker.ts).
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
-import { QdrantStore, embedDeterministic, type PayloadFilter } from '@careeros/embeddings';
+import {
+  QdrantStore,
+  createEmbeddingProvider,
+  resolveEmbeddingMode,
+  type EmbeddingLogger,
+  type EmbeddingProvider,
+  type PayloadFilter,
+} from '@careeros/embeddings';
 import { ALL_COLLECTIONS, COLLECTION_CAREER_FACTS, SENSITIVITY_LEVELS } from '@careeros/shared';
 import { rankOf, type Sensitivity } from '@careeros/ai';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -18,12 +31,23 @@ export interface SearchHitDto {
 @Injectable()
 export class SearchService {
   private readonly qdrant: QdrantStore;
+  /** Process-wide (Nest singleton) provider; created once per process. */
+  private readonly embeddings: EmbeddingProvider;
 
   constructor(
     private readonly prisma: PrismaService,
     @InjectPinoLogger(SearchService.name) private readonly logger: PinoLogger,
   ) {
     this.qdrant = new QdrantStore(process.env.QDRANT_URL ?? 'http://qdrant:6333');
+    const cacheDir = process.env.EMBEDDING_MODEL_CACHE_DIR;
+    const embedLogger: EmbeddingLogger = {
+      warn: (obj, msg) => this.logger.warn({ ...obj }, msg),
+    };
+    this.embeddings = createEmbeddingProvider({
+      mode: resolveEmbeddingMode(process.env.EMBEDDING_MODE),
+      ...(cacheDir ? { cacheDir } : {}),
+      logger: embedLogger,
+    });
   }
 
   async search(
@@ -48,7 +72,7 @@ export class SearchService {
     const maxSensitivity: Sensitivity = options.maxSensitivity ?? 'personal';
     const maxRank = rankOf(maxSensitivity);
 
-    const vector = embedDeterministic(trimmed);
+    const vector = await this.embeddings.embed(trimmed);
     // Server-side filter: user isolation is Qdrant's responsibility, not the api's.
     // `sensitivity: {any: allowedLabels}` avoids surfacing labels above the ceiling.
     const allowedLabels = SENSITIVITY_LEVELS.filter((l) => rankOf(l) <= maxRank);

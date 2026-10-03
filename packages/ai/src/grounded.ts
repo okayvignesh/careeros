@@ -82,6 +82,11 @@ export async function generateGrounded<S extends ZodTypeAny>({
     ],
     schema: rendered.schema,
     temperature,
+    meta: {
+      promptId: rendered.id,
+      promptVersion: rendered.version,
+      promptHash: rendered.hash,
+    },
   })) as z.output<S>;
 
   // Feed the raw fact content (not the wrapped form) so the heuristic doesn't

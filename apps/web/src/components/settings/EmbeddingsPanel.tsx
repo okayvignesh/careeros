@@ -1,10 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useState, type FormEvent } from 'react';
 import { CheckCircle2, Cpu, Cloud, KeyRound, RefreshCw, Server, XCircle, type LucideIcon } from 'lucide-react';
 import { ThinkingOrb } from 'thinking-orbs';
 import { Button, Input, cn } from '@careeros/ui';
 import { apiGet, apiPost } from '@/lib/api-client';
+import { useApi } from '@/lib/use-api';
 
 type Mode = 'local' | 'external';
 
@@ -25,8 +26,6 @@ interface TestResult {
 }
 
 export function EmbeddingsPanel() {
-  const [cfg, setCfg] = useState<Config | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [savedNote, setSavedNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
@@ -34,18 +33,14 @@ export function EmbeddingsPanel() {
   const [reembedNote, setReembedNote] = useState<string | null>(null);
   const [reembedding, setReembedding] = useState(false);
 
-  const refresh = useCallback(async () => {
-    try {
-      const c = await apiGet<Config>('/embeddings');
-      setCfg(c);
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }, []);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
+  const refresh = useCallback(() => apiGet<Config>('/embeddings'), []);
+  const {
+    data: cfg,
+    error,
+    setData: setCfg,
+    setError,
+    refetch,
+  } = useApi<Config>(refresh);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -64,7 +59,7 @@ export function EmbeddingsPanel() {
       }
       await apiPost('/embeddings', payload);
       setSavedNote('Saved. Run a re-embed to rebuild the vector store with the new mode.');
-      await refresh();
+      await refetch();
     } catch (e) {
       setError((e as Error).message);
     } finally {

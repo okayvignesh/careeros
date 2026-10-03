@@ -82,8 +82,8 @@ export class InterviewPrepService {
     const evidence = await this.loadEvidence(userId);
 
     const rendered = renderPrompt('interview-prep-planner', {
-      jobDescription: wrapUntrusted(ctx.jobDescription, 'user-input').content,
-      companyDossier: wrapUntrusted(ctx.companyDossier, 'user-input').content,
+      jobDescription: wrapUntrusted(ctx.jobDescription, 'user-input', { userId }).content,
+      companyDossier: wrapUntrusted(ctx.companyDossier, 'user-input', { userId }).content,
       resumeSummary: ctx.resumeSummary,
       evidenceCatalog: renderEvidenceCatalog(evidence),
     });
@@ -97,6 +97,12 @@ export class InterviewPrepService {
         schema: rendered.schema,
         temperature: 0.4,
         maxTokens: 1500,
+        meta: {
+          promptId: rendered.id,
+          promptVersion: rendered.version,
+          promptHash: rendered.hash,
+          sensitivity: 'personal',
+        },
       }),
     )) as InterviewPrepPlan;
 
@@ -169,6 +175,12 @@ export class InterviewPrepService {
         schema: rendered.schema,
         temperature: 0.5,
         maxTokens: 900,
+        meta: {
+          promptId: rendered.id,
+          promptVersion: rendered.version,
+          promptHash: rendered.hash,
+          sensitivity: 'personal',
+        },
       }),
     )) as TalkTrack;
 
@@ -198,6 +210,7 @@ export class InterviewPrepService {
     const outcome = await runFactCheck({
       claims: [claim],
       provider,
+      sensitivity: 'personal',
       runWithUserLimit: (fn) => this.usage.runWithUserLimit(userId, fn),
     }).catch((err) => {
       this.logger.warn(`talk-track fact-check crashed, keeping draft: ${(err as Error).message}`);

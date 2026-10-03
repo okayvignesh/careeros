@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback } from 'react';
 import Link from 'next/link';
 import {
   ArrowRight,
@@ -15,6 +15,7 @@ import { ThinkingOrb } from 'thinking-orbs';
 import { motion } from 'framer-motion';
 import { Button } from '@careeros/ui';
 import { apiPost } from '@/lib/api-client';
+import { useApi } from '@/lib/use-api';
 import { ErrorBanner } from './AccountForm';
 
 interface TestResult {
@@ -33,35 +34,17 @@ const CHECKS = [
 ] as const;
 
 export function EmbeddingTest() {
-  const [state, setState] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
-  const [result, setResult] = useState<TestResult | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-
-  async function run() {
-    setState('running');
-    setErr(null);
-    try {
-      const r = await apiPost<TestResult>('/setup/embedding/test', {});
-      setResult(r);
-      setState(r.qdrantReachable && r.upsertOk && r.searchOk ? 'done' : 'error');
-    } catch (e) {
-      setErr((e as Error).message);
-      setState('error');
-    }
-  }
-
-  useEffect(() => {
-    void run();
-  }, []);
-
-  const allOk = state === 'done';
+  const run = useCallback(() => apiPost<TestResult>('/setup/embedding/test', {}), []);
+  const { data: result, error: err, loading, refetch } = useApi(run);
+  const running = loading;
+  const allOk = !!result && result.qdrantReachable && result.upsertOk && result.searchOk;
 
   return (
     <div className="flex flex-col gap-5">
       <div className="panel divide-y divide-[hsl(var(--border))]">
         {CHECKS.map(({ key, icon: Icon, name, blurb }, i) => {
           const value = result?.[key];
-          const pending = state === 'running' && value === undefined;
+          const pending = loading && value === undefined;
           const ok = value === true;
           const failed = value === false;
           return (
@@ -120,9 +103,9 @@ export function EmbeddingTest() {
       {(err || result?.error) && <ErrorBanner message={err ?? result!.error!} />}
 
       <div className="flex items-center gap-3">
-        <Button variant="secondary" onClick={run} disabled={state === 'running'}>
-          <RefreshCw className={`h-4 w-4 ${state === 'running' ? 'animate-spin' : ''}`} />
-          {state === 'running' ? 'Testing…' : 'Retry'}
+        <Button variant="secondary" onClick={() => void refetch()} disabled={running}>
+          <RefreshCw className={`h-4 w-4 ${running ? 'animate-spin' : ''}`} />
+          {running ? 'Testing…' : 'Retry'}
         </Button>
         {allOk && (
           <Link href="/setup/07-github">

@@ -138,6 +138,7 @@ export class MarketBriefService {
         const w = wrapUntrusted(
           `- ${s.title} @ ${s.company} | ${s.canonicalUrl}`,
           'job-description',
+          { userId },
         );
         wrappedLines.push(w.content);
       } catch (err) {
@@ -171,6 +172,12 @@ export class MarketBriefService {
         ],
         schema: rendered.schema,
         temperature: 0.3,
+        meta: {
+          promptId: rendered.id,
+          promptVersion: rendered.version,
+          promptHash: rendered.hash,
+          sensitivity: 'personal',
+        },
       }),
     )) as MarketBriefContent;
 

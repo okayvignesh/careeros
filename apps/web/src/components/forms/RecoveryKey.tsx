@@ -1,42 +1,35 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AlertTriangle, ArrowRight, Check, Copy, Download, RotateCw, ShieldCheck } from 'lucide-react';
 import { ThinkingOrb } from 'thinking-orbs';
 import { motion } from 'framer-motion';
 import { Button, cn } from '@careeros/ui';
 import { apiPost } from '@/lib/api-client';
+import { useApi } from '@/lib/use-api';
 import { ErrorBanner } from './AccountForm';
 
 export function RecoveryKey() {
   const router = useRouter();
-  const [key, setKey] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [downloaded, setDownloaded] = useState(false);
   const [ack, setAck] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
 
-  async function generate() {
-    setBusy(true);
-    setErr(null);
+  const generate = useCallback(
+    () => apiPost<{ key: string; last4: string }>('/recovery/generate', {}),
+    [],
+  );
+  const { data, error: err, loading, setError: setErr, refetch } = useApi(generate);
+  const key = data?.key ?? null;
+
+  function regenerate() {
     setCopied(false);
     setDownloaded(false);
     setAck(false);
-    try {
-      const r = await apiPost<{ key: string; last4: string }>('/recovery/generate', {});
-      setKey(r.key);
-    } catch (e) {
-      setErr((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
+    void refetch();
   }
-
-  useEffect(() => {
-    void generate();
-  }, []);
 
   function copy() {
     if (!key) return;
@@ -109,8 +102,8 @@ export function RecoveryKey() {
             <Download className="h-3.5 w-3.5" />
             Download .txt
           </Button>
-          <Button size="sm" variant="ghost" onClick={generate} disabled={busy}>
-            <RotateCw className={cn('h-3.5 w-3.5', busy && 'animate-spin')} />
+          <Button size="sm" variant="ghost" onClick={regenerate} disabled={loading}>
+            <RotateCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
             Regenerate
           </Button>
         </div>

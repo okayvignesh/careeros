@@ -10,6 +10,9 @@ import { defineConfig, devices } from '@playwright/test';
  */
 export default defineConfig({
   testDir: './e2e',
+  // Ignore macOS AppleDouble sidecar files (created on non-native volumes);
+  // they otherwise match the default `*.spec.ts` test match and fail to parse.
+  testIgnore: ['**/._*'],
   fullyParallel: false, // single-user app; parallel would step on shared state
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,

@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import { STATIC_SECURITY_HEADERS, apiOrigin, buildCsp } from '@/lib/security-headers';
 
 /**
  * Gate every request against the API's /setup/state:
@@ -12,6 +13,11 @@ import { NextResponse, type NextRequest } from 'next/server';
  *    wizard is done; the sign-in form is redundant when authenticated).
  *  - API unreachable on any protected path → /service-unavailable?next=…
  *    (A-M8: fail closed).
+ *
+ * It also stamps the security-header baseline (plan/security.md item 2) on
+ * every response, minting a per-request CSP nonce and forwarding it to Next as
+ * `x-nonce` so the framework can stamp its inline scripts.
+ *
  * ponytail: no separate SetupGuard component; the middleware is the single
  * choke point so a page-level bypass isn't possible.
  */
@@ -35,9 +41,44 @@ function isFrameworkPath(pathname: string): boolean {
   );
 }
 
+function newNonce(): string {
+  return btoa(crypto.randomUUID());
+}
+
+/** Attach the CSP + static security headers to an outgoing response. */
+function decorate(res: NextResponse, nonce: string): NextResponse {
+  res.headers.set('Content-Security-Policy', buildCsp(nonce, apiOrigin()));
+  for (const [key, value] of Object.entries(STATIC_SECURITY_HEADERS)) {
+    res.headers.set(key, value);
+  }
+  return res;
+}
+
+/** Forward the request to the app, carrying the nonce for Next's inline tags. */
+function passThrough(req: NextRequest, nonce: string): NextResponse {
+  const requestHeaders = new Headers(req.headers);
+  requestHeaders.set('x-nonce', nonce);
+  requestHeaders.set('content-security-policy', buildCsp(nonce, apiOrigin()));
+  return decorate(NextResponse.next({ request: { headers: requestHeaders } }), nonce);
+}
+
+function redirectTo(req: NextRequest, location: string, nonce: string): NextResponse {
+  return decorate(NextResponse.redirect(new URL(location, req.url)), nonce);
+}
+
 export async function middleware(req: NextRequest) {
+  const nonce = newNonce();
   const { pathname, search } = req.nextUrl;
-  if (isFrameworkPath(pathname)) return NextResponse.next();
+
+  // Next's own API routes (e.g. /api/health) are not part of the setup wizard
+  // and manage their own response, so skip the setup-state round-trip.
+  if (
+    isFrameworkPath(pathname) ||
+    pathname === '/api' ||
+    pathname.startsWith('/api/')
+  ) {
+    return passThrough(req, nonce);
+  }
 
   const apiUrl = process.env.API_URL ?? 'http://api:3001';
   const controller = new AbortController();
@@ -50,20 +91,20 @@ export async function middleware(req: NextRequest) {
     });
     if (!res.ok) {
       console.error(`[MW_API_UNREACHABLE:status] ${res.status} ${pathname}`);
-      return redirectToUnavailable(req, pathname, search);
+      return redirectToUnavailable(req, pathname, search, nonce);
     }
     const body = (await res.json()) as SetupState;
-    return route(req, pathname, body);
+    return route(req, pathname, body, nonce);
   } catch (err) {
     const reason = controller.signal.aborted ? 'timeout' : 'network';
     console.error(`[MW_API_UNREACHABLE:${reason}] ${pathname}`, err);
-    return redirectToUnavailable(req, pathname, search);
+    return redirectToUnavailable(req, pathname, search, nonce);
   } finally {
     clearTimeout(timer);
   }
 }
 
-function route(req: NextRequest, pathname: string, body: SetupState): NextResponse {
+function route(req: NextRequest, pathname: string, body: SetupState, nonce: string): NextResponse {
   const isSetup = pathname.startsWith(SETUP_PREFIX) || pathname === '/setup';
   const isSignIn = pathname === SIGN_IN_PATH;
   const setupComplete = body.state === 'complete';
@@ -71,38 +112,43 @@ function route(req: NextRequest, pathname: string, body: SetupState): NextRespon
   // Post-setup: /setup/* and /sign-in redirect to /dashboard so the wizard
   // and login form aren't reachable to an authenticated, done user.
   if (setupComplete && (isSetup || isSignIn)) {
-    return NextResponse.redirect(new URL('/dashboard', req.url));
+    return redirectTo(req, '/dashboard', nonce);
   }
 
   // Setup complete + protected route: let the app render.
-  if (setupComplete) return NextResponse.next();
+  if (setupComplete) return passThrough(req, nonce);
 
   // Setup incomplete: sign-in stays reachable (rare but recoverable). Every
   // other non-setup route sends the user back into the wizard.
-  if (isSignIn) return NextResponse.next();
+  if (isSignIn) return passThrough(req, nonce);
 
   if (!isSetup) {
     const target = body.currentStepSlug ?? '01-preflight';
-    return NextResponse.redirect(new URL(`/setup/${target}`, req.url));
+    return redirectTo(req, `/setup/${target}`, nonce);
   }
 
   // Setup incomplete + /setup/<slug>: allow only reached slugs.
   const requestedSlug = pathname.slice(SETUP_PREFIX.length).split('/')[0] ?? '';
   if (!requestedSlug) {
     const target = body.currentStepSlug ?? '01-preflight';
-    return NextResponse.redirect(new URL(`/setup/${target}`, req.url));
+    return redirectTo(req, `/setup/${target}`, nonce);
   }
   if (!body.allowedSlugs.includes(requestedSlug)) {
     const target = body.currentStepSlug ?? '01-preflight';
-    return NextResponse.redirect(new URL(`/setup/${target}`, req.url));
+    return redirectTo(req, `/setup/${target}`, nonce);
   }
-  return NextResponse.next();
+  return passThrough(req, nonce);
 }
 
-function redirectToUnavailable(req: NextRequest, pathname: string, search: string) {
+function redirectToUnavailable(
+  req: NextRequest,
+  pathname: string,
+  search: string,
+  nonce: string,
+): NextResponse {
   const url = new URL('/service-unavailable', req.url);
   url.searchParams.set('next', `${pathname}${search}`);
-  return NextResponse.redirect(url);
+  return decorate(NextResponse.redirect(url), nonce);
 }
 
 export const config = {

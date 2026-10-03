@@ -1,10 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, CircleDollarSign, PauseCircle, PlayCircle, Zap } from 'lucide-react';
 import { ThinkingOrb } from 'thinking-orbs';
 import { Button, cn } from '@careeros/ui';
 import { apiGet, apiPost } from '@/lib/api-client';
+import { useApi } from '@/lib/use-api';
 
 type Window = '7d' | '30d' | '90d' | 'mtd';
 type BreakdownKey = 'model' | 'provider' | 'callKind';
@@ -77,62 +78,58 @@ export function UsageDashboard() {
   const [window, setWindow] = useState<Window>('30d');
   const [breakdownKey, setBreakdownKey] = useState<BreakdownKey>('model');
 
-  const [summary, setSummary] = useState<Summary | null>(null);
-  const [breakdown, setBreakdown] = useState<BreakdownRow[] | null>(null);
-  const [series, setSeries] = useState<TimeseriesPoint[] | null>(null);
-  const [calls, setCalls] = useState<CallRow[] | null>(null);
-  const [budget, setBudget] = useState<Budget | null>(null);
-  const [paused, setPaused] = useState<boolean>(false);
-
   const [errorsOnly, setErrorsOnly] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  // errorsOnly is intentionally not a loadAll dependency; toggling it re-fetches
+  // only calls (see effect below). The ref keeps the current value for a full
+  // reload triggered by a window/breakdown change without widening the deps.
+  const errorsOnlyRef = useRef(errorsOnly);
+  useEffect(() => {
+    errorsOnlyRef.current = errorsOnly;
+  }, [errorsOnly]);
 
   const loadAll = useCallback(async () => {
-    setBusy(true);
-    setErr(null);
-    try {
-      const [s, b, t, c, bg, ps] = await Promise.all([
-        apiGet<Summary>(`/me/usage/summary?window=${window}`),
-        apiGet<BreakdownRow[]>(`/me/usage/breakdown?by=${breakdownKey}&window=${window}`),
-        apiGet<TimeseriesPoint[]>(`/me/usage/timeseries?window=${window}&bucket=day`),
-        apiGet<CallRow[]>(`/me/usage/calls?limit=100${errorsOnly ? '&errorsOnly=1' : ''}`),
-        apiGet<Budget>('/me/usage/budget'),
-        apiGet<{ paused: boolean }>('/me/usage/pause'),
-      ]);
-      setSummary(s);
-      setBreakdown(b);
-      setSeries(t);
-      setCalls(c);
-      setBudget(bg);
-      setPaused(ps.paused);
-    } catch (e) {
-      setErr((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-    // errorsOnly is intentionally excluded; toggling it re-fetches only calls (see effect below).
-
+    const [s, b, t, c, bg, ps] = await Promise.all([
+      apiGet<Summary>(`/me/usage/summary?window=${window}`),
+      apiGet<BreakdownRow[]>(`/me/usage/breakdown?by=${breakdownKey}&window=${window}`),
+      apiGet<TimeseriesPoint[]>(`/me/usage/timeseries?window=${window}&bucket=day`),
+      apiGet<CallRow[]>(
+        `/me/usage/calls?limit=100${errorsOnlyRef.current ? '&errorsOnly=1' : ''}`,
+      ),
+      apiGet<Budget>('/me/usage/budget'),
+      apiGet<{ paused: boolean }>('/me/usage/pause'),
+    ]);
+    return { summary: s, breakdown: b, series: t, calls: c, budget: bg, paused: ps.paused };
   }, [window, breakdownKey]);
 
-  useEffect(() => {
-    void loadAll();
-  }, [loadAll]);
+  const {
+    data: usage,
+    error: err,
+    loading: busy,
+    setData: setUsage,
+    setError: setErr,
+    refetch: reload,
+  } = useApi(loadAll);
+  const summary = usage?.summary ?? null;
+  const breakdown = usage?.breakdown ?? null;
+  const series = usage?.series ?? null;
+  const calls = usage?.calls ?? null;
+  const budget = usage?.budget ?? null;
+  const paused = usage?.paused ?? false;
 
   // Cheap partial reload when errorsOnly toggles — no need to re-hit summary/timeseries/etc.
   useEffect(() => {
     apiGet<CallRow[]>(`/me/usage/calls?limit=100${errorsOnly ? '&errorsOnly=1' : ''}`)
-      .then(setCalls)
+      .then((rows) => setUsage((prev) => (prev ? { ...prev, calls: rows } : prev)))
       .catch((e) => setErr((e as Error).message));
-  }, [errorsOnly]);
+  }, [errorsOnly, setUsage, setErr]);
 
   async function togglePause() {
     const next = !paused;
-    setPaused(next);
+    setUsage((prev) => (prev ? { ...prev, paused: next } : prev));
     try {
       await apiPost('/me/usage/pause', { paused: next });
     } catch (e) {
-      setPaused(!next);
+      setUsage((prev) => (prev ? { ...prev, paused: !next } : prev));
       setErr((e as Error).message);
     }
   }
@@ -141,7 +138,7 @@ export function UsageDashboard() {
     try {
       await apiPost('/me/usage/budget', { monthlyLimitUsd: value });
       const bg = await apiGet<Budget>('/me/usage/budget');
-      setBudget(bg);
+      setUsage((prev) => (prev ? { ...prev, budget: bg } : prev));
     } catch (e) {
       setErr((e as Error).message);
     }
@@ -168,7 +165,7 @@ export function UsageDashboard() {
           ))}
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" onClick={loadAll} disabled={busy}>
+          <Button variant="ghost" size="sm" onClick={() => void reload()} disabled={busy}>
             {busy ? <ThinkingOrb state="working" size={20} /> : null}
             Refresh
           </Button>

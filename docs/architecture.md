@@ -456,12 +456,35 @@ P6: User approves submission
 - User sees flag in triage UI with snippet + score + recommended action
 
 ### …the operator rotates the master ENCRYPTION_KEY
-- Settings → Security → Rotate key (requires fresh re-auth)
-- Wizard: paste new key
-- Background job: decrypt every `encrypted_secrets` row with old key → re-encrypt with new
-- Runs in one transaction per row
-- On failure: rollback to old key, error surfaced
-- On success: `ENCRYPTION_KEY` env replaced (operator restarts stack)
+- **Implemented.** `POST /me/security/rotate-key` (session + fresh re-auth).
+  Fresh re-auth uses `SensitivityGateService.hasFreshReauth(userId,
+  'security.rotate_master_key')`, same window the passkey / password re-verify
+  path mints via `withReauthWindow` (C-P0.3).
+- Body: `{ "newKey": "<64 hex chars or 44 base64 chars>" }`. The service calls
+  `assertStrongKey` (rejects missing / known-weak / short) then `loadMasterKey`
+  (strict format) before touching a single row. The old key is the process's
+  current `ENCRYPTION_KEY`; the new key is never persisted by the endpoint.
+- Walk (`MasterKeyRotationService.rotate`): every `encrypted_secrets` row
+  (AAD context = its `purpose`), then every `enc:v1:`-prefixed `ENCRYPTED_FIELDS`
+  column (`ResumeFact.content`, `LlmHallucinationLog.snippet`,
+  `Evidence.detail`, `Application.notes`, `OutreachMessage.body/subject`, AAD
+  context = column name). Reads/writes go through the **unextended**
+  `PrismaService.rawClient` so stored ciphertext is touched verbatim, not
+  decrypted/re-encrypted with the env key by the field-encryption extension.
+- **One transaction per row** (`$transaction` around each `update`); the pure
+  `rotateMasterKey(oldKey, newKey, ctx)` in `@careeros/secrets` decides per
+  value: decrypts with old → re-encrypts with new; if only the new key
+  decrypts, the row is already rotated and is skipped (idempotent resume);
+  plaintext legacy field values pass through untouched.
+- **On failure**: the walk stops at the first row neither key decrypts and
+  returns `{ scanned, rotated, alreadyRotated, skippedPlaintext, failed,
+  stopped: true, failure: { source, id, message } }` (never any
+  secret/ciphertext). The operator therefore keeps the old `ENCRYPTION_KEY`,
+  fixes the reported row and re-runs the endpoint — already-rotated rows are
+  skipped, so the run resumes.
+- **On success** (`stopped: false`): the operator replaces the `ENCRYPTION_KEY`
+  env value with the new key and restarts the stack. The endpoint only reports
+  progress; it never writes env.
 
 ### …nightly backup runs
 - Compose cron sidecar at 03:00 UTC

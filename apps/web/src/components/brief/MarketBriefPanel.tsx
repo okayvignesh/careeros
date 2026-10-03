@@ -1,11 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import Link from 'next/link';
 import { ArrowUpRight, RefreshCw } from 'lucide-react';
 import { ThinkingOrb } from 'thinking-orbs';
 import { Button } from '@careeros/ui';
 import { apiGet, apiPost } from '@/lib/api-client';
+import { useApi } from '@/lib/use-api';
 
 interface BriefStats {
   windowDays: number;
@@ -45,37 +46,19 @@ interface Brief {
 type BriefResponse = Brief | { empty: true };
 
 export function MarketBriefPanel() {
-  const [brief, setBrief] = useState<Brief | null>(null);
-  const [empty, setEmpty] = useState(false);
   const [generating, setGenerating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    try {
-      const res = await apiGet<BriefResponse>('/me/market-brief/latest');
-      if ('empty' in res) {
-        setEmpty(true);
-        setBrief(null);
-      } else {
-        setEmpty(false);
-        setBrief(res);
-      }
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const load = useCallback(() => apiGet<BriefResponse>('/me/market-brief/latest'), []);
+  const { data, error, setData, setError } = useApi(load);
+  const brief = data && !('empty' in data) ? data : null;
+  const empty = !!data && 'empty' in data;
 
   async function generate() {
     setGenerating(true);
     setError(null);
     try {
       const fresh = await apiPost<Brief>('/me/market-brief/generate');
-      setBrief(fresh);
-      setEmpty(false);
+      setData(fresh);
     } catch (e) {
       setError((e as Error).message);
     } finally {

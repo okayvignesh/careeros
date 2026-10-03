@@ -112,6 +112,11 @@ async function runLlm(
     // mails from flipping class between two ingest runs.
     temperature: 0,
     maxTokens: 200,
+    meta: {
+      promptId: rendered.id,
+      promptVersion: rendered.version,
+      promptHash: rendered.hash,
+    },
   });
   return parsed as EmailClassification;
 }

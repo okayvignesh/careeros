@@ -3,7 +3,7 @@ import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
 import { z } from 'zod';
 import { OpenAICompatibleProvider, type LlmCallRecord } from './openai-compatible';
-import { LLMProviderError, StructuredOutputError } from '../errors';
+import { LLMProviderError, StructuredOutputError, TokenCapExceededError } from '../errors';
 
 const server = setupServer();
 
@@ -131,6 +131,55 @@ describe('OpenAICompatibleProvider (msw)', () => {
         schema: z.object({ n: z.number() }),
       }),
     ).rejects.toBeInstanceOf(StructuredOutputError);
+  });
+
+  it('rejects an over-cap prompt pre-flight (no network egress)', async () => {
+    // msw is set to `onUnhandledRequest: 'error'`; a fetch here would throw a
+    // different error, so the TokenCapExceededError proves we short-circuited.
+    const p = new OpenAICompatibleProvider({
+      name: 'openai',
+      apiKey: 'sk-test',
+      baseUrl: OPENAI_URL,
+      chatModel: 'gpt-4o-mini',
+      maxInputTokens: 5,
+      lookup: async () => [{ address: '93.184.216.34', family: 4 }],
+    });
+    await expect(
+      p.chat({ messages: [{ role: 'user', content: 'this is a much longer prompt' }] }),
+    ).rejects.toBeInstanceOf(TokenCapExceededError);
+  });
+
+  it('stamps prompt context + validation on the audit row', async () => {
+    const records: LlmCallRecord[] = [];
+    server.use(
+      http.post(`${OPENAI_URL}/chat/completions`, () =>
+        HttpResponse.json({
+          choices: [{ message: { content: '{"n":1}' } }],
+          usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 },
+        }),
+      ),
+    );
+    const p = makeProvider((r) => records.push(r));
+    await p.chatStructured({
+      messages: [{ role: 'user', content: 'give n' }],
+      schema: z.object({ n: z.number() }),
+      meta: {
+        promptId: 'test-prompt',
+        promptVersion: '1.0.0',
+        promptHash: 'abc123',
+        sensitivity: 'personal',
+      },
+    });
+    await new Promise((r) => setTimeout(r, 5));
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      promptId: 'test-prompt',
+      promptVersion: '1.0.0',
+      promptHash: 'abc123',
+      sensitivity: 'personal',
+      validation: 'passed',
+    });
+    expect(records[0]!.estimatedPromptTokens).toBeGreaterThan(0);
   });
 
   it('probe reports reachable on GET /models', async () => {

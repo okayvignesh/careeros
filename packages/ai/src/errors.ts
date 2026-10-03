@@ -71,6 +71,29 @@ export class InjectionBlockedError extends Error {
 }
 
 /**
+ * Thrown by the provider adapters' pre-flight token gate (ai-safety.md item 9)
+ * when `estimateMessagesTokens(prompt) + maxOutputTokens` exceeds the configured
+ * per-call input cap. Rejected BEFORE any network egress, so an over-budget
+ * prompt never spends tokens. Fields are enumerable so the API can map to a
+ * 413/400 with the actual numbers.
+ */
+export class TokenCapExceededError extends Error {
+  readonly code = 'llm.token_cap_exceeded';
+
+  constructor(
+    readonly estimatedInputTokens: number,
+    readonly maxOutputTokens: number,
+    readonly cap: number,
+  ) {
+    super(
+      `LLM prompt exceeds per-call token cap (estimated input ${estimatedInputTokens} + ` +
+        `max output ${maxOutputTokens} > cap ${cap})`,
+    );
+    this.name = 'TokenCapExceededError';
+  }
+}
+
+/**
  * Thrown by `assertProviderAllowed` (packages/ai/src/sensitivity-gate.ts) when
  * the classified content-level exceeds a provider's configured ceiling (e.g.
  * `employer-confidential` content routed to a `personal`-ceiling provider).
