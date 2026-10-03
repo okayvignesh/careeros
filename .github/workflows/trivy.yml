@@ -45,6 +45,9 @@ jobs:
           # only produces false positives on dependency tarballs/test fixtures
           # inside the pnpm store baked into the image. Scan vulnerabilities.
           scanners: vuln
+          # Accepted build/desktop-only tooling CVEs (pnpm corepack CLI + its
+          # bundled deps, and desktop-only electron) — see .trivyignore.
+          trivyignores: .trivyignore
           # This repo ships a large dependency surface (Next, Expo tooling,
           # Prisma). Block only on vulns that have a fix available; unfixed
           # base-image OS CVEs would otherwise fail every push indefinitely.

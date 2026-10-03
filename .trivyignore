@@ -1,0 +1,68 @@
+# Trivy ignore list.
+#
+# These HIGH/CRITICAL findings are all in build-time / desktop-only tooling that
+# is present in the server images only because the Dockerfiles install the whole
+# pnpm workspace:
+#
+#   * the corepack-managed pnpm 9.12 CLI and its bundled deps (tar, minimatch,
+#     brace-expansion, cross-spawn) under /app/.cache/node/corepack/ — used to
+#     install dependencies, not exposed by the running api/web/worker processes.
+#   * electron — pulled in by apps/desktop; not used by the api/web/worker
+#     runtime at all.
+#
+# Server runtime dependencies are gated separately and strictly by
+# `pnpm audit --prod --audit-level=high` in .github/workflows/pr.yml.
+#
+# Follow-ups that would let us delete this list:
+#   * upgrade pnpm to the patched 10.x line and stop shipping the corepack cache;
+#   * split prod Dockerfiles so apps/desktop + apps/mobile deps never enter the
+#     server images.
+#
+# NOTE: keep this list to CVE/GHSA ids only. Do not add runtime deps here.
+
+# --- pnpm CLI (corepack) + bundled build tooling ---
+CVE-2024-21538
+CVE-2025-64756
+CVE-2025-69262
+CVE-2025-69263
+CVE-2026-102276
+CVE-2026-102278
+CVE-2026-13149
+CVE-2026-14257
+CVE-2026-23745
+CVE-2026-23950
+CVE-2026-24842
+CVE-2026-26960
+CVE-2026-26996
+CVE-2026-27903
+CVE-2026-27904
+CVE-2026-29786
+CVE-2026-31802
+CVE-2026-55697
+CVE-2026-55698
+CVE-2026-55487
+CVE-2026-50015
+CVE-2026-50016
+CVE-2026-82392
+CVE-2026-82393
+GHSA-qrv3-253h-g69c
+GHSA-fr4h-3cph-29xv
+GHSA-72r4-9c5j-mj57
+
+# --- electron (desktop only; not a server runtime dep) ---
+CVE-2026-102673
+CVE-2026-102674
+CVE-2026-102675
+CVE-2026-102676
+CVE-2026-34769
+CVE-2026-34770
+CVE-2026-34771
+CVE-2026-34774
+CVE-2026-70602
+CVE-2026-70603
+CVE-2026-70605
+CVE-2026-70607
+CVE-2026-70609
+CVE-2026-70610
+CVE-2026-70611
+CVE-2026-70612
