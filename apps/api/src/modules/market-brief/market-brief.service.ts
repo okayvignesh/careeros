@@ -2,11 +2,11 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { MarketBriefContent } from '@careeros/shared';
 import {
-  DeepSeekProvider,
   InjectionBlockedError,
   renderPrompt,
   runFactCheck,
   wrapUntrusted,
+  type AIProvider,
   type FactCheckClaim,
 } from '@careeros/ai';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -219,7 +219,7 @@ export class MarketBriefService {
    */
   private async factCheckSections(
     userId: string,
-    provider: DeepSeekProvider,
+    provider: AIProvider,
     content: MarketBriefContent,
     sample: Array<{ title: string; company: string; canonicalUrl: string }>,
   ): Promise<MarketBriefContent> {
@@ -428,7 +428,7 @@ export class MarketBriefService {
   }
 
   /** Delegates to the shared provider loader; gates at `public`. */
-  private async tryLoadProvider(userId: string): Promise<DeepSeekProvider | null> {
+  private async tryLoadProvider(userId: string): Promise<AIProvider | null> {
     try {
       const loaded = await this.providerLoader.loadProviderForUser(userId, 'public');
       return loaded?.provider ?? null;

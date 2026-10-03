@@ -54,10 +54,16 @@ top-level attribution.
 
 ## License notice for AGPL-affected work
 
-If Career OS is redistributed under a copyleft license (AGPL-3.0 is
-the working assumption per `plan/COMPLETION_PLAN.md` §6 open decision
-2), operators offering it as a network service must publish source
-modifications. Personal-use self-hosting has no such obligation.
+Career OS is licensed under **AGPL-3.0-or-later** (see `LICENSE`;
+owner decision, `plan/COMPLETION_PLAN.md` §6 open decision 2, resolved
+2026-10-02). Operators offering a modified version as a network service
+must offer users the corresponding source of their modifications
+(AGPL section 13). Self-hosting an unmodified copy carries no such
+obligation.
+
+The direct-dependency list above is representative, not exhaustive.
+The authoritative per-release list is the CycloneDX SBOM generated at
+release time; see `plan/release-process.md` and `docs/verify.md`.
 
 ## Third-party model providers
 

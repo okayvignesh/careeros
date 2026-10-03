@@ -6,39 +6,31 @@ import { Loader } from '@/components/Loader';
 import { UnavailableNotice } from '@/components/UnavailableNotice';
 import { Sparkline } from './Sparkline';
 import { GapBadge } from './GapBadge';
+import { skillDemandView, type SkillDemandView } from './market-data';
 
 /**
  * Screen 33: Skill demand table.
  *
- * TODO(api): implement GET /api/market/skill-demand?window=<days>
- * Expected shape matches SkillDemandRow[]. Until the endpoint lands the panel
- * renders an explicit unavailable state — never a fixture.
+ * Backed by `GET /me/market/skill-demand?window=<days>` (derived from the
+ * caller's persisted job pool). An empty result is a real empty state, not an
+ * unavailable notice — the notice is reserved for actual load/validation
+ * failures (A8: never a fixture).
  */
 
-export interface SkillDemandRow {
-  skillId: string;
-  label: string;
-  cluster: string;
-  postings: number;
-  share: number;
-  history: number[];
-  gap: number;
-}
+const WINDOW_DAYS = 30;
 
-const CLUSTERS = ['All', 'Backend', 'Cloud', 'Data', 'Frontend'] as const;
+export type { SkillDemandRow } from '@careeros/shared';
 
 export function SkillDemandTable() {
-  const [rows, setRows] = useState<SkillDemandRow[] | null>(null);
+  const [data, setData] = useState<SkillDemandView | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [cluster, setCluster] = useState<(typeof CLUSTERS)[number]>('All');
+  const [cluster, setCluster] = useState('All');
   const [onlyGaps, setOnlyGaps] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      // Endpoint missing (see TODO above): a failure must not resolve to data,
-      // so the panel can render an honest unavailable state.
-      const res = await apiGet<SkillDemandRow[]>('/me/market/skill-demand');
-      setRows(res);
+      const res = await apiGet<unknown>(`/me/market/skill-demand?window=${WINDOW_DAYS}`);
+      setData(skillDemandView(res));
     } catch (e) {
       setError((e as Error).message);
     }
@@ -49,40 +41,51 @@ export function SkillDemandTable() {
   }, [load]);
 
   const filtered = useMemo(() => {
-    if (!rows) return [];
-    return rows.filter((r) => {
+    if (!data) return [];
+    return data.rows.filter((r) => {
       if (cluster !== 'All' && r.cluster !== cluster) return false;
       if (onlyGaps && r.gap <= 0) return false;
       return true;
     });
-  }, [rows, cluster, onlyGaps]);
+  }, [data, cluster, onlyGaps]);
 
   if (error) {
     return <UnavailableNotice feature="Skill demand" />;
   }
 
-  if (rows === null) {
+  if (data === null) {
     return <Loader size={64} label="Loading skill demand" />;
+  }
+
+  if (data.rows.length === 0) {
+    return (
+      <div className="rounded-[var(--radius)] border border-dashed border-[hsl(var(--border-strong))] bg-[hsl(var(--bg-elev-1))] px-6 py-10 text-center">
+        <p className="text-fg-muted text-[13.5px]">
+          No skill demand yet. Sync jobs and extract skills, then demand will show up here for the
+          last {data.windowDays} days.
+        </p>
+      </div>
+    );
   }
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
-        <label className="flex items-center gap-1.5 text-[12px] text-fg-muted">
-          <span className="uppercase tracking-[0.12em] text-fg-faint">Cluster</span>
+        <label className="text-fg-muted flex items-center gap-1.5 text-[12px]">
+          <span className="text-fg-faint uppercase tracking-[0.12em]">Cluster</span>
           <select
             value={cluster}
-            onChange={(e) => setCluster(e.target.value as (typeof CLUSTERS)[number])}
-            className="rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--bg-elev-1))] px-2 py-1 text-[12px] text-fg"
+            onChange={(e) => setCluster(e.target.value)}
+            className="text-fg rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--bg-elev-1))] px-2 py-1 text-[12px]"
           >
-            {CLUSTERS.map((c) => (
+            {['All', ...data.clusters].map((c) => (
               <option key={c} value={c}>
                 {c}
               </option>
             ))}
           </select>
         </label>
-        <label className="flex items-center gap-1.5 text-[12px] text-fg-muted">
+        <label className="text-fg-muted flex items-center gap-1.5 text-[12px]">
           <input
             type="checkbox"
             checked={onlyGaps}
@@ -91,14 +94,14 @@ export function SkillDemandTable() {
           />
           Only my gaps
         </label>
-        <span className="ml-auto font-mono text-[11.5px] tabular-nums text-fg-faint">
-          {filtered.length} of {rows.length}
+        <span className="text-fg-faint ml-auto font-mono text-[11.5px] tabular-nums">
+          {filtered.length} of {data.rows.length}
         </span>
       </div>
 
       {filtered.length === 0 ? (
         <div className="rounded-[var(--radius)] border border-dashed border-[hsl(var(--border-strong))] bg-[hsl(var(--bg-elev-1))] px-6 py-10 text-center">
-          <p className="text-[13.5px] text-fg-muted">
+          <p className="text-fg-muted text-[13.5px]">
             No skills match this filter. Widen the cluster or clear the gap toggle.
           </p>
         </div>
@@ -106,7 +109,7 @@ export function SkillDemandTable() {
         <div className="overflow-hidden rounded-[var(--radius)] border border-[hsl(var(--border))] bg-[hsl(var(--bg-elev-1))]">
           <table className="w-full text-[13px]">
             <thead>
-              <tr className="border-b border-[hsl(var(--border))] text-left text-[10.5px] font-medium uppercase tracking-[0.12em] text-fg-faint">
+              <tr className="text-fg-faint border-b border-[hsl(var(--border))] text-left text-[10.5px] font-medium uppercase tracking-[0.12em]">
                 <th className="px-4 py-2.5">Skill</th>
                 <th className="px-4 py-2.5 text-right">Postings</th>
                 <th className="px-4 py-2.5 text-right">Share</th>
@@ -124,19 +127,19 @@ export function SkillDemandTable() {
                   <td className="px-4 py-3">
                     <div className="flex flex-col">
                       <span className="text-fg">{r.label}</span>
-                      <span className="text-[11px] text-fg-faint">{r.cluster}</span>
+                      <span className="text-fg-faint text-[11px]">{r.cluster}</span>
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-right font-mono tabular-nums text-fg-muted">
+                  <td className="text-fg-muted px-4 py-3 text-right font-mono tabular-nums">
                     {r.postings.toLocaleString()}
                   </td>
-                  <td className="px-4 py-3 text-right font-mono tabular-nums text-fg-muted">
+                  <td className="text-fg-muted px-4 py-3 text-right font-mono tabular-nums">
                     {Math.round(r.share * 100)}%
                   </td>
                   <td className="px-4 py-3">
                     <Sparkline
                       values={r.history}
-                      ariaLabel={`${r.label} 7 window trend`}
+                      ariaLabel={`${r.label} ${data.windowDays} window trend`}
                     />
                   </td>
                   <td className="px-4 py-3 text-right">

@@ -42,12 +42,14 @@ function fakeAgents() {
       pairingRequestId: `preq-${userId}`,
       expiresAt: new Date(Date.now() + 600_000),
     })),
-    pairComplete: vi.fn(async (_code: string, name: string) => ({
-      deviceId: `dev-${name}`,
-      jwt: 'jwt.x',
-      refreshToken: 'refresh.x',
-      expiresAt: new Date(Date.now() + 3_600_000),
-    })),
+    pairComplete: vi.fn(
+      async (_code: string, name: string, _publicKey?: Buffer, _agentVersion?: string, _platform?: string) => ({
+        deviceId: `dev-${name}`,
+        jwt: 'jwt.x',
+        refreshToken: 'refresh.x',
+        expiresAt: new Date(Date.now() + 3_600_000),
+      }),
+    ),
     pairRefresh: vi.fn(async (deviceId: string) => ({
       deviceId,
       jwt: 'jwt.rotated',
@@ -110,8 +112,17 @@ describe('AgentController.pairComplete', () => {
       deviceName: 'Mac',
       publicKey: Buffer.from([1, 2]).toString('base64'),
       agentVersion: 'v0.1',
+      platform: 'darwin',
     });
     expect(prisma.audits.map((a) => a.action)).toContain('agent.pair.completed');
+    // Platform is forwarded to the service so listDevices can show it.
+    expect(agents.pairComplete).toHaveBeenCalledWith(
+      '123456',
+      'Mac',
+      expect.any(Buffer),
+      'v0.1',
+      'darwin',
+    );
   });
 
   it('writes agent.pair.failed with reason on missing fields', async () => {

@@ -8,9 +8,10 @@
 //
 // ponytail: no @slack/bolt runtime. Hand-verify because Bolt ships its own HTTP
 // server (would collide with Nest) and the signing math is 20 lines.
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, Optional } from '@nestjs/common';
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import Redis from 'ioredis';
+import { SlackOAuthService } from './slack.oauth';
 
 /**
  * Result of a signature check. `ok` is the only field the controller reads;
@@ -49,7 +50,7 @@ export class SlackService implements OnModuleDestroy {
   private readonly logger = new Logger(SlackService.name);
   private readonly redis: Redis;
 
-  constructor() {
+  constructor(@Optional() private readonly oauth?: SlackOAuthService) {
     this.redis = new Redis(process.env.REDIS_URL ?? 'redis://redis:6379', {
       lazyConnect: true,
       maxRetriesPerRequest: 1,
@@ -170,5 +171,45 @@ export class SlackService implements OnModuleDestroy {
     }
     if (!parsed || parsed.userId !== userId || typeof parsed.expiresAt !== 'number') return false;
     return parsed.expiresAt > now;
+  }
+
+  /**
+   * E.3b: outbound `chat.postMessage`. Backs the messaging `SlackChannel`
+   * (constructor injection in the daily-brief module) so the Channel package
+   * stays free of @slack/web-api. Resolves the bot token from the encrypted
+   * store on each call (tokens rotate on reinstall); falls back to the
+   * `SLACK_BOT_TOKEN` env for out-of-band installs. Transport failures are
+   * returned, never thrown, so a Slack outage cannot abort the fan-out or
+   * lose the composed brief.
+   *
+   * `args.metadata` is accepted for Channel-shape compatibility but not
+   * forwarded: Slack rejects message metadata that does not match a
+   * registered event schema.
+   */
+  async postMessage(args: {
+    channel: string;
+    text: string;
+    blocks?: unknown[];
+    metadata?: Record<string, unknown>;
+  }): Promise<{ ok: boolean; ts?: string; error?: string }> {
+    const stored = this.oauth ? await this.oauth.loadBotToken().catch(() => null) : null;
+    const token = stored ?? process.env.SLACK_BOT_TOKEN ?? null;
+    if (!token) return { ok: false, error: 'slack_bot_token_missing' };
+    try {
+      const { WebClient } = await import('@slack/web-api');
+      const client = new WebClient(token);
+      const res = await client.chat.postMessage({
+        channel: args.channel,
+        text: args.text,
+        // ponytail: the Block Kit builder in this module owns the shape; the
+        // WebClient's Block union is structurally compatible, so assert at the
+        // boundary rather than re-importing @slack/types.
+        ...(args.blocks ? { blocks: args.blocks as never } : {}),
+      });
+      if (!res.ok) return { ok: false, error: res.error ?? 'slack_post_failed' };
+      return res.ts !== undefined ? { ok: true, ts: res.ts } : { ok: true };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
   }
 }

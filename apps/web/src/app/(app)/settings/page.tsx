@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Activity, ArrowUpRight, Boxes, Briefcase, Cpu, Receipt, Sparkles } from 'lucide-react';
+import { Activity, ArrowUpRight, Boxes, Briefcase, Cpu, MonitorSmartphone, Receipt, Sparkles } from 'lucide-react';
 import { Eyebrow } from '@careeros/ui';
 
 const cards = [
@@ -26,6 +26,12 @@ const cards = [
     icon: Activity,
     title: 'Integrations',
     body: 'GitHub today; Slack and Gmail in P5. Reauthorise or revoke access.',
+  },
+  {
+    href: '/settings/devices',
+    icon: MonitorSmartphone,
+    title: 'Devices',
+    body: 'Download the desktop agent, pair a machine, see last-seen status, and revoke access.',
   },
   {
     href: '/settings/workers',

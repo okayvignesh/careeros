@@ -14,7 +14,7 @@ Career OS is a pnpm + Turborepo monorepo with four applications and fifteen shar
 
 | Path | Purpose | Evidence |
 |------|---------|----------|
-| `apps/web/` | Next.js 16 App Router user app (47 pages): setup wizard, dashboard, arena, market, jobs, settings | `apps/web/src/app/**/page.tsx`; `apps/web/package.json` |
+| `apps/web/` | Next.js 16 App Router user app (48 pages): setup wizard, dashboard, arena, market, jobs, settings | `apps/web/src/app/**/page.tsx`; `apps/web/package.json` |
 | `apps/api/` | NestJS HTTP API: 38 feature modules, Prisma data layer, WebSockets gateway, seed data | `apps/api/src/app.module.ts:14-124`; `apps/api/src/modules/` |
 | `apps/worker/` | BullMQ workers on Redis (sync, embedding, retention, market snapshot, Gmail watch, selector health, corpus refresh) | `apps/worker/src/main.ts`; `apps/worker/src/*.worker.ts` |
 | `apps/desktop/` | Electron desktop companion agent (Playwright + user's Chrome, WSS pairing) | `apps/desktop/src/main.ts`; `apps/desktop/package.json` |

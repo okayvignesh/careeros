@@ -1,7 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import type { KeyPointsExtraction } from '@careeros/shared';
-import { DeepSeekProvider, renderPrompt, wrapUntrusted } from '@careeros/ai';
+import { renderPrompt, wrapUntrusted, type AIProvider } from '@careeros/ai';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UsageService } from '../usage/usage.service';
 import { UsageCache } from '../usage/usage.cache';
@@ -123,7 +123,7 @@ export class CorpusService {
 
   private async extractKeyPoints(
     userId: string,
-    provider: DeepSeekProvider,
+    provider: AIProvider,
     question: string,
   ): Promise<KeyPointsExtraction | null> {
     const wrapped = wrapUntrusted(question, 'readme');
@@ -147,7 +147,7 @@ export class CorpusService {
    * the input is public open-source content, so we gate on `public` not
    * `personal`. Sequencing is delegated to `ProviderLoaderService`.
    */
-  private async tryLoadProvider(userId: string): Promise<DeepSeekProvider | null> {
+  private async tryLoadProvider(userId: string): Promise<AIProvider | null> {
     try {
       const loaded = await this.providerLoader.loadProviderForUser(userId, 'public');
       return loaded?.provider ?? null;

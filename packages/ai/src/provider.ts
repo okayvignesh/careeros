@@ -47,6 +47,14 @@ export interface AIProvider {
   /** Optional default; per-call `maxTokens` on chat / chatStructured overrides. */
   readonly maxTokens?: number;
 
+  /**
+   * Set by `FallbackProvider` once a non-primary candidate has served a call.
+   * Adapters leave this undefined; the API surfaces it as a "degraded" badge.
+   */
+  readonly degraded?: boolean;
+  /** Set by `FallbackProvider`: provider id that served the latest call. */
+  readonly activeProvider?: string;
+
   chat(input: {
     messages: ChatMessage[];
     temperature?: number;

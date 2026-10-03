@@ -1,12 +1,20 @@
-import { Injectable } from '@nestjs/common';
-import { QdrantStore, embedDeterministic, EMBED_DIM } from '@careeros/embeddings';
+import { Injectable, Logger } from '@nestjs/common';
+import {
+  QdrantStore,
+  createEmbeddingProvider,
+  resolveEmbeddingMode,
+  type CreateEmbeddingProviderOptions,
+  type EmbeddingLogger,
+  type EmbeddingProvider,
+} from '@careeros/embeddings';
+import type { EmbeddingMode } from '@careeros/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 
 const QDRANT_URL = process.env.QDRANT_URL ?? 'http://qdrant:6333';
 const TEST_COLLECTION = '_setup_test';
 
 export interface EmbeddingConfig {
-  mode: 'local' | 'external';
+  mode: EmbeddingMode;
   model: string;
   externalBaseUrl?: string | undefined;
   externalApiKey?: string | undefined;
@@ -18,12 +26,21 @@ export interface TestResult {
   upsertOk: boolean;
   searchOk: boolean;
   topScore: number;
+  /** Effective backend after any fallback, not just the configured mode. */
+  mode: EmbeddingMode;
+  model: string;
+  dim: number;
   error?: string;
 }
 
 @Injectable()
 export class EmbeddingsService {
   private store = new QdrantStore(QDRANT_URL);
+
+  private readonly log = new Logger(EmbeddingsService.name);
+  private readonly embedLogger: EmbeddingLogger = {
+    warn: (obj, msg) => this.log.warn(`${msg} ${JSON.stringify(obj)}`),
+  };
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -40,11 +57,23 @@ export class EmbeddingsService {
     return (row?.value as unknown as EmbeddingConfig) ?? null;
   }
 
+  /** Saved config for the settings editor, or the env/default provider shape. */
+  async getEffectiveConfig(): Promise<EmbeddingConfig> {
+    const cfg = await this.getConfig();
+    if (cfg) return cfg;
+    const provider = await this.resolveProvider();
+    return { mode: provider.mode, model: provider.model };
+  }
+
   async test(sampleText = 'Career OS embedding round-trip check'): Promise<TestResult> {
+    const provider = await this.resolveProvider();
+    const base = { mode: provider.mode, model: provider.model, dim: provider.dim };
+
     const t0 = Date.now();
     const reachable = await this.store.ping();
     if (!reachable) {
       return {
+        ...base,
         qdrantReachable: false,
         qdrantLatencyMs: Date.now() - t0,
         upsertOk: false,
@@ -56,8 +85,8 @@ export class EmbeddingsService {
     const qdrantLatencyMs = Date.now() - t0;
 
     try {
-      await this.store.ensureCollection(TEST_COLLECTION, EMBED_DIM);
-      const vec = embedDeterministic(sampleText);
+      await this.store.ensureCollection(TEST_COLLECTION, provider.dim);
+      const vec = await provider.embed(sampleText);
       const id = Date.now();
       await this.store.upsert(TEST_COLLECTION, [
         { id, vector: vec, payload: { text: sampleText } },
@@ -67,6 +96,7 @@ export class EmbeddingsService {
       const upsertOk = true;
       const searchOk = !!top && top.id === id && top.score > 0.99;
       return {
+        ...base,
         qdrantReachable: true,
         qdrantLatencyMs,
         upsertOk,
@@ -75,6 +105,7 @@ export class EmbeddingsService {
       };
     } catch (e) {
       return {
+        ...base,
         qdrantReachable: true,
         qdrantLatencyMs,
         upsertOk: false,
@@ -83,5 +114,22 @@ export class EmbeddingsService {
         error: (e as Error).message,
       };
     }
+  }
+
+  /**
+   * Resolve the active provider from the saved config, else `EMBEDDING_MODE`
+   * (default `local`). The local BGE provider is wrapped so an offline/missing
+   * model falls back to the deterministic embedder with a warning.
+   */
+  private async resolveProvider(): Promise<EmbeddingProvider> {
+    const cfg = await this.getConfig();
+    const mode = cfg?.mode ?? resolveEmbeddingMode(process.env.EMBEDDING_MODE);
+
+    const opts: CreateEmbeddingProviderOptions = { mode, logger: this.embedLogger };
+    if (cfg?.model) opts.model = cfg.model;
+    const cacheDir = process.env.EMBEDDING_MODEL_CACHE_DIR;
+    if (cacheDir) opts.cacheDir = cacheDir;
+
+    return createEmbeddingProvider(opts);
   }
 }

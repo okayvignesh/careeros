@@ -41,6 +41,10 @@ Thumbs.db
 npm-debug.log*
 pnpm-debug.log*
 
+# nginx local self-signed certs (infra/nginx/self-signed.sh)
+infra/nginx/certs/*
+!infra/nginx/certs/.gitkeep
+
 # generated
 apps/api/prisma/generated/
 docs/schema.png

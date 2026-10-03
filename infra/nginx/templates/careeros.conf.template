@@ -1,0 +1,100 @@
+# Rendered by the nginx image entrypoint from the container environment:
+#   SERVER_NAME     public DNS name(s), space-separated
+#   TLS_CERT_PATH   fullchain path inside the container
+#   TLS_KEY_PATH    private key path inside the container
+#   HSTS_MAX_AGE    HSTS max-age seconds (0 disables the effect for local dev)
+#
+# nginx runtime variables ($host, $uri, …) are left untouched because envsubst
+# only substitutes variables that exist in the environment.
+
+upstream careeros_web {
+    server web:3000;
+    keepalive 16;
+}
+
+upstream careeros_api {
+    server api:3001;
+    keepalive 16;
+}
+
+# ─── Port 80: ACME HTTP-01 + health, everything else → HTTPS ────────────────
+server {
+    listen      80;
+    listen      [::]:80;
+    server_name ${SERVER_NAME};
+
+    # Liveness for the compose healthcheck / any external LB. Never redirects,
+    # so it works before a real certificate exists.
+    location = /healthz {
+        access_log off;
+        return 200 "ok\n";
+    }
+
+    # certbot --webroot drops challenge tokens under this shared volume.
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        default_type "text/plain";
+        try_files $uri =404;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# ─── Port 443: TLS termination, HSTS, security headers ──────────────────────
+server {
+    listen      443 ssl;
+    listen      [::]:443 ssl;
+    http2       on;
+    server_name ${SERVER_NAME};
+
+    ssl_certificate     ${TLS_CERT_PATH};
+    ssl_certificate_key ${TLS_KEY_PATH};
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache   shared:SSL:10m;
+    ssl_session_timeout 1d;
+
+    # Local/self-signed dev sets HSTS_MAX_AGE=0 so browsers do not pin the
+    # untrusted cert. Real deployments use 63072000 (two years).
+    add_header Strict-Transport-Security "max-age=${HSTS_MAX_AGE}; includeSubDomains" always;
+    add_header X-Content-Type-Options    "nosniff" always;
+    add_header X-Frame-Options           "SAMEORIGIN" always;
+    add_header Referrer-Policy           "strict-origin-when-cross-origin" always;
+
+    client_max_body_size 25m;
+
+    location = /healthz {
+        access_log off;
+        return 200 "ok\n";
+    }
+
+    # The api serves its OpenAPI document + Swagger UI at /api/* internally
+    # (apps/api/src/openapi/openapi.ts: SWAGGER_UI_PATH = "api/docs"), so these
+    # two pass through unrewritten.
+    location = /api/openapi.json {
+        proxy_pass http://careeros_api/api/openapi.json;
+    }
+    location ^~ /api/docs {
+        proxy_pass http://careeros_api/api/docs;
+    }
+
+    # Public /api/* maps onto the api's UNPREFIXED controllers (auth, health,
+    # me/*, admin/*). Strip /api before proxying. Buffering off + long read
+    # timeout keep SSE streams (brief, interview, PDF render) flowing.
+    location ^~ /api/ {
+        rewrite ^/api/(.*)$ /$1 break;
+        proxy_pass http://careeros_api;
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
+    # Everything else is the Next.js app.
+    location / {
+        proxy_pass http://careeros_web;
+        proxy_read_timeout 120s;
+    }
+}

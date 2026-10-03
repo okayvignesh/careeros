@@ -1,7 +1,7 @@
 # Contributing to Career OS
 
-Career OS is currently a personal-use project in active alpha development.
-External contributions are welcome but not expected until v1.0.
+Career OS is an open-source project (AGPL-3.0-or-later) in active alpha
+development. External contributions are welcome.
 
 ## Ground rules
 
@@ -85,7 +85,14 @@ a minimal reproduction.
 
 ## License
 
-License TBD pending the OSS-public vs personal-only decision (see
-`plan/COMPLETION_PLAN.md` §6 open decision 2). Until then, treat this
-repo as "all rights reserved" for redistribution purposes; personal
-local use is fine.
+Career OS is licensed under the **GNU Affero General Public License,
+version 3 or later** (`AGPL-3.0-or-later`). See [`LICENSE`](LICENSE).
+
+By contributing, you agree that your contributions are licensed under
+the same terms, and you confirm you have the right to submit them. Do
+not add code, assets, or dependencies that are incompatible with
+`AGPL-3.0-or-later` without calling it out in the PR first.
+
+If you modify Career OS and let other people use that modified version
+over a network, AGPL section 13 requires you to offer them the
+corresponding source. See the License section of [`README.md`](README.md).

@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/okayvignesh/careeros/security/advisories/new
+    about: Report security issues privately. Do NOT open a public issue. See SECURITY.md.
+  - name: Support and support windows
+    url: https://github.com/okayvignesh/careeros/blob/main/docs/support.md
+    about: Read the support policy and supported-version windows before filing.
+  - name: Edge / pre-release builds
+    url: https://github.com/okayvignesh/careeros/blob/main/docs/edge.md
+    about: How to run the unsupported pre-release channel, and what that means.

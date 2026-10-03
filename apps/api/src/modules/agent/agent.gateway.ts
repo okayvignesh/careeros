@@ -34,6 +34,8 @@ const NAMESPACE = '/agent/ws';
 })
 export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly log = new Logger('AgentGateway');
+  /** deviceId -> userId for sockets currently connected. Used by the dispatcher to pick an online device. */
+  private readonly online = new Map<string, string>();
 
   @WebSocketServer()
   server!: Server;
@@ -48,13 +50,14 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
     try {
-      const { deviceId } = await this.agents.verifyBearer(token);
+      const { deviceId, userId } = await this.agents.verifyBearer(token);
       const agentVersion = typeof client.handshake.query.agentVersion === 'string'
         ? client.handshake.query.agentVersion
         : undefined;
       await client.join(roomFor(deviceId));
       // Stash the deviceId on the socket for later hooks (`disconnect`, message handlers).
       (client.data as { deviceId?: string }).deviceId = deviceId;
+      this.online.set(deviceId, userId);
       await this.agents.touchDevice(deviceId, agentVersion);
     } catch (err) {
       this.log.warn(`WSS connect rejected: ${(err as Error).message}`);
@@ -65,14 +68,20 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
   async handleDisconnect(client: Socket): Promise<void> {
     const deviceId = (client.data as { deviceId?: string }).deviceId;
     if (deviceId) {
+      this.online.delete(deviceId);
       await this.agents.touchDevice(deviceId);
     }
   }
 
+  /** True iff the device currently has a live WSS socket on this replica. */
+  isDeviceOnline(deviceId: string): boolean {
+    return this.online.has(deviceId);
+  }
+
   /**
-   * Called by the dispatcher (future slice) to push a queued task to a
-   * specific device. Kept on the gateway so the socket.io server instance
-   * stays private.
+   * Called by the approval dispatcher (AgentApprovalWorker) to push a queued
+   * task to a specific device. Kept on the gateway so the socket.io server
+   * instance stays private.
    */
   pushTask(deviceId: string, task: unknown): void {
     this.server.to(roomFor(deviceId)).emit('task', task);

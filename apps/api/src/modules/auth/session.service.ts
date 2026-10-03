@@ -53,8 +53,14 @@ export class SessionService {
 
   requireUserId(req: Request): string {
     const s = this.read(req);
-    if (!s) throw new UnauthorizedException('Not signed in');
-    return s.userId;
+    if (s) return s.userId;
+    // B1 (phase 7 mobile): the global MobileAuthMiddleware verifies the
+    // `mobile:*` bearer and sets `req.mobileAuth`. Cookie-first keeps the web
+    // path unchanged while letting every existing read controller serve the
+    // native app. Typed structurally to avoid an auth -> mobile import cycle.
+    const mobile = (req as Request & { mobileAuth?: { userId: string } }).mobileAuth;
+    if (mobile?.userId) return mobile.userId;
+    throw new UnauthorizedException('Not signed in');
   }
 
   /** DB-backed check used by the revocation middleware. Async, but the hot

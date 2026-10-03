@@ -17,8 +17,7 @@ export class EmbeddingsController {
   @Get()
   async get(@Req() req: Request) {
     this.session.requireUserId(req);
-    const cfg = await this.embeddings.getConfig();
-    return cfg ?? { mode: 'local', model: 'bge-small-en' };
+    return this.embeddings.getEffectiveConfig();
   }
 
   @Post()

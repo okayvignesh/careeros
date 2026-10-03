@@ -29,6 +29,17 @@ pnpm dev                # api + worker + web in parallel
 
 Open `http://localhost:3000` — wizard redirects if setup incomplete, else dashboard.
 
+> The stack also starts `nginx` on ports 80/443 as the public TLS entrypoint.
+> For local dev without a domain, generate a self-signed cert once before
+> `pnpm docker:up`:
+>
+> ```bash
+> ./infra/nginx/self-signed.sh        # writes infra/nginx/certs/tls.{crt,key}
+> ```
+>
+> Details and the production Let's Encrypt flow: [`infra/nginx/README.md`](../infra/nginx/README.md).
+> The scheduled backup sidecar is opt-in (`docker compose --profile ops up -d backup`); see [`docs/backup.md`](backup.md).
+
 ## Common tasks
 
 | Task | Command |

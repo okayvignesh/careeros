@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { type JobSkillExtraction } from '@careeros/shared';
-import { DeepSeekProvider, InjectionBlockedError, renderPrompt, wrapUntrusted } from '@careeros/ai';
+import { InjectionBlockedError, renderPrompt, wrapUntrusted, type AIProvider } from '@careeros/ai';
 import {
   adapters as allAdapters,
   buildCandidateSearchQueries,
@@ -588,7 +588,7 @@ export class JobsService {
 
   private async extractSkillsForOne(
     userId: string,
-    provider: DeepSeekProvider,
+    provider: AIProvider,
     job: { title: string; company: string; description: string },
     catalogueRendered: string,
   ): Promise<JobSkillExtraction> {
@@ -618,7 +618,7 @@ export class JobsService {
    * `ProviderLoaderService`; this wrapper only keeps the jobs-specific log and
    * null handling.
    */
-  private async tryLoadProvider(userId: string): Promise<DeepSeekProvider | null> {
+  private async tryLoadProvider(userId: string): Promise<AIProvider | null> {
     try {
       const loaded = await this.providerLoader.loadProviderForUser(userId, 'public');
       return loaded?.provider ?? null;

@@ -1,0 +1,27 @@
+# Backup sidecar (compose `ops` profile). Runs scripts/backup-cron.sh on a
+# schedule; the entrypoint renders /etc/careeros/backup.env from the container
+# environment (compose fills it from .env) and starts busybox crond.
+#
+# Built from the repo root: infra/docker/docker-compose.yml sets
+# build.context: ../.. so the scripts/ COPY below resolves.
+#
+# Tooling required by scripts/backup.sh: age, pg_dump, mc, curl, jq, tar,
+# gzip, coreutils. tar/gzip/mktemp/date come from busybox.
+FROM alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
+
+RUN apk add --no-cache \
+      bash \
+      age \
+      postgresql16-client \
+      minio-client \
+      curl \
+      jq \
+      ca-certificates \
+ && ln -s /usr/bin/mcli /usr/local/bin/mc \
+ && mkdir -p /opt/careeros/scripts /var/backups/careeros /etc/careeros
+
+COPY scripts/backup.sh scripts/backup-cron.sh /opt/careeros/scripts/
+COPY infra/docker/backup-entrypoint.sh /opt/careeros/entrypoint.sh
+RUN chmod +x /opt/careeros/scripts/*.sh /opt/careeros/entrypoint.sh
+
+ENTRYPOINT ["/opt/careeros/entrypoint.sh"]

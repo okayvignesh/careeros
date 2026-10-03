@@ -1,0 +1,35 @@
+// Screen 56: configured search providers + their scheduled workloads.
+//
+//   GET /me/search-providers            - provider inventory (config-derived)
+//   GET /me/search-providers/workloads  - scheduled jobs that use a provider
+//
+// Both require an authenticated session. An install with no configured source
+// returns `{ providers: [] }` / `{ workloads: [] }` — a valid, documented
+// empty state, never a fixture.
+import { Controller, Get, Req } from '@nestjs/common';
+import type { Request } from 'express';
+import { Throttle } from '@nestjs/throttler';
+import { SessionService } from '../auth/session.service';
+import { SearchProvidersService } from './search-providers.service';
+
+@Controller('me/search-providers')
+export class SearchProvidersController {
+  constructor(
+    private readonly providers: SearchProvidersService,
+    private readonly session: SessionService,
+  ) {}
+
+  @Get()
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  async list(@Req() req: Request) {
+    this.session.requireUserId(req);
+    return this.providers.list();
+  }
+
+  @Get('workloads')
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  async workloads(@Req() req: Request) {
+    this.session.requireUserId(req);
+    return this.providers.workloads();
+  }
+}

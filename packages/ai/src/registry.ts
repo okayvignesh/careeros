@@ -26,6 +26,11 @@ export class ProviderRegistry {
     this.factories.set(name, factory);
   }
 
+  /** True when a name is already registered; used by idempotent bootstrap. */
+  has(name: string): boolean {
+    return this.factories.has(name);
+  }
+
   resolve(name: string): AIProvider {
     const cached = this.instances.get(name);
     if (cached) return cached;

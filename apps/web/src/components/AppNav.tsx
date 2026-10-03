@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Activity, Briefcase, FileCheck, LayoutDashboard, Newspaper, Receipt, Settings, Swords, Target, Wrench } from 'lucide-react';
+import { Activity, Briefcase, FileCheck, LayoutDashboard, MonitorSmartphone, Newspaper, Receipt, Settings, Swords, Target, Wrench } from 'lucide-react';
 import { cn } from '@careeros/ui';
 
 const groups = [
@@ -25,6 +25,7 @@ const groups = [
       { href: '/settings', label: 'Overview', icon: Settings },
       { href: '/settings/usage', label: 'Usage & costs', icon: Receipt },
       { href: '/settings/integrations', label: 'Integrations', icon: Activity },
+      { href: '/settings/devices', label: 'Devices', icon: MonitorSmartphone },
     ],
   },
 ];

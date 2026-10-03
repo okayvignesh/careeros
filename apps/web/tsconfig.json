@@ -6,6 +6,8 @@
     "jsx": "preserve",
     "allowJs": true,
     "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
     "isolatedModules": true,
     "plugins": [{ "name": "next" }],
     "paths": {

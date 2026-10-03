@@ -6,6 +6,7 @@ import {
   DailyBriefPreferencesService,
   nextFiringAt,
 } from './daily-brief-preferences.service';
+import { DailyBriefDeliveryService } from './daily-brief-delivery.service';
 
 /**
  * E.3 scheduler + worker (one process, one class).
@@ -16,10 +17,11 @@ import {
  *             re-key the schedule (delete existing jobId then re-enqueue).
  *
  *   Consumer: BullMQ Worker takes the job, calls the composer, writes the
- *             payload to audit_log (single-user MVP), marks lastSentAt,
- *             then re-enqueues the NEXT day. Channel wire is deferred:
- *             once @careeros/messaging ChannelRegistry is instantiated per
- *             user's channel list, drop the audit-log write and fan out.
+ *             payload to audit_log (in-app source of truth), fans out via
+ *             DailyBriefDeliveryService/ChannelRegistry on the user's
+ *             opted-in channels, marks lastSentAt, then re-enqueues the
+ *             NEXT day. A transport failure never loses the brief (the
+ *             composed row is written first).
  *
  * ponytail: no repeating-scheduler config. Each fire schedules the next
  * one. Trade-off: if the process is down at fire time, that day is
@@ -46,6 +48,7 @@ export class DailyBriefScheduler implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly prefs: DailyBriefPreferencesService,
     private readonly composer: DailyBriefComposerService,
+    private readonly delivery: DailyBriefDeliveryService,
     private readonly prisma: PrismaService,
   ) {
     const connection: ConnectionOptions = {
@@ -141,13 +144,26 @@ export class DailyBriefScheduler implements OnModuleInit, OnModuleDestroy {
     }
 
     const brief = await this.composer.compose(payload.userId);
+    // Persist first: the composed row is the in-app source of truth, so a
+    // transport failure below can never lose the brief.
     await this.writeAudit(payload.userId, brief, payload.scheduledFor);
+
+    const kinds = this.delivery.kindsFor(p);
+    const outcomes = await this.delivery.deliver(payload.userId, brief, kinds);
+    const delivered = outcomes.some((o) => o.ok);
+    for (const o of outcomes) {
+      if (!o.ok) {
+        this.logger.warn(`daily-brief ${o.kind} delivery failed: ${o.error ?? 'unknown'}`);
+      }
+    }
     await this.prefs.markSent(payload.userId);
 
     // Enqueue the NEXT day's fire before returning so a crash on the
     // await above at least leaves the next day scheduled.
     await this.reschedule(payload.userId, p.timezone, p.sendHourLocal);
-    return { delivered: true };
+    if (delivered) return { delivered: true };
+    const reason = outcomes.map((o) => `${o.kind}:${o.error ?? 'failed'}`).join(',');
+    return { delivered: false, reason: reason || 'no_channels' };
   }
 
   private async writeAudit(

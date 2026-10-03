@@ -91,7 +91,30 @@ vi.mock('@careeros/embeddings', () => {
     }
   }
 
-  return { QdrantStore, embedDeterministic, EMBED_DIM };
+  // Provider seam: the service resolves an EmbeddingProvider and calls .embed().
+  // The fake reports deterministic (the CI-safe backend) and delegates to the
+  // spy-wrapped embedDeterministic so the existing call-tracking still works.
+  function createEmbeddingProvider(): {
+    mode: 'deterministic';
+    model: string;
+    dim: number;
+    embed: (text: string) => Promise<number[]>;
+  } {
+    return {
+      mode: 'deterministic',
+      model: 'test-deterministic',
+      dim: EMBED_DIM,
+      async embed(text: string): Promise<number[]> {
+        return embedDeterministic(text);
+      },
+    };
+  }
+
+  function resolveEmbeddingMode(): 'deterministic' {
+    return 'deterministic';
+  }
+
+  return { QdrantStore, embedDeterministic, EMBED_DIM, createEmbeddingProvider, resolveEmbeddingMode };
 });
 
 // Import AFTER vi.mock so the field initializer picks up the fake QdrantStore.
@@ -222,6 +245,18 @@ describe('EmbeddingsService.test round-trip (B-8)', () => {
     expect(res.searchOk).toBe(false);
     expect(res.topScore).toBe(0.5);
     // mutation smoke: loosening the gate to `>= 0` would make this pass falsely.
+  });
+});
+
+describe('EmbeddingsService.test effective provider reporting', () => {
+  it('reports the active provider mode/model/dim (not a hardcoded bge claim)', async () => {
+    const svc = new EmbeddingsService(makePrisma() as never);
+    const res = await svc.test('report-provider');
+    expect(res.mode).toBe('deterministic');
+    expect(res.model).toBe('test-deterministic');
+    expect(res.dim).toBe(384);
+    // mutation smoke: if the service hardcoded mode:'local'/model:'bge-small-en'
+    // in TestResult, these would not match the provider actually used.
   });
 });
 

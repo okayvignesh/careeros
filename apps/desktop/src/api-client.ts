@@ -23,6 +23,8 @@ export class ApiClient {
     deviceName: string;
     publicKey: string;
     agentVersion: string;
+    /** `process.platform` — surfaced in web Settings → Devices. */
+    platform?: string;
   }): Promise<PairCompleteResponse> {
     const res = await fetch(`${this.apiUrl}/agent/pair/complete`, {
       method: 'POST',

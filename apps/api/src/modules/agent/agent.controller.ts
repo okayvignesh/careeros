@@ -81,7 +81,14 @@ export class AgentController {
   @Throttle({ default: { limit: 5, ttl: 60 * 60 * 1000 } })
   async pairComplete(
     @Req() req: Request,
-    @Body() body: { code?: string; deviceName?: string; publicKey?: string; agentVersion?: string },
+    @Body()
+    body: {
+      code?: string;
+      deviceName?: string;
+      publicKey?: string;
+      agentVersion?: string;
+      platform?: string;
+    },
   ) {
     if (!body?.code || !body?.deviceName || !body?.publicKey) {
       await audit(this.prisma, null, req, 'agent.pair.failed', { phase: 'complete', reason: 'missing_fields' });
@@ -100,6 +107,7 @@ export class AgentController {
         body.deviceName,
         publicKey,
         body.agentVersion,
+        body.platform,
       );
       await audit(this.prisma, null, req, 'agent.pair.completed', {
         deviceId: out.deviceId,

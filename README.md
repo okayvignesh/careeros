@@ -42,4 +42,18 @@ open http://localhost:3001/health   # service status JSON
 
 ## License
 
-TBD.
+Career OS is licensed under the **GNU Affero General Public License,
+version 3 or later** (`AGPL-3.0-or-later`). See [`LICENSE`](LICENSE) for
+the full text.
+
+In short:
+
+- You may run, study, share, and modify Career OS.
+- If you modify it and let other people use it over a network, you must
+  offer them the corresponding source of your modified version (AGPL
+  section 13). Self-hosting an unmodified copy carries no such
+  obligation.
+- There is no warranty.
+
+Third-party components keep their own licenses; see [`NOTICES`](NOTICES)
+and the per-release SBOM (generated per [`plan/release-process.md`](plan/release-process.md)).

@@ -197,6 +197,7 @@ ipcMain.handle('agent:pair', async (_evt, code: string) => {
       deviceName,
       publicKey,
       agentVersion: config.agentVersion,
+      platform: platform(),
     });
     await getKeychain().save({
       deviceId: res.deviceId,

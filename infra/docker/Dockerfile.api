@@ -25,15 +25,11 @@ RUN chown -R careeros:careeros /app
 USER careeros
 
 COPY --chown=careeros:careeros package.json pnpm-lock.yaml* pnpm-workspace.yaml turbo.json tsconfig.base.json ./
-COPY --chown=careeros:careeros apps/api/package.json apps/api/
-COPY --chown=careeros:careeros packages/shared/package.json packages/shared/
-COPY --chown=careeros:careeros packages/secrets/package.json packages/secrets/
-COPY --chown=careeros:careeros packages/auth/package.json packages/auth/
-COPY --chown=careeros:careeros packages/ai/package.json packages/ai/
+# W15-B temporary: full workspace copy so pnpm resolves every workspace:* dep and
+# apps/api's prisma-generate postinstall sees apps/api/prisma/schema.prisma.
+COPY --chown=careeros:careeros . .
 
 RUN pnpm install --frozen-lockfile || pnpm install
-
-COPY --chown=careeros:careeros . .
 
 RUN pnpm --filter @careeros/api prisma generate
 

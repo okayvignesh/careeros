@@ -3,10 +3,10 @@ import { Prisma } from '@prisma/client';
 import type { TailoredResumeContent } from '@careeros/shared';
 import { renderResumePdf } from '@careeros/resume-render';
 import {
-  DeepSeekProvider,
   renderPrompt,
   runFactCheck,
   wrapUntrusted,
+  type AIProvider,
   type FactCheckClaim,
 } from '@careeros/ai';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -241,7 +241,7 @@ export class ResumeVariantsService {
    */
   private async runFactCheck(
     userId: string,
-    provider: DeepSeekProvider,
+    provider: AIProvider,
     sections: TailoredResumeContent['sections'],
     factById: Map<string, { id: string; kind: string; content: Prisma.JsonValue }>,
   ): Promise<{ finalSections: TailoredResumeContent['sections']; audit: FactCheckAudit }> {
@@ -385,7 +385,7 @@ export class ResumeVariantsService {
     }));
   }
 
-  private async tryLoadProvider(userId: string): Promise<DeepSeekProvider | null> {
+  private async tryLoadProvider(userId: string): Promise<AIProvider | null> {
     try {
       // Resume facts + job description together are `personal` — the candidate's
       // work history alongside third-party listing prose. Gate accordingly.

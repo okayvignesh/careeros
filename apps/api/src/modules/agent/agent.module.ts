@@ -1,10 +1,18 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { AuthModule } from '../auth/auth.module';
+import { ApprovalsModule } from '../approvals/approvals.module';
 import { AgentController } from './agent.controller';
 import { AgentService } from './agent.service';
 import { AgentJwtGuard } from './agent.jwt-strategy';
 import { AgentGateway } from './agent.gateway';
+import {
+  AGENT_FORM_FILL_ALLOWLIST,
+  AGENT_KILL_SWITCH,
+  AgentApprovalWorker,
+  killSwitchReader,
+  loadAgentAllowlist,
+} from './agent-approval.worker';
 
 /**
  * D.2 (Wave D / P3.5): registers the desktop-agent module. `JwtModule` is
@@ -18,6 +26,7 @@ import { AgentGateway } from './agent.gateway';
 @Module({
   imports: [
     AuthModule,
+    ApprovalsModule,
     JwtModule.registerAsync({
       useFactory: () => {
         const secret = process.env.AGENT_JWT_SECRET ?? process.env.SESSION_SECRET;
@@ -31,7 +40,14 @@ import { AgentGateway } from './agent.gateway';
     }),
   ],
   controllers: [AgentController],
-  providers: [AgentService, AgentJwtGuard, AgentGateway],
+  providers: [
+    AgentService,
+    AgentJwtGuard,
+    AgentGateway,
+    AgentApprovalWorker,
+    { provide: AGENT_FORM_FILL_ALLOWLIST, useFactory: loadAgentAllowlist },
+    { provide: AGENT_KILL_SWITCH, useFactory: killSwitchReader },
+  ],
   exports: [AgentService, AgentJwtGuard, AgentGateway, JwtModule],
 })
 export class AgentModule {}

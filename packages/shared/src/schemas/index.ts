@@ -36,12 +36,12 @@ export const ProviderConfigSchema = z.object({
 });
 export type ProviderConfigInput = z.infer<typeof ProviderConfigSchema>;
 
-export const EmbeddingModeSchema = z.enum(['local', 'external']);
+export const EmbeddingModeSchema = z.enum(['local', 'deterministic', 'external']);
 export type EmbeddingMode = z.infer<typeof EmbeddingModeSchema>;
 
 export const EmbeddingConfigSchema = z.object({
   mode: EmbeddingModeSchema,
-  model: z.string().min(1).max(120).default('bge-small-en'),
+  model: z.string().min(1).max(120).default('Xenova/bge-small-en-v1.5'),
   externalBaseUrl: PublicUrlSchema.optional(),
   externalApiKey: z.string().min(1).max(500).optional(),
 });
@@ -379,3 +379,108 @@ export const SetupStateSchema = z.enum([
   'complete',
 ]);
 export type SetupState = z.infer<typeof SetupStateSchema>;
+
+// ---------------------------------------------------------------------------
+// Market demand (P3 screens 33 + 34). Derived from persisted `NormalizedJob`
+// rows; no news-source ingestion exists yet, so trend signals are computed
+// from the same job pool. Empty result = `[]` (documented, never a fixture).
+// ---------------------------------------------------------------------------
+
+/**
+ * One row of the screen-33 skill-demand table. `postings` counts the jobs in
+ * the window that list the skill; `share` is `postings / jobsInWindow`;
+ * `history` is the per-bucket posting count across the window (7 buckets);
+ * `gap` is the market demand score (`round(share*100)`) minus the caller's
+ * demonstrated `CandidateSkillState.level`, floored at 0 — a proxy for
+ * "distance to the market threshold" from the evidence model.
+ */
+export const SkillDemandRowSchema = z.object({
+  skillId: z.string().min(1),
+  label: z.string().min(1),
+  cluster: z.string().min(1),
+  postings: z.number().int().nonnegative(),
+  share: z.number().min(0).max(1),
+  history: z.array(z.number().int().nonnegative()),
+  gap: z.number().int(),
+});
+export type SkillDemandRow = z.infer<typeof SkillDemandRowSchema>;
+
+/** Screen-34 trajectory classification (blueprint §9 trend thresholds). */
+export const TrendTrajectorySchema = z.enum(['rising', 'steady', 'declining']);
+export type TrendTrajectory = z.infer<typeof TrendTrajectorySchema>;
+
+/**
+ * One screen-34 trend signal. `mentions` is the 90-day posting count;
+ * `sources` is the number of distinct `NormalizedJob.primarySource` adapters
+ * that mentioned it; `firstSeen` is the earliest observed ISO date;
+ * `history` is the 7-bucket series across the 90 days.
+ */
+export const TrendSignalSchema = z.object({
+  id: z.string().min(1),
+  technology: z.string().min(1),
+  category: z.string().min(1),
+  mentions: z.number().int().nonnegative(),
+  sources: z.number().int().nonnegative(),
+  firstSeen: z.string(),
+  trajectory: TrendTrajectorySchema,
+  history: z.array(z.number().int().nonnegative()),
+});
+export type TrendSignal = z.infer<typeof TrendSignalSchema>;
+
+/** Response envelopes for the two market-demand endpoints. */
+export const SkillDemandResponseSchema = z.object({
+  windowDays: z.number().int().positive(),
+  rows: z.array(SkillDemandRowSchema),
+});
+export type SkillDemandResponse = z.infer<typeof SkillDemandResponseSchema>;
+
+export const TrendSignalsResponseSchema = z.object({
+  generatedAt: z.string(),
+  signals: z.array(TrendSignalSchema),
+});
+export type TrendSignalsResponse = z.infer<typeof TrendSignalsResponseSchema>;
+
+// ---------------------------------------------------------------------------
+// Search providers (P3 screen 56). Providers are the configured job-source
+// adapters (registry in `@careeros/job-pipeline`); there is no persisted
+// usage counter yet, so `quota`/`used` are null and the UI renders
+// "not tracked" rather than an invented number. An empty `providers` array is
+// a valid, documented state.
+// ---------------------------------------------------------------------------
+
+export const SearchProviderStatusSchema = z.enum(['active', 'standby', 'error']);
+export type SearchProviderStatus = z.infer<typeof SearchProviderStatusSchema>;
+
+export const SearchProviderSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  host: z.string(),
+  status: SearchProviderStatusSchema,
+  /** ISO date of the first persisted job from this source, or null if none. */
+  addedAt: z.string().nullable(),
+  /** Human-readable scope / declared rate ceiling from `RATE_LIMITS`. */
+  usage: z.string(),
+  /** Monthly request budget; null = usage tracking not persisted. */
+  quota: z.number().int().nonnegative().nullable(),
+  /** Requests used this month; null = usage tracking not persisted. */
+  used: z.number().int().nonnegative().nullable(),
+  authNote: z.string(),
+});
+export type SearchProvider = z.infer<typeof SearchProviderSchema>;
+
+export const SearchProviderWorkloadSchema = z.object({
+  workload: z.string().min(1),
+  provider: z.string().min(1),
+  schedule: z.string().min(1),
+});
+export type SearchProviderWorkload = z.infer<typeof SearchProviderWorkloadSchema>;
+
+export const SearchProvidersResponseSchema = z.object({
+  providers: z.array(SearchProviderSchema),
+});
+export type SearchProvidersResponse = z.infer<typeof SearchProvidersResponseSchema>;
+
+export const SearchProviderWorkloadsResponseSchema = z.object({
+  workloads: z.array(SearchProviderWorkloadSchema),
+});
+export type SearchProviderWorkloadsResponse = z.infer<typeof SearchProviderWorkloadsResponseSchema>;

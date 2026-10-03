@@ -34,6 +34,8 @@ import { CorpusModule } from './modules/corpus/corpus.module';
 import { JobsModule } from './modules/jobs/jobs.module';
 import { JobPreferencesModule } from './modules/job-prefs/job-prefs.module';
 import { MarketBriefModule } from './modules/market-brief/market-brief.module';
+import { MarketDemandModule } from './modules/market-demand/market-demand.module';
+import { SearchProvidersModule } from './modules/search-providers/search-providers.module';
 import { ResumeVariantsModule } from './modules/resume-variants/resume-variants.module';
 import { CoverLettersModule } from './modules/cover-letters/cover-letters.module';
 import { ApplicationsModule } from './modules/applications/applications.module';
@@ -41,6 +43,7 @@ import { MatcherModule } from './modules/matcher/matcher.module';
 import { DossierModule } from './modules/dossier/dossier.module';
 import { QuestsModule } from './modules/quests/quests.module';
 import { AgentModule } from './modules/agent/agent.module';
+import { MobileModule } from './modules/mobile/mobile.module';
 import { ApprovalsModule } from './modules/approvals/approvals.module';
 import { GmailModule } from './modules/gmail/gmail.module';
 import { EmailIngestModule } from './modules/email-ingest/email-ingest.module';
@@ -105,6 +108,8 @@ const loggerParams: Params = {
     JobsModule,
     JobPreferencesModule,
     MarketBriefModule,
+    MarketDemandModule,
+    SearchProvidersModule,
     ResumeVariantsModule,
     CoverLettersModule,
     ApplicationsModule,
@@ -112,6 +117,7 @@ const loggerParams: Params = {
     DossierModule,
     QuestsModule,
     AgentModule,
+    MobileModule,
     ApprovalsModule,
     GmailModule,
     EmailIngestModule,

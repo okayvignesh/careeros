@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -44,12 +44,36 @@ export interface PairCompleteResult {
   expiresAt: Date;
 }
 
+/**
+ * Emitted after a terminal task result is persisted. Lets the approval worker
+ * (A2) map an AgentTask back to the approval item that dispatched it without
+ * coupling AgentService to the approvals module.
+ */
+export interface AgentTaskResultEvent {
+  taskId: string;
+  deviceId: string;
+  status: 'completed' | 'failed' | 'timeout';
+  resultJson: unknown;
+}
+
+export interface AgentTaskResultListener {
+  onTaskResult(event: AgentTaskResultEvent): Promise<void> | void;
+}
+
 @Injectable()
 export class AgentService {
+  private readonly logger = new Logger(AgentService.name);
+  private readonly resultListeners: AgentTaskResultListener[] = [];
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
   ) {}
+
+  /** Consumer hook: called once per persisted terminal task result. */
+  registerResultListener(listener: AgentTaskResultListener): void {
+    this.resultListeners.push(listener);
+  }
 
   /**
    * Mint a fresh 6-digit pairing code for `userId`. Invalidates any prior
@@ -84,6 +108,7 @@ export class AgentService {
     deviceName: string,
     publicKey: Buffer,
     agentVersion?: string,
+    platform?: string,
   ): Promise<PairCompleteResult> {
     if (!code || !/^\d{6}$/.test(code)) {
       throw new UnauthorizedException('Invalid pairing code');
@@ -113,6 +138,7 @@ export class AgentService {
       data: {
         userId: req.userId,
         name: deviceName.slice(0, 128),
+        platform: platform?.slice(0, 64) ?? null,
         publicKey: new Uint8Array(publicKey),
         agentVersion: agentVersion ?? null,
       },
@@ -188,6 +214,7 @@ export class AgentService {
       select: {
         id: true,
         name: true,
+        platform: true,
         pairedAt: true,
         revokedAt: true,
         lastSeenAt: true,
@@ -248,6 +275,16 @@ export class AgentService {
       data: { status, completedAt: now, resultJson: (resultJson ?? null) as never },
     });
     if (updated.count !== 1) throw new NotFoundException('Task not found or already terminal');
+    // Fire-and-forget: the approval worker (A2) owns the terminal approval
+    // transition; a listener failure must not fail the device's HTTP result
+    // post (which already succeeded).
+    for (const listener of this.resultListeners) {
+      void Promise.resolve(listener.onTaskResult({ taskId, deviceId, status, resultJson })).catch(
+        (err: unknown) => {
+          this.logger.error(`task-result listener failed for ${taskId}: ${(err as Error).message}`);
+        },
+      );
+    }
   }
 
   /** Bump `lastSeenAt` on the device row. Used by WSS gateway on connect + heartbeat. */

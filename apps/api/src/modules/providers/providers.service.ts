@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
-import { DeepSeekProvider, probeProvider, type ProbeResult } from '@careeros/ai';
+import { DeepSeekProvider, createProvider, probeProvider, type ProbeResult } from '@careeros/ai';
 import { encrypt, decrypt, loadMasterKey } from '@careeros/secrets';
 import { PrismaService } from '../../prisma/prisma.service';
 import { makeLlmAuditor } from '../../common/llm-audit';
@@ -89,7 +89,30 @@ export class ProvidersService {
     const apiKey = decrypt(secret.ciphertext, KEY, purpose);
 
     if (cfg.provider !== 'deepseek') {
-      throw new NotFoundException(`Adapter for '${cfg.provider}' not implemented yet.`);
+      const provider = createProvider({
+        provider: cfg.provider,
+        apiKey,
+        ...(cfg.baseUrl ? { baseUrl: cfg.baseUrl } : {}),
+        chatModel: cfg.chatModel,
+        onCall: makeLlmAuditor(this.prisma, userId, this.logger, this.usageCache),
+      });
+      // Non-DeepSeek adapters don't implement the four DeepSeek capability
+      // tests; report reachability for chat/structured and mark tools/streaming
+      // unsupported rather than fabricating a pass.
+      const reachable = await this.usage.runWithUserLimit(userId, () => provider.probe());
+      const capability = {
+        ok: reachable.reachable,
+        latencyMs: reachable.latencyMs,
+        ...(reachable.error ? { error: reachable.error } : {}),
+      };
+      return {
+        chat: capability,
+        structured: provider.capabilities.structuredOutput
+          ? capability
+          : { ok: false, latencyMs: 0, error: 'unsupported' },
+        tools: { ok: false, latencyMs: 0, error: 'unsupported' },
+        streaming: { ok: false, latencyMs: 0, error: 'unsupported' },
+      };
     }
     const provider = new DeepSeekProvider({
       apiKey,

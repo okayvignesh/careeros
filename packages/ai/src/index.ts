@@ -4,7 +4,24 @@ export type {
   ProviderProbeResult,
   ChatMessage,
 } from './provider';
-export { DeepSeekProvider, type LlmCallRecord, type LlmCallHook } from './providers/deepseek';
+export {
+  DeepSeekProvider,
+  OpenAICompatibleProvider,
+  OllamaProvider,
+  FallbackProvider,
+  CircuitBreaker,
+  createProvider,
+  registerBuiltinProviders,
+  defaultBaseUrlFor,
+  type LlmCallRecord,
+  type LlmCallHook,
+  type OpenAICompatibleConfig,
+  type OllamaConfig,
+  type ProviderBuildSpec,
+  type FallbackInfo,
+  type FallbackProviderOptions,
+  type CircuitBreakerOptions,
+} from './providers';
 export { probeProvider, type ProbeResult } from './probe';
 export {
   ProviderRegistry,

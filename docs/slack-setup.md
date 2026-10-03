@@ -43,6 +43,7 @@ Set these on the API service before the first request lands:
 | `SLACK_CLIENT_SECRET` | App page -> **Basic Information -> Client Secret** | Required for OAuth exchange. |
 | `SLACK_BOT_TOKEN` | Populated automatically by the OAuth callback | Optional to set manually if you install out-of-band. |
 | `SLACK_OAUTH_REDIRECT_URI` | e.g. `https://your-host/webhooks/slack/oauth/callback` | Must match the manifest exactly. |
+| `SLACK_BRIEF_CHANNEL` | Channel or user id the bot should post the daily brief to | Required for daily-brief delivery over Slack; web mirror still works without it. |
 
 ## 4. Verify installation
 

@@ -102,7 +102,24 @@ A phase is done only when **all** of the following are true:
 ## Open questions (parked)
 
 - Product final name? (working: "Career OS")
-- OSS-public release or personal-only? (affects docs/install polish)
+- **OSS-public release - RESOLVED (2026-10-02):** public, licensed
+  **AGPL-3.0-or-later**. `LICENSE` (full AGPL v3 text + SPDX header),
+  `NOTICES`, `SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`,
+  `.github/` issue + PR templates, and `docs/support.md` + `docs/edge.md`
+  shipped. Root `package.json` carries `license`/`author`/`repository`.
+  Follow-ups:
+  - regenerate `NOTICES` + the CycloneDX SBOM from the shipped lockfile
+    at the first tagged release (already the release-process plan);
+  - replace the placeholder disclosure email in `SECURITY.md` with a real
+    monitored address (GitHub Security Advisories is the operational
+    channel today);
+  - replace the placeholder Code of Conduct contact in
+    `CODE_OF_CONDUCT.md`;
+  - sync the generated knowledge base to the resolved decision
+    (`docs/codebase/README.md` line 102, `docs/codebase/CONCERNS.md`
+    item 1 still say the decision is open);
+  - add privacy notice + terms + cookie disclosure before any hosted
+    offering (`plan/COMPLETION_PLAN.md` Wave G, G-Legal).
 - Backup destination for VPS (S3? Backblaze? rsync to laptop?)
 - Domain name + TLS provider (Let's Encrypt assumed)
 - **Companion mobile app** — parked for post-web-MVP. Needs its own scoping session:

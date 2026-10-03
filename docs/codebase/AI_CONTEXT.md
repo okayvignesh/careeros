@@ -28,11 +28,11 @@ Career OS is a **self-hosted, provider-agnostic Personal AI Career Operating Sys
 - **API:** NestJS 10 (`@nestjs/platform-express`), 38 feature modules, Prisma 6.19 (`apps/api/prisma/schema.prisma`, 55 models, 39 migrations, no Prisma enums), Zod at all trust boundaries, `helmet` + Redis-backed `@nestjs/throttler`, `iron-session` cookies, Argon2id, WebAuthn passkeys, OpenAPI JSON + Swagger UI (`@nestjs/swagger` + `zod-to-openapi`).
 - **Workers:** Node + BullMQ on Redis.
 - **Data:** Postgres (system of record), Redis (queues/cache), Qdrant (vectors), MinIO (files).
-- **AI:** `packages/ai` provider abstraction; **only a DeepSeek adapter exists**; `chatStructured<T>({schema})` + Zod; versioned prompts; grounding/injection/sensitivity modules; evals via Vitest.
+- **AI:** `packages/ai` provider abstraction with real DeepSeek, OpenAI/OpenRouter, and Ollama adapters + a primary→backup→Ollama fallback chain (5-failure circuit breaker); `chatStructured<T>({schema})` + Zod; versioned prompts; grounding/injection/sensitivity modules; evals via Vitest.
 - **Desktop:** Electron 31 + Playwright (user's installed Chrome) + `keytar`; WSS pairing.
 - **Deployment:** Docker Compose, Squid deny-by-default egress proxy, private datastore network.
 
-**Reality checks:** embeddings are still a SHA-256 placeholder (not `bge-small-en`); only the DeepSeek LLM adapter exists; nginx/TLS, GlitchTip, and whisper are documented but absent from compose; `@careeros/messaging` is orphaned; Prisma is aligned on 6.x across api/worker/aggregator; Swagger/OpenAPI and `undici`-enforced egress are now real.
+**Reality checks:** embeddings are still a SHA-256 placeholder (not `bge-small-en`); LLM adapters now ship for DeepSeek/OpenAI-compatible/Ollama with a fallback chain (Anthropic/Azure still absent); nginx/TLS, GlitchTip, and whisper are documented but absent from compose; `@careeros/messaging` is orphaned; Prisma is aligned on 6.x across api/worker/aggregator; Swagger/OpenAPI and `undici`-enforced egress are now real.
 
 ## Structure
 
@@ -91,4 +91,4 @@ pnpm test:evals  # LLM evals (EVAL_MOCK=1 default)
 
 ## Top risks to keep in mind
 
-Embedding placeholder; only a DeepSeek LLM adapter; docs describe infra still absent from compose (nginx/TLS, GlitchTip, whisper); `@careeros/messaging` orphaned; no global auth guard (per-controller `requireUserId`); `AppConfig` not user-scoped (multitenant TODO); live Docker egress smoke not yet run; T29 web fetch-on-mount warnings. Prisma alignment, egress enforcement, Swagger, build blockers, container hardening, and CI pinning are resolved. Full list and the `[ASK USER]` decisions are in `CONCERNS.md`.
+Embedding placeholder; LLM adapters ship for DeepSeek/OpenAI-compatible/Ollama with a fallback chain (Anthropic/Azure absent); docs describe infra still absent from compose (nginx/TLS, GlitchTip, whisper); `@careeros/messaging` orphaned; no global auth guard (per-controller `requireUserId`); `AppConfig` not user-scoped (multitenant TODO); live Docker egress smoke not yet run; T29 web fetch-on-mount warnings. Prisma alignment, egress enforcement, Swagger, build blockers, container hardening, and CI pinning are resolved. Full list and the `[ASK USER]` decisions are in `CONCERNS.md`.

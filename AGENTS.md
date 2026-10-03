@@ -96,10 +96,11 @@ career-os/
 │   ├── testing/          test infra (msw, fast-check, storage-state helpers)
 │   └── browser-agent/    (from P3.5) pacing + kill-switch + task schema
 ├── infra/
-│   ├── docker/           compose files + per-service Dockerfiles
-│   ├── nginx/            reverse proxy + TLS
+│   ├── docker/           compose files + per-service Dockerfiles (incl. Dockerfile.backup)
+│   ├── nginx/            reverse proxy + TLS (nginx.conf, templates/, self-signed.sh, README)
 │   ├── postgres/         init scripts
-│   └── scripts/          backup, restore, deploy
+│   └── slack/            Slack app manifest
+├── scripts/              backup/restore/cron, dev-host, verify-* (repo root, not infra/)
 ├── plan/                 implementation plan (living)
 ├── docs/                 blueprint DOCX
 ├── careeros-screens/     wireframes (visual reference only)

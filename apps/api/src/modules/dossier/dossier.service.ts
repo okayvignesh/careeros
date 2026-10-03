@@ -2,11 +2,11 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import {
-  DeepSeekProvider,
   InjectionBlockedError,
   UNTRUSTED_SYSTEM_CLAUSE,
   runFactCheck,
   wrapUntrusted,
+  type AIProvider,
   type FactCheckClaim,
 } from '@careeros/ai';
 import { safeFetch, SsrfBlockedError, type AssertPublicUrlOptions } from '@careeros/shared/net';
@@ -684,7 +684,7 @@ export class DossierService {
       });
   }
 
-  private async tryLoadProvider(userId: string): Promise<DeepSeekProvider | null> {
+  private async tryLoadProvider(userId: string): Promise<AIProvider | null> {
     try {
       const loaded = await this.providerLoader.loadProviderForUser(userId, 'public');
       return loaded?.provider ?? null;

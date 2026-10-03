@@ -24,6 +24,7 @@ type Device = {
   id: string;
   userId: string;
   name: string;
+  platform: string | null;
   publicKey: Uint8Array;
   pairedAt: Date;
   revokedAt: Date | null;
@@ -242,12 +243,19 @@ describe('AgentService.pairComplete', () => {
     const jwt = fakeJwt();
     const svc = new AgentService(prisma as never, jwt as never);
     const start = await svc.pairStart('user-9');
-    const out = await svc.pairComplete(start.code, 'MacBook', Buffer.from([1, 2, 3]), 'v0.1.0');
+    const out = await svc.pairComplete(
+      start.code,
+      'MacBook',
+      Buffer.from([1, 2, 3]),
+      'v0.1.0',
+      'darwin',
+    );
     expect(out.deviceId).toBeTruthy();
     expect(out.jwt).toContain('jwt.');
     expect(out.refreshToken).toMatch(/^[A-Za-z0-9_-]+$/);
     expect(prisma.calls.devices).toHaveLength(1);
     expect(prisma.calls.devices[0].agentVersion).toBe('v0.1.0');
+    expect(prisma.calls.devices[0].platform).toBe('darwin');
     expect(prisma.calls.sessions).toHaveLength(1);
     // Pairing request marked consumed so it cannot be spent twice.
     expect(prisma.calls.pairReqs[0].consumedAt).toBeInstanceOf(Date);
@@ -432,17 +440,18 @@ describe('AgentService.recordTaskResult', () => {
 // -- listDevices (userId scoping) --
 
 describe('AgentService.listDevices', () => {
-  it('returns only the caller devices', async () => {
+  it('returns only the caller devices, including platform', async () => {
     const prisma = fakePrisma({
       devices: [
-        { id: 'd1', userId: 'u1', name: 'A', publicKey: new Uint8Array([1]), pairedAt: new Date(), revokedAt: null, lastSeenAt: null, agentVersion: null },
-        { id: 'd2', userId: 'u2', name: 'B', publicKey: new Uint8Array([1]), pairedAt: new Date(), revokedAt: null, lastSeenAt: null, agentVersion: null },
+        { id: 'd1', userId: 'u1', name: 'A', platform: 'darwin', publicKey: new Uint8Array([1]), pairedAt: new Date(), revokedAt: null, lastSeenAt: null, agentVersion: null },
+        { id: 'd2', userId: 'u2', name: 'B', platform: 'linux', publicKey: new Uint8Array([1]), pairedAt: new Date(), revokedAt: null, lastSeenAt: null, agentVersion: null },
       ],
     });
     const svc = new AgentService(prisma as never, fakeJwt() as never);
     const rows = await svc.listDevices('u1');
     expect(rows).toHaveLength(1);
     expect(rows[0].id).toBe('d1');
+    expect(rows[0].platform).toBe('darwin');
   });
 });
 

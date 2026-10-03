@@ -3,10 +3,10 @@ import { Prisma } from '@prisma/client';
 import type { CoverLetterContent } from '@careeros/shared';
 import { renderCoverLetterPdf } from '@careeros/resume-render';
 import {
-  DeepSeekProvider,
   renderPrompt,
   runFactCheck,
   wrapUntrusted,
+  type AIProvider,
   type FactCheckClaim,
 } from '@careeros/ai';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -219,7 +219,7 @@ export class CoverLettersService {
 
   private async runFactCheck(
     userId: string,
-    provider: DeepSeekProvider,
+    provider: AIProvider,
     paragraphs: CoverLetterContent['paragraphs'],
     factById: Map<string, { id: string; kind: string; content: Prisma.JsonValue }>,
   ): Promise<{ finalParagraphs: CoverLetterContent['paragraphs']; audit: FactCheckAudit }> {
@@ -317,7 +317,7 @@ export class CoverLettersService {
     return rows.map((f) => ({ id: f.id, kind: f.kind, summary: summariseFact(f.content) }));
   }
 
-  private async tryLoadProvider(userId: string): Promise<DeepSeekProvider | null> {
+  private async tryLoadProvider(userId: string): Promise<AIProvider | null> {
     try {
       // Resume facts + job description = personal.
       const loaded = await this.providerLoader.loadProviderForUser(userId, 'personal');

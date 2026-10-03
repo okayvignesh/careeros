@@ -1,9 +1,14 @@
 import { createHash } from 'node:crypto';
 
 /**
- * Deterministic placeholder embedding for the wizard's round-trip test.
- * Produces a stable unit-normalized 384-d vector from the input string.
- * Real semantic embeddings (bge-small-en via @xenova/transformers) land in P1.
+ * Offline-safe fallback embedder: a stable, L2-normalized 384-d vector derived
+ * from a SHA-256 of the input. It carries no semantics; it exists so the wizard
+ * round-trip and CI stay green when the real local model is unavailable.
+ *
+ * Semantic embeddings come from `BgeSmallEmbedder` in `provider.ts`
+ * (`Xenova/bge-small-en-v1.5` via `@xenova/transformers`). That provider is
+ * lazy-loaded on first `embed()` and downloads model weights from Hugging Face
+ * into its cache dir on first use — see the `provider.ts` module doc.
  */
 export const EMBED_DIM = 384;
 

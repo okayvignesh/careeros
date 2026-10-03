@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
 // @careeros/shared (CJS dist) and app code can otherwise resolve zod through
@@ -9,7 +10,14 @@ const requireFromApi = createRequire(`${process.cwd()}/apps/api/package.json`);
 const zodEntry = requireFromApi.resolve('zod');
 
 export default defineConfig({
-  resolve: { alias: { zod: zodEntry } },
+  resolve: {
+    alias: {
+      zod: zodEntry,
+      // `apps/web` imports app modules through its tsconfig `@/*` path. Vite
+      // doesn't read tsconfig paths, so map it here for web component tests.
+      '@': fileURLToPath(new URL('./apps/web/src', import.meta.url)),
+    },
+  },
   // apps/web (and packages/ui) ship `jsx: preserve` for Next, which Vite 8's
   // transform would otherwise pass through untouched — so a node vitest test
   // cannot import a JSX .tsx component (see UnavailableNotice/CodeEditor's

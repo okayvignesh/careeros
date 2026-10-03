@@ -13,3 +13,7 @@ node_modules
 **/dist
 careeros-screens
 *.log
+# local self-signed TLS material must never enter a build context
+infra/nginx/certs
+*.key
+*.pem

@@ -113,6 +113,48 @@ you also get an email with the summary or the failure line.
 `mc` needs its alias pre-configured (`mc alias set minio http://127.0.0.1:9000
 $MINIO_ROOT_USER $MINIO_ROOT_PASSWORD`); this is a one-time operator step.
 
+## Running the schedule in Compose (ops profile)
+
+The stack ships a `backup` sidecar that runs `scripts/backup-cron.sh` on the
+private Docker network, so you do not need a host crontab or a second set of
+credentials. It is profile-gated so it never starts with the normal app:
+
+```
+# .env
+AGE_RECIPIENT=age1abcdef...
+BACKUP_CRON_SCHEDULE=17 3 * * *   # optional; this is the default (UTC)
+
+docker compose --profile ops -f infra/docker/docker-compose.yml --env-file .env up -d backup
+```
+
+What the service does:
+
+- Builds `infra/docker/Dockerfile.backup` (Alpine + `age`, `pg_dump`, `mc`,
+  `curl`, `jq`) and runs the same `scripts/backup.sh`/`backup-cron.sh` the
+  host recipe uses.
+- Refuses to start without `AGE_RECIPIENT` (the entrypoint exits non-zero) so a
+  misconfigured sidecar can never run unprotected.
+- Writes `backup.env` from the container environment — derived from `.env`,
+  with `PGHOST=postgres`, `QDRANT_URL=http://qdrant:6333` and the MinIO
+  endpoint resolved to container names. No new secrets are introduced.
+- Stores artifacts in the named `backupdata` volume (`BACKUP_DIR` =
+  `/var/backups/careeros`) and encrypts each artifact with `age` before it is
+  written, so plaintext never lands on the volume.
+- Reaches only the `internal` network (postgres, qdrant, minio) plus the shared
+  `mc` alias; it has no egress.
+
+Tail the run log:
+
+```
+docker compose --profile ops -f infra/docker/docker-compose.yml --env-file .env logs -f backup
+docker compose --profile ops -f infra/docker/docker-compose.yml --env-file .env \
+  exec backup tail -f /var/backups/careeros/careeros-backup.log
+```
+
+The `backupdata` volume is the restore source for `scripts/restore.sh`; copy it
+off-host (see the off-site section below) since a backup on the same disk as the
+data is not a backup.
+
 ## Retention policy
 
 Three tiers, tracked via symlinks in `$BACKUP_DIR`:

@@ -33,10 +33,16 @@ import { google } from 'googleapis';
 import type { OAuth2Client } from 'google-auth-library';
 import { decrypt, loadMasterKey } from '@careeros/secrets';
 import { InjectionBlockedError, wrapUntrusted } from '@careeros/ai';
-import { classifyEmailHeuristic } from '@careeros/shared';
+import {
+  classifyEmailHeuristic,
+  type EmailClass,
+  type EmailClassification,
+  type EmailFields,
+} from '@careeros/shared';
 import { parseEmail, matchSender } from '@careeros/email-parsers';
 import type { EmailJob, EmailSource } from '@careeros/email-parsers';
 import { PrismaService } from '../../prisma/prisma.service';
+import { InboxService } from '../inbox/inbox.service';
 import { QUEUE_EMAIL_PROCESSING, readGmailEnv, type GmailEnv } from '../gmail/gmail.service';
 
 const KEY = loadMasterKey();
@@ -49,6 +55,14 @@ export interface EmailProcessingPayload {
   threadId: string | null;
 }
 
+/** E.7 triage summary for the inbox item created off this email. */
+export interface InboxIngestSummary {
+  itemId: string;
+  status: 'new' | 'linked' | 'dismissed';
+  linkedApplicationId: string | null;
+  matchConfidence: number | null;
+}
+
 /** Result surfaced to unit tests + the worker log. Not persisted. */
 export interface IngestResult {
   status: 'parsed' | 'dropped-injection' | 'dropped-sender' | 'skipped-nohtml' | 'skipped-noconfig';
@@ -57,14 +71,32 @@ export interface IngestResult {
   reason?: string;
   /** E.5b: heuristic classifier output (null when no rule fired above threshold). */
   classification?: { class: string; confidence: number; evidence?: string | undefined };
+  /** E.7: inbox-triage outcome when the mail class was triage-eligible. */
+  inbox?: InboxIngestSummary;
 }
+
+/**
+ * Classes that go to inbox triage. Job-alert digests do NOT: they feed the
+ * job pipeline; only person-to-person application mail gets an InboxItem.
+ * `offer` is intentionally absent per the E.7 scope (it flows through the
+ * application timeline, not triage).
+ */
+const INBOX_CLASSES: ReadonlySet<EmailClass> = new Set([
+  'recruiter',
+  'interview_invite',
+  'assessment',
+  'rejection',
+]);
 
 @Injectable()
 export class EmailIngestService implements OnModuleDestroy {
   private readonly logger = new Logger(EmailIngestService.name);
   private readonly worker: Worker<EmailProcessingPayload> | null;
 
-  constructor(private readonly prisma: PrismaService) {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly inbox: InboxService,
+  ) {
     const env = readGmailEnv();
     if (!env) {
       // Gmail integration not configured (dev laptop without OAuth env). Skip
@@ -140,13 +172,14 @@ export class EmailIngestService implements OnModuleDestroy {
     // E.5b: classify every email with the heuristic (no LLM in the worker;
     // no provider plumbing to resolve here). Classification is written to
     // audit_log so downstream analytics + the F.9 security-stats dashboard
-    // can slice it, and the InboxItem row (future wire) can seed off it.
-    // Returning null is honest: callers that need high-confidence routing
-    // can run the LLM stage out of band.
+    // can slice it, and the InboxItem row seeds off it. Returning null is
+    // honest: callers that need high-confidence routing can run the LLM
+    // stage out of band.
+    const snippet = plainText(fetched.html).slice(0, 400);
     const classification = classifyEmailHeuristic({
       from: fetched.from,
       subject: fetched.subject,
-      snippet: fetched.html.replace(/<[^>]+>/g, ' ').slice(0, 400),
+      snippet,
     });
     await this.audit(userId, 'email.ingest.classified', {
       messageId,
@@ -154,6 +187,15 @@ export class EmailIngestService implements OnModuleDestroy {
       confidence: classification?.confidence ?? 0,
       method: classification ? 'heuristic' : 'fallback',
     });
+
+    // E.7 inbox triage runs BEFORE the job-alert allowlist gate: recruiter /
+    // interview / assessment / rejection mail usually comes from company or
+    // ATS domains that are deliberately not alert senders, and it still
+    // belongs in the inbox. Idempotent on (userId, emailId) so a retry is safe.
+    let inbox: InboxIngestSummary | undefined;
+    if (classification && INBOX_CLASSES.has(classification.class)) {
+      inbox = await this.ingestToInbox(userId, messageId, fetched, classification);
+    }
 
     // Gate 2 — sender allowlist. matchSender handles display-name +
     // angle-brackets and is case-insensitive.
@@ -165,6 +207,7 @@ export class EmailIngestService implements OnModuleDestroy {
       });
       const r: IngestResult = { status: 'dropped-sender', reason: fetched.from };
       if (classification) r.classification = classification;
+      if (inbox) r.inbox = inbox;
       return r;
     }
 
@@ -182,7 +225,9 @@ export class EmailIngestService implements OnModuleDestroy {
         messageId,
         from: fetched.from,
       });
-      return { status: 'dropped-sender', reason: 'race' };
+      const r: IngestResult = { status: 'dropped-sender', reason: 'race' };
+      if (inbox) r.inbox = inbox;
+      return r;
     }
 
     const inserted = await this.insertJobs(source, parsed.jobs);
@@ -194,7 +239,56 @@ export class EmailIngestService implements OnModuleDestroy {
     });
     const r: IngestResult = { status: 'parsed', source, jobsInserted: inserted };
     if (classification) r.classification = classification;
+    if (inbox) r.inbox = inbox;
     return r;
+  }
+
+  /**
+   * E.7: upsert an InboxItem for a triage-eligible mail and fuzzy-link it to
+   * an open application when the extractor found both company + role. Failure
+   * is best-effort: triage must never drop the job-alert path or trigger a
+   * retry storm; the idempotent upsert self-heals on a later run.
+   */
+  private async ingestToInbox(
+    userId: string,
+    messageId: string,
+    fetched: FetchedMessage,
+    classification: EmailClassification,
+  ): Promise<InboxIngestSummary | undefined> {
+    try {
+      const fields = extractApplicationFields(fetched.from, fetched.subject);
+      const body = plainText(fetched.html);
+      const result = await this.inbox.ingest({
+        userId,
+        emailId: messageId,
+        from: fetched.from,
+        subject: fetched.subject,
+        snippet: body.length > 0 ? body.slice(0, 500) : null,
+        emailClass: classification.class,
+        classConfidence: classification.confidence,
+        parsed: fields,
+      });
+      await this.audit(userId, 'email.ingest.inboxed', {
+        messageId,
+        class: classification.class,
+        status: result.status,
+        linkedApplicationId: result.linkedApplicationId,
+        matchConfidence: result.matchConfidence,
+      });
+      return {
+        itemId: result.inboxItemId,
+        status: result.status,
+        linkedApplicationId: result.linkedApplicationId,
+        matchConfidence: result.matchConfidence,
+      };
+    } catch (err) {
+      await this.audit(userId, 'email.ingest.inbox_failed', {
+        messageId,
+        class: classification.class,
+        error: (err as Error).message,
+      });
+      return undefined;
+    }
   }
 
   private async insertJobs(source: EmailSource, jobs: EmailJob[]): Promise<number> {
@@ -330,4 +424,90 @@ function findPart(part: GmailPart, mime: string): GmailPart | null {
 function decodeBase64Url(b64url: string): string {
   const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
   return Buffer.from(b64, 'base64').toString('utf8');
+}
+
+/** Collapse an HTML body to a single plain-text string (tags stripped). */
+export function plainText(html: string): string {
+  return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+// Subject shapes that name both the role and the company. Ordered specific
+// -> loose; the first hit wins. Kept deliberately narrow: a partial guess
+// (company-only) never auto-links anyway, and a wrong guess is worse than
+// no triage match, so we only return fields the pattern actually captured.
+const APPLICATION_FIELD_PATTERNS: ReadonlyArray<RegExp> = [
+  /\bfor\s+(?:the\s+)?(.+?)\s+(?:role|position|opening)\s+(?:at|with)\s+(.+?)\s*[.!]?$/i,
+  /\bfor\s+(?:the\s+)?(.+?)\s+(?:at|with)\s+(.+?)\s*[.!]?$/i,
+  /\binterview\b[^:]*[:\-]\s*(.+?)\s+(?:at|with)\s+(.+?)\s*[.!]?$/i,
+];
+
+/**
+ * E.7 best-effort `(company, role)` extraction from a recruiter/interview/
+ * assessment/rejection subject. This is NOT the email-parser alert path; it
+ * exists so `InboxService.ingest` can fuzzy-match against open applications
+ * for mail that names both fields ("Interview for Backend Engineer at
+ * Stripe"). Subjects without a clear both-fields signal fall back to
+ * role-from-subject + company-from-sender before giving up; the fuzzy
+ * matcher then decides honestly, and an unlinked InboxItem is still created.
+ */
+export function extractApplicationFields(from: string, subject: string): EmailFields {
+  const text = String(subject ?? '');
+  for (const pattern of APPLICATION_FIELD_PATTERNS) {
+    const m = pattern.exec(text);
+    if (!m) continue;
+    const role = cleanField(m[1]);
+    const company = cleanField(m[2]);
+    if (role && company) return { company, role };
+  }
+  // Fallback: a role phrase with no explicit company on the subject, paired
+  // with the sender display name / domain. Company-only matches never
+  // auto-link (0.5 < threshold), so a weak guess cannot merge the wrong mail.
+  const roleOnly = /\bfor\s+(?:the\s+)?([a-z0-9][\w/&+ .'-]{2,60}?)\s+(?:role|position|opening)\b/i.exec(
+    text,
+  );
+  const role = cleanField(roleOnly?.[1]);
+  // Without a role there is nothing the fuzzy matcher can link on, so do not
+  // emit a company-only guess.
+  if (!role) return { company: null, role: null };
+  return { company: inferCompany(from), role };
+}
+
+function stripAddress(from: string): { display: string; address: string } {
+  const m = /^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/.exec(from);
+  if (m) return { display: (m[1] ?? '').trim(), address: (m[2] ?? '').trim() };
+  return { display: '', address: from.trim() };
+}
+
+// ATS domains are infrastructure, not the hiring company; never treat the
+// domain label as a company name for these.
+const ATS_DOMAINS: ReadonlySet<string> = new Set([
+  'greenhouse.io',
+  'lever.co',
+  'myworkday.com',
+  'workday.com',
+  'ashbyhq.com',
+  'smartrecruiters.com',
+  'icims.com',
+  'jobvite.com',
+]);
+
+function inferCompany(from: string): string | null {
+  const { display, address } = stripAddress(from);
+  const displayName = cleanField(
+    display.replace(/\b(recruiting|recruitment|talent acquisition|talent|careers|career|hiring|team|hr|people)\b.*$/i, ''),
+  );
+  if (displayName) return displayName;
+  const domain = (address.split('@')[1] ?? '').toLowerCase();
+  if (!domain || ATS_DOMAINS.has(domain)) return null;
+  const labels = domain.split('.').filter((l) => l && l !== 'www' && l !== 'mail' && l !== 'email');
+  const root = labels.length >= 2 ? labels[labels.length - 2] : labels[0];
+  return root ? cleanField(root) : null;
+}
+
+/** Trim quotes/punctuation and collapse whitespace in a captured field. */
+function cleanField(value: string | undefined): string | null {
+  if (!value) return null;
+  const out = value.replace(/["'`]+/g, '').replace(/[.,;:!?]+$/g, '').replace(/\s+/g, ' ').trim();
+  if (out.length === 0 || out.length > 80) return null;
+  return out;
 }

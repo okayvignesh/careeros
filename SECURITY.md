@@ -7,20 +7,56 @@ Security posture is documented in `plan/security.md`.
 ## Reporting a vulnerability
 
 **Do not open a public GitHub issue for security-sensitive findings.**
+A public issue discloses the problem before there is a fix.
 
-Email: security@career-os.local
-(Update this placeholder before public release. Until an OSS decision
-lands per `plan/COMPLETION_PLAN.md` §6, this project is personal-use;
-private disclosure means messaging the maintainer directly.)
+### Primary channel: GitHub Security Advisories
 
-We aim to acknowledge within 72 hours and to ship a fix or workaround
-within 14 days for high-severity findings.
+Use the repository's private vulnerability reporting flow:
 
-## PGP key
+1. Open the **Security** tab of
+   [`github.com/okayvignesh/careeros`](https://github.com/okayvignesh/careeros/security).
+2. Click **Report a vulnerability** (GitHub Security Advisories).
+3. Include the affected version or commit, reproduction steps, impact,
+   and any suggested fix. A proof of concept helps a lot.
 
-Placeholder pending OSS-public decision. When we cut v1.0, this section
-will pin a full public key + fingerprint. For now, prefer
-end-to-end-encrypted email or Signal.
+This opens a private thread visible only to you and the maintainer.
+Advisories are the operational channel: triage, fix coordination, CVE
+request, and the published advisory all happen there. This is the
+channel to use.
+
+### Backup email (not yet configured)
+
+Email: `security@career-os.local`
+
+**Placeholder. Do not send mail here. Replace this line with a real,
+monitored address before the first public release.** Until it is
+replaced, GitHub Security Advisories is the only working channel.
+
+### What to expect
+
+| Stage | Commitment |
+|---|---|
+| Acknowledge receipt | within 3 business days |
+| Initial triage + severity assessment | within 7 days |
+| Fix or workaround for high/critical | within 14 days |
+| Default coordinated-disclosure window | 90 days, negotiable |
+| Credit | in the advisory, unless you ask to stay anonymous |
+
+### Supported versions
+
+Security fixes target the versions inside the support window defined in
+[`docs/support.md`](docs/support.md): the current major gets full
+support; the previous major gets security patches only, until 6 months
+after the current major shipped. Pre-release / `edge` builds are **not**
+supported for security fixes. Please report against a tagged, supported
+release where possible.
+
+### Encrypted communication
+
+GitHub Security Advisories is private end to end for the duration of
+the report. No PGP key is pinned yet. If you need to exchange material
+outside GitHub, say so in the advisory and a channel plus key can be
+arranged before anything sensitive is sent.
 
 ## Scope
 

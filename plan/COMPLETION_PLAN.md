@@ -230,7 +230,7 @@ Source: `_audit_ba_qa.md#Product completeness gaps` (58 items). Grouped for dele
 | **G-Cost** Cost/rate-limit UX | 429 banner "you've used 87% today, resets HH:MM"; pre-flight cost card on heavy ops; provider-fallback UX; degraded-provider banner; per-artifact cost + tokens | P1/P4/P6 | ⏳ open (UI) |
 | **G-i18n** i18n + locale | Confirm English-only for v1.0; timezone display consistency + toggle; currency per-user preference for comp | P0/P3/P4 | ⏳ open |
 | **G-Docs** Docs | `docs/install.md`, `docs/user-manual.md`, `docs/runbook.md`, `docs/incident-response.md`, `docs/threat-model-operator.md`, `docs/verify.md`, `CHANGELOG.md` pre-1.0, `postmortem-template.md` | P0 + P6 | ✅ SHIPPED `2942e26` + `9e11a17` |
-| **G-Legal** Legal + license | `LICENSE` (missing), `NOTICES` for AGPL/MIT/Apache; privacy notice + terms + cookie disclosure | P0/P6 | ⏳ `NOTICES` + `SECURITY.md` + `CONTRIBUTING.md` shipped; `LICENSE` blocked on §6 decision 2 |
+| **G-Legal** Legal + license | `LICENSE` (missing), `NOTICES` for AGPL/MIT/Apache; privacy notice + terms + cookie disclosure | P0/P6 | ✅ `LICENSE` (full AGPL v3 + SPDX header, `AGPL-3.0-or-later`), `NOTICES`, `SECURITY.md` (GitHub advisories as primary channel), `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1), `.github/` issue + PR templates, `docs/support.md` + `docs/edge.md` shipped 2026-10-02; privacy notice + terms + cookie disclosure still open for a hosted offering |
 | **G-Auth** Session + roles | Screen 59 AC: list + revoke sessions; passkey recovery; `requireAdmin` guard | P0/P6 | ⏳ `requireAdmin` shipped; session list + revoke UI still open |
 | **G-Notif** Notifications | In-app toast + notification center for async completions; quiet hours; per-feature kill switches | P5/P6 | ⏳ open (UI) |
 | **G-Feedback** Feedback loop | Thumbs-up/down on every generated artifact → eval set + regression counter | P1/P4/P6 | ⏳ open (UI + schema) |
@@ -325,7 +325,7 @@ Per-workstream assignment table (abbreviated — full expansion in workstream ti
 ## 6. Open decisions the user must make BEFORE Wave A ships
 
 1. **Product final name** — working "Career OS". Affects `SECURITY.md`, image names, docs. Default: keep "Career OS".
-2. **OSS-public vs personal-only** — determines whether `LICENSE`, `NOTICES`, `SECURITY.md` publish path, privacy/terms, and CI cadence matter as public commitments. Default: personal-only for now, keep everything ready for OSS flip.
+2. ~~**OSS-public vs personal-only**~~ — **RESOLVED (2026-10-02): OSS-public, licensed `AGPL-3.0-or-later`.** `LICENSE` + community files shipped; follow-ups (regenerate `NOTICES`/SBOM at first tag, replace placeholder `SECURITY.md`/CoC contacts, add privacy/terms/cookie disclosure before hosting, sync `docs/codebase/`) tracked under "OSS-public release" in `plan/PLAN.md` open questions.
 3. **VPS backup destination** — S3 / Backblaze B2 / rsync-to-laptop? Blocks F.7 and H.4. Default: Backblaze B2 (cheap, S3-compatible).
 4. **Domain + TLS provider** — nginx + Let's Encrypt (assumed) or Caddy? Blocks C-P0 nginx config + H. Default: nginx + certbot.
 5. **Mobile companion** — remains parked per `PLAN.md` open questions? Default: yes, parked.

@@ -496,7 +496,7 @@ P6: User approves submission
 
 | Service | Image | Public? | Volumes | Depends on |
 |---|---|---|---|---|
-| nginx | `nginx:alpine` (pinned) | 80/443 | certs | api, web |
+| nginx | `nginx:alpine` (digest `sha256:df221db8…`) | 80/443 | local certs, `letsencrypt`, `certbot-www` | api, web |
 | web | `careeros/web` (distroless node20) | private 3000 | — | api |
 | api | `careeros/api` (distroless node20) | private 3001 | — | postgres, redis, qdrant, minio |
 | worker | `careeros/worker` (distroless node20) | none | — | redis, postgres, qdrant, minio |
@@ -508,8 +508,23 @@ P6: User approves submission
 | embedding | `careeros/embedding` (bge-small-en) | private 4000 | model cache | — |
 | whisper | `careeros/whisper` (whisper.cpp small en) | private 4001 | model cache | — |
 | glitchtip | `glitchtip/glitchtip` | private 9000 | — | postgres, redis |
-| backup | `careeros/backup` (age+cron) | none | reads all data volumes | postgres, minio, qdrant |
-| certbot | `certbot/certbot` | none | certs | — |
+| backup | built from `infra/docker/Dockerfile.backup` (age + busybox cron; `ops` profile) | none | `backupdata` | postgres, minio, qdrant |
+| certbot | `certbot/certbot` (digest `sha256:f70ad0ad…`) | none | `letsencrypt`, `certbot-www` | — |
+
+**nginx routing (config: `infra/nginx/`).** nginx is the only service that
+publishes host ports. It terminates TLS (HSTS + security headers), redirects
+`:80` to `:443` except `/healthz` and the ACME challenge, and routes `/` to
+`web:3000`, `/api/*` to `api:3001` (the `/api` prefix is stripped because the
+api's controllers are unprefixed). Local dev uses a self-signed cert from
+`infra/nginx/self-signed.sh` with `HSTS_MAX_AGE=0`; production points
+`TLS_CERT_PATH`/`TLS_KEY_PATH` at the `letsencrypt` volume after
+`certbot certonly`. The `certbot` service renews every 12h.
+
+**Backup sidecar.** The `backup` service is profile-gated (`profiles: [ops]`)
+so it does not start with the normal stack; `docker compose --profile ops up -d
+backup` runs `scripts/backup-cron.sh` nightly, writing age-encrypted artifacts
+to the `backupdata` volume. It requires `AGE_RECIPIENT` from `.env` (see
+`docs/backup.md`).
 
 All non-nginx services on private Docker network. Volumes are named (not bind mounts) for portability.
 
