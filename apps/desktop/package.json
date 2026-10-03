@@ -5,7 +5,7 @@
   "description": "Career OS desktop companion agent (Electron). Pairs to the API, drives Playwright locally.",
   "main": "./dist/main.js",
   "scripts": {
-    "build": "tsc && node scripts/copy-renderer.mjs",
+    "build": "pnpm --filter @careeros/browser-agent build && tsc && node scripts/copy-renderer.mjs",
     "dev": "pnpm build && electron ./dist/main.js",
     "typecheck": "tsc --noEmit",
     "start": "electron ./dist/main.js",

@@ -32,6 +32,11 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      # Workspace packages expose compiled dist/ via package.json exports, so
+      # build them before vitest (Turbo does this locally; CI does not).
+      - name: Build workspace packages
+        run: pnpm -r --filter './packages/*' build
+
       # Root vitest run walks every workspace via the shared config.
       # Must stay green: all 325+ tests pass or the PR is blocked.
       - name: Run vitest
@@ -64,6 +69,11 @@ jobs:
       # resurface hundreds of phantom `Prisma.*` errors in tsc.
       - name: Generate Prisma client
         run: pnpm --filter @careeros/api exec prisma generate
+
+      # Build workspace packages first: their dependents' typecheck resolves
+      # deps from dist/ (Turbo builds dependencies locally; CI does not).
+      - name: Build workspace packages
+        run: pnpm -r --filter './packages/*' build
 
       - name: Typecheck
         run: pnpm -r typecheck
@@ -117,6 +127,9 @@ jobs:
         with:
           path: ~/.cache/testcontainers
           key: testcontainers-${{ runner.os }}-v1
+
+      - name: Build workspace packages
+        run: pnpm -r --filter './packages/*' build
 
       - name: Run integration tests
         env:
