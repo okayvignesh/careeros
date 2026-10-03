@@ -72,6 +72,13 @@ export class GmailController {
       throw new BadRequestException('oauth state mismatch');
     }
     const result = await this.gmail.finishOAuth(sealed.userId, code);
+    // A browser returns from Google via a top-level GET (Accept: text/html);
+    // send it back to the web UI so the operator sees a page, not raw JSON.
+    // API clients keep the existing JSON shape.
+    if (wantsHtml(req)) {
+      res.redirect(302, webRedirect('/settings/integrations?connected=gmail'));
+      return;
+    }
     res.status(200).json({
       historyId: result.historyId,
       expiration: result.expiration.toISOString(),
@@ -110,4 +117,14 @@ function escapeHtml(s: string): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+function wantsHtml(req: Request): boolean {
+  return req.headers.accept?.includes('text/html') ?? false;
+}
+
+// Relative when WEB_URL is unset (api + web share an origin behind nginx in
+// production); absolute when set (local dev / split origins).
+function webRedirect(path: string): string {
+  return `${process.env.WEB_URL ?? ''}${path}`;
 }

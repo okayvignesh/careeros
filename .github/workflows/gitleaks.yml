@@ -20,8 +20,10 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          # PR + push: shallow is fine. Scheduled: fetch full history.
-          fetch-depth: ${{ github.event_name == 'schedule' && '0' || '1' }}
+          # Full history: gitleaks-action derives a commit range and errors
+          # ("failed to scan Git repository: stderr is not empty") on shallow
+          # clones. The repo is small, so a full-history scan is cheap.
+          fetch-depth: 0
 
       - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
         env:

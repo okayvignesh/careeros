@@ -3,6 +3,7 @@
 // job is signature-verify + route + reply, all pure of transport concerns.
 import { HttpException } from '@nestjs/common';
 import { createHmac } from 'node:crypto';
+import type { Response } from 'express';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SessionService } from '../auth/session.service';
 import { SlackController } from './slack.controller';
@@ -272,5 +273,57 @@ describe('SlackController.oauthCallback', () => {
     await expect(ctrl.oauthCallback('code_123', state, fakeReq(''))).rejects.toMatchObject({
       status: 400,
     });
+  });
+});
+
+describe('SlackController.oauthCallbackBrowser', () => {
+  function fakeRes() {
+    return { redirect: vi.fn() } as unknown as Response & { redirect: ReturnType<typeof vi.fn> };
+  }
+
+  it('302s to the web settings page on a valid browser return', async () => {
+    process.env.WEB_URL = 'https://web.test';
+    const { ctrl, slack, oauth } = buildOauth('u-owner');
+    const state = await slack.createOAuthState('u-owner');
+    const res = fakeRes();
+    await ctrl.oauthCallbackBrowser('code_123', state, undefined, fakeReq(''), res);
+    expect(oauth.completeInstall).toHaveBeenCalledWith('code_123', OAUTH_REDIRECT);
+    expect(res.redirect).toHaveBeenCalledWith(
+      302,
+      'https://web.test/settings/integrations?connected=slack',
+    );
+  });
+
+  it('302s with error=slack when the state is invalid (no install call)', async () => {
+    process.env.WEB_URL = 'https://web.test';
+    const { ctrl, oauth } = buildOauth('u-owner');
+    const res = fakeRes();
+    await ctrl.oauthCallbackBrowser('code_123', 'bogus_state', undefined, fakeReq(''), res);
+    expect(oauth.completeInstall).not.toHaveBeenCalled();
+    expect(res.redirect).toHaveBeenCalledWith(
+      302,
+      'https://web.test/settings/integrations?error=slack',
+    );
+  });
+
+  it('302s with error=slack when Slack reports a denial', async () => {
+    process.env.WEB_URL = 'https://web.test';
+    const { ctrl, oauth } = buildOauth('u-owner');
+    const res = fakeRes();
+    await ctrl.oauthCallbackBrowser(undefined, undefined, 'access_denied', fakeReq(''), res);
+    expect(oauth.completeInstall).not.toHaveBeenCalled();
+    expect(res.redirect).toHaveBeenCalledWith(
+      302,
+      'https://web.test/settings/integrations?error=slack',
+    );
+  });
+
+  it('falls back to a relative redirect when WEB_URL is unset', async () => {
+    delete process.env.WEB_URL;
+    const { ctrl, slack } = buildOauth('u-owner');
+    const state = await slack.createOAuthState('u-owner');
+    const res = fakeRes();
+    await ctrl.oauthCallbackBrowser('code_123', state, undefined, fakeReq(''), res);
+    expect(res.redirect).toHaveBeenCalledWith(302, '/settings/integrations?connected=slack');
   });
 });

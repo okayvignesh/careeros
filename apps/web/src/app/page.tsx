@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { ArrowRight, FileCheck2, ShieldCheck, Sparkles } from 'lucide-react';
 import { Button, Eyebrow } from '@careeros/ui';
+import { BrandWordmark } from '@/components/Brand';
 
 const pillars = [
   {
@@ -25,9 +26,9 @@ export default function HomePage() {
     <main className="relative z-10 mx-auto grid min-h-screen w-full max-w-[1200px] grid-rows-[1fr_auto] gap-16 px-12 py-16 md:py-24">
       <section className="flex flex-col justify-center gap-10">
         <div className="flex items-center gap-3">
-          <span className="grid h-8 w-8 place-items-center rounded-[10px] border border-[hsl(var(--border-strong))] bg-[hsl(var(--bg-elev-2))]">
-            <span className="h-3 w-3 rounded-[3px] bg-[hsl(var(--accent))]" />
-          </span>
+          <Link href="/" aria-label="Career OS home" className="shrink-0">
+            <BrandWordmark alt="" className="h-7" />
+          </Link>
           <Eyebrow>Career OS · v0.0.1 · Self-hosted alpha</Eyebrow>
         </div>
 

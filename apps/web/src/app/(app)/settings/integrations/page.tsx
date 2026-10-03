@@ -1,6 +1,11 @@
 import { Eyebrow } from '@careeros/ui';
 import { IntegrationsPanel } from '@/components/settings/IntegrationsPanel';
 
+// IntegrationsPanel reads `?connected=` via useSearchParams(), so opt out of
+// prerender rather than adding a Suspense boundary (same pattern as
+// arena/knowledge/page.tsx).
+export const dynamic = 'force-dynamic';
+
 export default function IntegrationsPage() {
   return (
     <main className="mx-auto flex w-full max-w-[900px] flex-col gap-8 px-10 py-12">
@@ -10,7 +15,8 @@ export default function IntegrationsPage() {
           Integrations
         </h1>
         <p className="max-w-2xl text-[14px] leading-relaxed text-fg-muted">
-          Reauth, resync, and revoke connected services. Slack and Gmail land in P5.
+          Connect, reauth, resync, and revoke services. OAuth tokens are encrypted at rest with
+          AES-GCM and scoped to the least privilege each integration needs.
         </p>
       </header>
       <IntegrationsPanel />

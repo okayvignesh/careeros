@@ -61,11 +61,16 @@ Set these on the API service before the first OAuth flow:
 
 | Var | Where to find it | Notes |
 |---|---|---|
-| `GMAIL_CLIENT_ID` | OAuth credentials page | Required |
-| `GMAIL_CLIENT_SECRET` | OAuth credentials page | Required |
-| `GMAIL_REDIRECT_URI` | e.g. `https://<your-host>/integrations/gmail/oauth/callback` | Must match the OAuth client exactly |
+| `GMAIL_OAUTH_CLIENT_ID` | OAuth credentials page | Required |
+| `GMAIL_OAUTH_CLIENT_SECRET` | OAuth credentials page | Required |
+| `GMAIL_OAUTH_REDIRECT_URI` | e.g. `https://<your-host>/integrations/gmail/oauth/callback` | Must match the OAuth client exactly |
 | `GMAIL_PUBSUB_TOPIC` | `projects/<project-id>/topics/career-os-gmail` | Full resource name |
 | `GMAIL_PUBSUB_AUDIENCE` | Usually `https://<your-host>/webhooks/gmail/push` | JWT audience claim |
+
+These are the exact names `apps/api/src/modules/gmail/gmail.service.ts`
+(`readGmailEnv`) reads; all five are required together. Until they are set,
+`GET /integrations/gmail/oauth/start` returns HTTP 400
+`Gmail integration is not configured...`.
 
 ## 4. Connect your mailbox
 

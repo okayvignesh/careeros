@@ -1,12 +1,13 @@
 import Link from 'next/link';
 import { Eyebrow, Glass } from '@careeros/ui';
+import { BrandMark } from '@/components/Brand';
 import { SignInForm } from '@/components/forms/SignInForm';
 
 export default function SignInPage() {
   return (
     <main className="relative z-10 mx-auto flex min-h-screen w-full max-w-md flex-col justify-center gap-8 px-6 py-16">
       <div className="flex items-center gap-3">
-        <div className="h-6 w-6 rounded-md bg-[hsl(var(--accent))]" />
+        <BrandMark className="h-6 w-6" />
         <Eyebrow>Career OS · Sign in</Eyebrow>
       </div>
 

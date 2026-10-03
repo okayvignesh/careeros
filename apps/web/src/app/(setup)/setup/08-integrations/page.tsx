@@ -5,7 +5,7 @@ export default function Integrations() {
   return (
     <WizardStep
       slug="08-integrations"
-      description="Optional integrations you can add or revoke any time from Settings. GitHub and GitLab (public or self-hosted) are available today; Slack and Gmail land in P5."
+      description="Optional integrations you can add or revoke any time from Settings. GitHub, GitLab (public or self-hosted), Slack, and Gmail are all available today."
       ownContinue
     >
       <IntegrationsList />

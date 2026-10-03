@@ -9,3 +9,14 @@ body {
   position: relative;
   z-index: 1;
 }
+
+/* The wordmark export is drawn for light surfaces (dark lettering). In the
+ * default dark theme, invert + hue-rotate flips the lettering to white while
+ * bringing the indigo accents back to roughly their original hue. */
+.brand-wordmark {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+html.light .brand-wordmark {
+  filter: none;
+}

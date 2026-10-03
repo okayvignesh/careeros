@@ -22,11 +22,12 @@ import {
   Post,
   Query,
   Req,
+  Res,
 } from '@nestjs/common';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { SessionService } from '../auth/session.service';
 import { SlackService } from './slack.service';
-import { SlackOAuthService } from './slack.oauth';
+import { SlackOAuthService, type SlackOAuthResult } from './slack.oauth';
 import {
   dispatchSlash,
   type SlackSlashPayload,
@@ -145,11 +146,9 @@ export class SlackController {
   }
 
   /**
-   * OAuth completion. NOT signature-verified - the `code` proves possession.
-   * Defence is session + one-time server-issued `state`: the caller must be
-   * signed in, hold the state minted for that same user, and not have replayed
-   * it. `redirect_uri` is always the server-configured registered value; the
-   * query param is ignored so an attacker cannot redirect the code exchange.
+   * OAuth completion for API clients (JSON). NOT signature-verified - the
+   * `code` proves possession. Defence is session + one-time server-issued
+   * `state`: see `runOAuthCallback`.
    */
   @Post('oauth/callback')
   @HttpCode(200)
@@ -158,6 +157,54 @@ export class SlackController {
     @Query('state') state: string | undefined,
     @Req() req: Request,
   ): Promise<Record<string, unknown>> {
+    const result = await this.runOAuthCallback(code, state, req);
+    return { ok: true, team: { id: result.teamId, name: result.teamName }, scopes: result.scopes };
+  }
+
+  /**
+   * OAuth completion for the browser hop: Slack redirects the user's browser
+   * here with a top-level GET (`?code=...&state=...`). Same session + one-time
+   * state checks as the POST; on success we 302 to the web settings page
+   * (rather than handing a browser JSON), and on failure we land back there
+   * with `?error=slack` so the operator still sees a page.
+   */
+  @Get('oauth/callback')
+  async oauthCallbackBrowser(
+    @Query('code') code: string | undefined,
+    @Query('state') state: string | undefined,
+    @Query('error') error: string | undefined,
+    @Req() req: Request,
+    @Res() res: Response,
+  ): Promise<void> {
+    if (error) {
+      res.redirect(302, this.webRedirect('/settings/integrations?error=slack'));
+      return;
+    }
+    try {
+      await this.runOAuthCallback(code, state, req);
+    } catch (e) {
+      this.logger.warn(`slack oauth callback rejected: ${(e as Error).message}`);
+      res.redirect(302, this.webRedirect('/settings/integrations?error=slack'));
+      return;
+    }
+    res.redirect(302, this.webRedirect('/settings/integrations?connected=slack'));
+  }
+
+  // ---- privates ----
+
+  /**
+   * Shared OAuth completion. NOT signature-verified - the `code` proves
+   * possession. Defence is session + one-time server-issued `state`: the
+   * caller must be signed in, hold the state minted for that same user, and
+   * not have replayed it. `redirect_uri` is always the server-configured
+   * registered value; a caller-supplied value is ignored so an attacker
+   * cannot redirect the code exchange.
+   */
+  private async runOAuthCallback(
+    code: string | undefined,
+    state: string | undefined,
+    req: Request,
+  ): Promise<SlackOAuthResult> {
     if (!code) throw new BadRequestException('missing code');
     if (!state) throw new BadRequestException('missing state');
     const session = this.session.read(req);
@@ -166,11 +213,14 @@ export class SlackController {
     if (!redirectUri) throw new BadRequestException('missing redirect_uri');
     const valid = await this.slack.consumeOAuthState(state, session.userId);
     if (!valid) throw new BadRequestException('oauth state mismatch');
-    const result = await this.oauth.completeInstall(code, redirectUri);
-    return { ok: true, team: { id: result.teamId, name: result.teamName }, scopes: result.scopes };
+    return this.oauth.completeInstall(code, redirectUri);
   }
 
-  // ---- privates ----
+  // Relative when WEB_URL is unset (api + web share an origin behind nginx in
+  // production); absolute when set (local dev / split origins).
+  private webRedirect(path: string): string {
+    return `${process.env.WEB_URL ?? ''}${path}`;
+  }
 
   /**
    * Verify signature FIRST. Any failure throws an HttpException; no downstream

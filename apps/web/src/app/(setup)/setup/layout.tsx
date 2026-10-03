@@ -1,5 +1,6 @@
 import { SetupProgressBar, PageReveal } from '@careeros/ui';
 import { SETUP_STEPS, SETUP_SECTIONS } from '@careeros/shared/constants';
+import { BrandMark } from '@/components/Brand';
 
 export default function SetupLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -10,9 +11,7 @@ export default function SetupLayout({ children }: { children: React.ReactNode })
         basePath="/setup"
         brand={
           <>
-            <span className="grid h-8 w-8 place-items-center rounded-[9px] border border-[hsl(var(--border-strong))] bg-[hsl(var(--bg-elev-2))]">
-              <span className="h-3 w-3 rounded-[3px] bg-[hsl(var(--accent))]" />
-            </span>
+            <BrandMark className="h-7 w-7" />
             <span className="text-[13.5px] font-semibold tracking-tight text-fg">Career OS</span>
           </>
         }

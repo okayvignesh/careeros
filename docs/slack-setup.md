@@ -59,7 +59,8 @@ daily-brief block. If Slack shows `dispatch_failed`, check the API logs for
 | `POST /webhooks/slack/interactive` | Block Kit button + menu callbacks. |
 | `POST /webhooks/slack/commands` | The seven slash commands. |
 | `GET /webhooks/slack/oauth/start` | Auth-required. Mints a one-time OAuth `state`, returns the Slack authorize URL. |
-| `POST /webhooks/slack/oauth/callback` | OAuth completion. Requires session + matching, unexpired, one-time `state`. |
+| `GET /webhooks/slack/oauth/callback` | Browser OAuth return from Slack. Same session + matching, unexpired, one-time `state` checks; on success 302s to `/settings/integrations?connected=slack`, on failure to `?error=slack`. |
+| `POST /webhooks/slack/oauth/callback` | OAuth completion for API clients (JSON). Same checks. |
 
 ## 6. Security notes
 

@@ -40,3 +40,8 @@ jobs:
       - uses: github/codeql-action/analyze@1190a975f95ce23525efb6a3fc21ea29567c1b52 # v3
         with:
           category: /language:${{ matrix.language }}
+          # SARIF upload requires GitHub code scanning, which on private repos
+          # needs GitHub Advanced Security. Skip the upload while private so the
+          # job doesn't fail with "Code scanning is not enabled"; results publish
+          # automatically once the repo is public (or GHAS is enabled).
+          upload: ${{ github.event.repository.private && 'never' || 'always' }}

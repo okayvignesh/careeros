@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowRight, CheckCircle2, Github, Gitlab, Mail, MessageSquare, Slash } from 'lucide-react';
+import { ArrowRight, CheckCircle2, Github, Gitlab, Mail, MessageSquare } from 'lucide-react';
 import { ThinkingOrb } from 'thinking-orbs';
 import { motion } from 'framer-motion';
 import { Button } from '@careeros/ui';
@@ -17,10 +17,10 @@ interface Integration {
 }
 
 const CATALOG = [
-  { kind: 'github' as const, icon: Github, name: 'GitHub', body: 'Repository + commit analysis', status: 'available' },
-  { kind: 'gitlab' as const, icon: Gitlab, name: 'GitLab', body: 'Public or self-hosted merge-request analysis', status: 'available' },
-  { kind: 'slack' as const, icon: MessageSquare, name: 'Slack', body: 'Daily brief + slash commands', status: 'coming-later' },
-  { kind: 'gmail' as const, icon: Mail, name: 'Gmail', body: 'Recruiter mail + alert parsing', status: 'coming-later' },
+  { kind: 'github' as const, icon: Github, name: 'GitHub', body: 'Repository + commit analysis' },
+  { kind: 'gitlab' as const, icon: Gitlab, name: 'GitLab', body: 'Public or self-hosted merge-request analysis' },
+  { kind: 'slack' as const, icon: MessageSquare, name: 'Slack', body: 'Daily brief + slash commands' },
+  { kind: 'gmail' as const, icon: Mail, name: 'Gmail', body: 'Recruiter mail + alert parsing' },
 ];
 
 export function IntegrationsList() {
@@ -61,9 +61,8 @@ export function IntegrationsList() {
   return (
     <div className="flex flex-col gap-5">
       <div className="panel divide-y divide-[hsl(var(--border))]">
-        {CATALOG.map(({ kind, icon: Icon, name, body, status: cat }, i) => {
+        {CATALOG.map(({ kind, icon: Icon, name, body }, i) => {
           const connected = status(kind);
-          const isFuture = cat === 'coming-later';
           return (
             <motion.div
               key={kind}
@@ -75,11 +74,7 @@ export function IntegrationsList() {
               <div className="flex items-center gap-3">
                 <Icon
                   className={
-                    connected
-                      ? 'h-4 w-4 text-[hsl(var(--accent))]'
-                      : isFuture
-                        ? 'h-4 w-4 text-fg-faint'
-                        : 'h-4 w-4 text-fg-subtle'
+                    connected ? 'h-4 w-4 text-[hsl(var(--accent))]' : 'h-4 w-4 text-fg-subtle'
                   }
                   strokeWidth={1.8}
                 />
@@ -92,11 +87,6 @@ export function IntegrationsList() {
                 <span className="inline-flex items-center gap-1.5 text-[12.5px] font-medium text-[hsl(var(--success))]">
                   <CheckCircle2 className="h-3.5 w-3.5" strokeWidth={2} />
                   Connected
-                </span>
-              ) : isFuture ? (
-                <span className="inline-flex items-center gap-1.5 text-[12.5px] font-medium text-fg-faint">
-                  <Slash className="h-3.5 w-3.5" strokeWidth={1.8} />
-                  Available in P5
                 </span>
               ) : (
                 <Link
