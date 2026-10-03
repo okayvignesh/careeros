@@ -42,7 +42,30 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build desktop package
-        env:
-          # electron-builder uses GH_TOKEN to upload release artifacts.
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: pnpm --filter @careeros/desktop release
+        # Build only. electron-builder's own GitHub publisher targets
+        # `v${version}`; this workflow releases under the `desktop-v*` tag, so
+        # we attach the artifacts to that tag's release below instead.
+        run: pnpm --filter @careeros/desktop exec electron-builder --config electron-builder.yml --publish never
+
+      - name: Attach artifacts to the release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Career OS Agent ${{ github.ref_name }} (unsigned)
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: false
+          files: |
+            apps/desktop/release/*.dmg
+            apps/desktop/release/*.zip
+            apps/desktop/release/*.exe
+            apps/desktop/release/*.AppImage
+            apps/desktop/release/*.blockmap
+            apps/desktop/release/latest*.yml
+          body: |
+            Unsigned desktop agent built from `${{ github.sha }}`.
+
+            - **macOS:** right-click the app → Open, or
+              `xattr -dr com.apple.quarantine "/Applications/Career OS Agent.app"`.
+            - **Windows:** SmartScreen → More info → Run anyway.
+            - **Linux:** AppImage is executable directly (`chmod +x`).
