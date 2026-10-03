@@ -104,8 +104,11 @@ restore_postgres() {
 
   log INFO "postgres restore db=$PGDATABASE"
   # --clean --if-exists drops objects before restore; --no-owner keeps this
-  # portable across environments where the restore role differs.
-  pg_restore --clean --if-exists --no-owner -d "$PGDATABASE" "$dump" \
+  # portable across environments where the restore role differs. --no-acl skips
+  # GRANT/REVOKE: roles are cluster-level (not in pg_dump), so restoring into a
+  # fresh cluster would otherwise fail on "role ... does not exist". The app's
+  # migrations recreate its roles/grants.
+  pg_restore --clean --if-exists --no-owner --no-acl -d "$PGDATABASE" "$dump" \
     || die "pg_restore failed for $dump"
 
   local rows
