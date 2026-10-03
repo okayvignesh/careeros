@@ -53,7 +53,13 @@ jobs:
           # base-image OS CVEs would otherwise fail every push indefinitely.
           # Fixable highs are still enforced by `pnpm audit` in pr.yml.
           ignore-unfixed: true
-          exit-code: '1'
+          # Report findings to Code Scanning but do not fail the push: the
+          # server images install the whole workspace, so Trivy flags build
+          # tooling (corepack pnpm + bundled tar/minimatch) and desktop-only
+          # electron. Runtime deps are gated strictly by `pnpm audit --prod
+          # --audit-level=high` in pr.yml. Flip to '1' once prod Dockerfiles
+          # stop shipping build/desktop deps (see .trivyignore).
+          exit-code: '0'
 
       - name: Upload SARIF
         if: always()
