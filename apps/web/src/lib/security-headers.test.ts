@@ -4,16 +4,18 @@ import { HSTS_VALUE, STATIC_SECURITY_HEADERS, buildCsp } from './security-header
 afterEach(() => vi.unstubAllEnvs());
 
 describe('buildCsp', () => {
-  it('is nonce-based with no inline/eval scripts in production', () => {
+  it('allows same-origin + inline scripts and no eval in production', () => {
     vi.stubEnv('NODE_ENV', 'production');
     const csp = buildCsp('abc123', 'https://api.example.test');
     expect(csp).toContain("default-src 'self'");
-    expect(csp).toContain("'nonce-abc123'");
     expect(csp).toContain("frame-ancestors 'none'");
     expect(csp).toContain('https://api.example.test');
 
     const scriptSrc = /script-src[^;]*/.exec(csp)?.[0] ?? '';
-    expect(scriptSrc).not.toContain("'unsafe-inline'");
+    // Static Next output needs inline bootstrap scripts (nonces can't be
+    // applied to prerendered pages); eval must never be allowed in production.
+    expect(scriptSrc).toContain("'self'");
+    expect(scriptSrc).toContain("'unsafe-inline'");
     expect(scriptSrc).not.toContain("'unsafe-eval'");
   });
 

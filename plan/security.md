@@ -77,6 +77,7 @@ Cross-cutting security requirements for an open-source, self-hostable developer 
 
 **Acceptance criteria:**
 - [x] `Content-Security-Policy`: nonce-based, no `unsafe-inline` in production, no `unsafe-eval`, explicit `default-src 'self'`, `frame-ancestors 'none'`. Config lives in exported `buildSecurityMiddleware()` at `apps/api/src/main.ts:34-80` (per-request nonce middleware + helmet CSP directives at :40-56); regression at `apps/api/src/main.test.ts` imports that same factory and asserts unsafe-inline is absent and the nonce is stamped (A-H2).
+  - **Web tier note (2026-10-03):** the Next.js tier's CSP (`apps/web/src/lib/security-headers.ts`) uses `script-src 'self' 'unsafe-inline'` with no nonce, because Next statically prerenders pages and a per-request nonce does not reach the inline bootstrap/flight scripts — a nonce-only (or `strict-dynamic`) policy blocked `/_next/static/chunks/*.js` and the inline bootstrap, so the app never hydrated in production. The API tier keeps the strict nonce-based policy. Revisit with dynamic rendering + a nonce/hash if XSS hardening is prioritized.
 - [x] `Strict-Transport-Security: max-age=63072000; includeSubDomains; preload`. `apps/api/src/main.ts:60-64`.
 - [x] `X-Frame-Options: DENY`. helmet default (helmet imported at `apps/api/src/main.ts:5`, invoked at :39); complemented by explicit `frame-ancestors 'none'` at :52 for modern browsers.
 - [x] `X-Content-Type-Options: nosniff`. helmet default (helmet import at `apps/api/src/main.ts:5`, call at :39).
