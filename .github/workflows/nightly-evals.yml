@@ -50,6 +50,11 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      # Workspace packages expose compiled dist/; build before evals so
+      # `@careeros/shared` (and the runner) resolve.
+      - name: Build workspace packages
+        run: pnpm -r --filter './packages/*' build
+
       # Runs the real eval target. continue-on-error lets artifact emission +
       # drift computation finish even when a suite goes red; the final Gate
       # step turns a non-zero exit back into a failed job.

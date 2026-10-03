@@ -45,6 +45,11 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      # Workspace packages expose compiled dist/; build before the contract
+      # tests so `@careeros/shared` resolves (Turbo did this locally).
+      - name: Build workspace packages
+        run: pnpm -r --filter './packages/*' build
+
       - name: Run contract tests
         id: run
         continue-on-error: true
