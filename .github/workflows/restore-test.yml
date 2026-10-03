@@ -90,16 +90,16 @@ jobs:
         if: steps.preflight.outputs.skip != 'true'
         run: |
           {
-            echo "PGHOST=localhost"
+            echo "PGHOST=127.0.0.1"
             echo "PGPORT=5432"
             echo "PGUSER=${POSTGRES_USER}"
             echo "PGPASSWORD=${POSTGRES_PASSWORD}"
             echo "PGDATABASE=${POSTGRES_DB}"
-            echo "PGURL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:5432/${POSTGRES_DB}"
-            echo "DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:5432/${POSTGRES_DB}?schema=public"
-            echo "REDIS_URL=redis://localhost:6379"
-            echo "QDRANT_URL=http://localhost:6333"
-            echo "MINIO_ENDPOINT=localhost"
+            echo "PGURL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:5432/${POSTGRES_DB}"
+            echo "DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:5432/${POSTGRES_DB}?schema=public"
+            echo "REDIS_URL=redis://127.0.0.1:6379"
+            echo "QDRANT_URL=http://127.0.0.1:6333"
+            echo "MINIO_ENDPOINT=127.0.0.1"
             echo "MINIO_PORT=9000"
             echo "MINIO_USE_SSL=false"
             echo "MINIO_ACCESS_KEY=${MINIO_ROOT_USER}"
@@ -135,10 +135,10 @@ jobs:
         if: steps.preflight.outputs.skip != 'true'
         run: |
           for i in $(seq 1 30); do
-            docker compose --env-file .env \
-              -f infra/docker/docker-compose.yml \
-              -f infra/docker/docker-compose.host-dev.yml \
-              exec -T postgres pg_isready -U "$POSTGRES_USER" && exit 0
+            # Check the host-published port (127.0.0.1), which is what the restore
+            # script + API use; `exec pg_isready` checks the container socket and
+            # can pass before the published port accepts.
+            pg_isready -h 127.0.0.1 -p 5432 -U "$POSTGRES_USER" && exit 0
             sleep 2
           done
           echo "postgres did not become ready" >&2
@@ -215,10 +215,7 @@ jobs:
         if: steps.preflight.outputs.skip != 'true'
         run: |
           for i in $(seq 1 30); do
-            docker compose --env-file .env \
-              -f infra/docker/docker-compose.yml \
-              -f infra/docker/docker-compose.host-dev.yml \
-              exec -T postgres pg_isready -U "$POSTGRES_USER" && exit 0
+            pg_isready -h 127.0.0.1 -p 5432 -U "$POSTGRES_USER" && exit 0
             sleep 2
           done
           echo "postgres did not become ready after wipe" >&2
