@@ -1,9 +1,14 @@
 # C-P0.5b: weekly backup-restore verification.
 # Owning specs: testing.md test-type 7, release-process.md operator guarantees.
 #
-# Runs Monday 03:00 UTC + on demand. Spins the stack, backs up seeded
-# fixtures, wipes volumes, restores into a fresh Postgres + MinIO,
-# asserts row-count parity via scripts/verify-restore-parity.sh.
+# Runs Monday 03:00 UTC + on demand. Real round-trip on GitHub-hosted runners:
+#   migrate + seed fixtures -> snapshot row counts -> encrypted backup ->
+#   wrong-key negative test -> wipe volumes -> fresh datastores -> restore ->
+#   boot API -> assert setup_state=complete -> row-count parity.
+#
+# No repo secret is required: the age keypair is generated ephemerally in-job,
+# so the round-trip is not gated behind an operator secret. It skips (loudly,
+# never silently) only when Docker or the scripts/fixtures are unavailable.
 name: Restore Test
 
 on:
@@ -11,11 +16,23 @@ on:
     - cron: '0 3 * * 1'
   workflow_dispatch:
 
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: restore-test
+  cancel-in-progress: false
+
 jobs:
   restore:
     name: backup + restore round-trip
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      BACKUP_DIR: /tmp/careeros-backup
+      MANIFEST_PATH: /tmp/parity.manifest
+      LOG_FILE: /tmp/careeros-restore.log
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -31,43 +48,261 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      - name: Prepare env file
+      # Never a silent no-op: if prerequisites are absent we emit a warning and
+      # a SKIPPED summary line; the round-trip steps are all gated on skip=false.
+      - name: Preflight
+        id: preflight
         run: |
-          # Deterministic secrets for the CI-only stack. Never used outside CI.
-          cat > .env <<'EOF'
-          POSTGRES_PASSWORD=ci_only_do_not_reuse
-          MINIO_ROOT_USER=ci_minio_root
-          MINIO_ROOT_PASSWORD=ci_only_minio_password
-          SESSION_SECRET=0000000000000000000000000000000000000000000000000000000000000000
-          MASTER_KEY_HEX=1111111111111111111111111111111111111111111111111111111111111111
-          BACKUP_AGE_RECIPIENT_KEY=ci-placeholder
-          EOF
-
-      # TODO(C-P0.8): the scripts (backup.sh, restore.sh, seed-test.ts) now exist;
-      # the round-trip stays gated until its acceptance is signed off. To enable,
-      # drop the guarded block and run them in order:
-      #   1. docker compose ... up -d db redis minio
-      #   2. pnpm --filter @careeros/api prisma migrate deploy
-      #   3. pnpm seed:test
-      #   4. scripts/manifest.sh > /tmp/parity.manifest    # snapshot row counts
-      #   5. scripts/backup.sh /tmp/backup                 # write encrypted bundle
-      #   6. docker compose ... down -v                    # wipe volumes
-      #   7. docker compose ... up -d db redis minio
-      #   8. scripts/restore.sh /tmp/backup                # rehydrate
-      #   9. PGURL=... MANIFEST_PATH=/tmp/parity.manifest scripts/verify-restore-parity.sh
-      #  10. Negative test: scripts/restore.sh with wrong age key must exit non-zero
-      - name: Backup + restore (skipped until C-P0.8 lands)
-        run: |
-          if [[ -x scripts/backup.sh && -x scripts/restore.sh ]]; then
-            echo "backup/restore scripts present but wiring not yet enabled." >&2
-            echo "TODO: enable full round-trip once C-P0.8 acceptance is signed off." >&2
+          missing=""
+          for f in scripts/backup.sh scripts/restore.sh scripts/verify-restore-parity.sh scripts/manifest.sh scripts/seed-test.ts; do
+            [ -f "$f" ] || missing="$missing $f"
+          done
+          if [ -n "$missing" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::restore round-trip skipped — missing fixture/scripts:$missing"
             exit 0
           fi
-          echo "scripts/backup.sh + scripts/restore.sh not yet in tree (C-P0.8 pending)."
-          echo "Skipping round-trip; verifier helper still lints below."
+          if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::restore round-trip skipped — Docker unavailable on this runner"
+            exit 0
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
 
-      - name: Lint parity verifier
-        run: bash -n scripts/verify-restore-parity.sh
+      - name: Generate CI secrets + compose env
+        if: steps.preflight.outputs.skip != 'true'
+        run: |
+          {
+            echo "NODE_ENV=development"
+            echo "POSTGRES_USER=careeros"
+            echo "POSTGRES_DB=careeros"
+            echo "POSTGRES_PASSWORD=$(openssl rand -hex 32)"
+            echo "MINIO_ROOT_USER=careeros"
+            echo "MINIO_ROOT_PASSWORD=$(openssl rand -hex 32)"
+            echo "MINIO_BUCKET=careeros"
+            echo "ENCRYPTION_KEY=$(openssl rand -hex 32)"
+            echo "SESSION_SECRET=$(openssl rand -hex 32)"
+          } > /tmp/ci.env
+          cat /tmp/ci.env >> "$GITHUB_ENV"
+          cp /tmp/ci.env .env
+
+      - name: Export host connection env
+        if: steps.preflight.outputs.skip != 'true'
+        run: |
+          {
+            echo "PGHOST=localhost"
+            echo "PGPORT=5432"
+            echo "PGUSER=${POSTGRES_USER}"
+            echo "PGPASSWORD=${POSTGRES_PASSWORD}"
+            echo "PGDATABASE=${POSTGRES_DB}"
+            echo "PGURL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:5432/${POSTGRES_DB}"
+            echo "DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:5432/${POSTGRES_DB}?schema=public"
+            echo "REDIS_URL=redis://localhost:6379"
+            echo "QDRANT_URL=http://localhost:6333"
+            echo "MINIO_ENDPOINT=localhost"
+            echo "MINIO_PORT=9000"
+            echo "MINIO_USE_SSL=false"
+            echo "MINIO_ACCESS_KEY=${MINIO_ROOT_USER}"
+            echo "MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD}"
+            echo "MINIO_BUCKET=careeros"
+            echo "MC_ALIAS=minio"
+            echo "MC_BUCKET=careeros"
+            echo "API_PORT=3001"
+            echo "API_URL=http://localhost:3001"
+            echo "WEB_URL=http://localhost:3000"
+            echo "TRUSTED_ORIGINS=http://localhost:3000"
+          } >> "$GITHUB_ENV"
+
+      # age for encryption; postgresql-client-16 must match the postgres:16
+      # server or pg_restore rejects the dump; mc is MinIO's client.
+      - name: Install age + postgresql-client-16 + mc
+        if: steps.preflight.outputs.skip != 'true'
+        run: |
+          sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/pgdg.gpg
+          sudo apt-get update
+          sudo apt-get install -y age postgresql-client-16
+          curl -fsSL https://dl.min.io/client/mc/release/linux-amd64/mc -o /tmp/mc
+          sudo install -m 0755 /tmp/mc /usr/local/bin/mc
+          age --version
+          psql --version
+
+      - name: Start datastores
+        if: steps.preflight.outputs.skip != 'true'
+        run: pnpm docker:infra
+
+      - name: Wait for Postgres
+        if: steps.preflight.outputs.skip != 'true'
+        run: |
+          for i in $(seq 1 30); do
+            docker compose --env-file .env \
+              -f infra/docker/docker-compose.yml \
+              -f infra/docker/docker-compose.host-dev.yml \
+              exec -T postgres pg_isready -U "$POSTGRES_USER" && exit 0
+            sleep 2
+          done
+          echo "postgres did not become ready" >&2
+          exit 1
+
+      - name: Build API
+        if: steps.preflight.outputs.skip != 'true'
+        run: pnpm exec turbo run build --filter=@careeros/api
+
+      - name: Migrate + seed deterministic fixtures
+        if: steps.preflight.outputs.skip != 'true'
+        run: |
+          pnpm --filter @careeros/api exec prisma migrate deploy
+          pnpm seed:test
+
+      - name: Snapshot pre-backup row counts
+        if: steps.preflight.outputs.skip != 'true'
+        run: bash scripts/manifest.sh "$MANIFEST_PATH"
+
+      - name: Prepare MinIO bucket
+        if: steps.preflight.outputs.skip != 'true'
+        run: |
+          mc alias set "$MC_ALIAS" "http://localhost:9000" "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" --api S3v4
+          mc mb --ignore-existing "$MC_ALIAS/$MC_BUCKET"
+
+      - name: Generate age key + encrypted test backup
+        if: steps.preflight.outputs.skip != 'true'
+        run: |
+          age-keygen -o /tmp/age-key.txt 2>/dev/null
+          AGE_RECIPIENT=$(age-keygen -y /tmp/age-key.txt)
+          echo "AGE_RECIPIENT=$AGE_RECIPIENT" >> "$GITHUB_ENV"
+          mkdir -p "$BACKUP_DIR"
+          AGE_RECIPIENT="$AGE_RECIPIENT" BACKUP_DIR="$BACKUP_DIR" \
+            PGDATABASE="$PGDATABASE" bash scripts/backup.sh
+          PG_FILE=$(find "$BACKUP_DIR" -name 'postgres-*.dump.age' -print -quit)
+          MINIO_FILE=$(find "$BACKUP_DIR" -name 'minio-*.tar.gz.age' -print -quit)
+          [ -n "$PG_FILE" ] || { echo "::error::no postgres backup produced"; exit 1; }
+          [ -n "$MINIO_FILE" ] || { echo "::error::no minio backup produced"; exit 1; }
+          echo "PG_FILE=$PG_FILE" >> "$GITHUB_ENV"
+          echo "MINIO_FILE=$MINIO_FILE" >> "$GITHUB_ENV"
+
+      - name: Negative test — wrong age key fails cleanly
+        id: negative
+        if: steps.preflight.outputs.skip != 'true'
+        run: |
+          age-keygen -o /tmp/wrong-key.txt 2>/dev/null
+          set +e
+          LOG_FILE=/tmp/negative-test.log bash scripts/restore.sh \
+            --age-key /tmp/wrong-key.txt --postgres "$PG_FILE" 2>/tmp/negative-test.err
+          code=$?
+          set -e
+          if [ "$code" -eq 0 ]; then
+            echo "::error::restore.sh with a wrong age key exited 0 (expected non-zero)"
+            exit 1
+          fi
+          if ! grep -qiE 'age|decrypt|identity' /tmp/negative-test.err; then
+            echo "::warning::wrong-key failure did not mention age/decrypt; stderr:"
+            cat /tmp/negative-test.err || true
+          fi
+          echo "negative test ok: wrong age key exited $code"
+
+      - name: Wipe volumes
+        if: steps.preflight.outputs.skip != 'true'
+        run: |
+          docker compose --env-file .env \
+            -f infra/docker/docker-compose.yml \
+            -f infra/docker/docker-compose.host-dev.yml down -v
+
+      - name: Restart fresh datastores
+        if: steps.preflight.outputs.skip != 'true'
+        run: pnpm docker:infra
+
+      - name: Wait for fresh Postgres
+        if: steps.preflight.outputs.skip != 'true'
+        run: |
+          for i in $(seq 1 30); do
+            docker compose --env-file .env \
+              -f infra/docker/docker-compose.yml \
+              -f infra/docker/docker-compose.host-dev.yml \
+              exec -T postgres pg_isready -U "$POSTGRES_USER" && exit 0
+            sleep 2
+          done
+          echo "postgres did not become ready after wipe" >&2
+          exit 1
+
+      - name: Recreate MinIO bucket
+        if: steps.preflight.outputs.skip != 'true'
+        run: mc mb --ignore-existing "$MC_ALIAS/$MC_BUCKET"
+
+      - name: Restore into fresh volumes
+        if: steps.preflight.outputs.skip != 'true'
+        run: bash scripts/restore.sh --age-key /tmp/age-key.txt --postgres "$PG_FILE" --minio "$MINIO_FILE"
+
+      - name: Boot API
+        id: boot
+        if: steps.preflight.outputs.skip != 'true'
+        run: |
+          nohup pnpm --filter @careeros/api start > /tmp/api.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:3001/health >/dev/null; then
+              echo "api is up"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::group::api.log"; tail -100 /tmp/api.log || true; echo "::endgroup::"
+          echo "api failed to start" >&2
+          exit 1
+
+      - name: Assert setup_state=complete
+        id: setup_state
+        if: steps.preflight.outputs.skip != 'true'
+        run: |
+          state=$(psql "$PGURL" -Atc "SELECT state FROM setup_state WHERE \"userId\" = '00000000-0000-4000-8000-000000000001';")
+          echo "setup_state=$state"
+          [ "$state" = "complete" ] || { echo "::error::expected setup_state=complete, got '$state'"; exit 1; }
+
+      - name: Verify row-count parity
+        id: parity
+        if: steps.preflight.outputs.skip != 'true'
+        run: bash scripts/verify-restore-parity.sh
+
+      - name: Teardown datastores
+        if: always() && steps.preflight.outputs.skip != 'true'
+        run: |
+          docker compose --env-file .env \
+            -f infra/docker/docker-compose.yml \
+            -f infra/docker/docker-compose.host-dev.yml down -v || true
+
+      - name: File restore-test failure issue
+        if: failure() && steps.preflight.outputs.skip != 'true'
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const title = 'Weekly backup/restore test failing';
+            const body = [
+              'The weekly backup → wipe → restore round-trip failed.',
+              '',
+              `Workflow run: ${runUrl}`,
+              '',
+              'Operators rely on "every backup is restorable — proven weekly" (testing.md test-type 7).',
+              'Do not assume backups are good until this is green.',
+            ].join('\n');
+            const { owner, repo } = context.repo;
+            const { data: open } = await github.rest.issues.listForRepo({
+              owner,
+              repo,
+              state: 'open',
+              labels: 'restore-test',
+              per_page: 20,
+            });
+            const existing = open.find((i) => i.title === title);
+            if (existing) {
+              await github.rest.issues.createComment({ owner, repo, issue_number: existing.number, body });
+            } else {
+              await github.rest.issues.create({
+                owner,
+                repo,
+                title,
+                body,
+                labels: ['restore-test', 'ops'],
+              });
+            }
 
       - name: Summary
         if: always()
@@ -75,7 +310,13 @@ jobs:
           {
             echo "## Restore test"
             echo ""
-            echo "- Status: ${{ job.status }}"
-            echo "- Backup/restore round-trip: gated on C-P0.8"
-            echo "- Parity helper: scripts/verify-restore-parity.sh"
+            if [ "${{ steps.preflight.outputs.skip }}" = "true" ]; then
+              echo "**SKIPPED** — prerequisites missing (this is not a pass)."
+            else
+              echo "- Job status: ${{ job.status }}"
+              echo "- Backup → wipe → restore → boot API: see steps above"
+              echo "- setup_state=complete: ${{ steps.setup_state.outcome }}"
+              echo "- Row-count parity: ${{ steps.parity.outcome }}"
+              echo "- Negative (wrong age key): ${{ steps.negative.outcome }}"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"

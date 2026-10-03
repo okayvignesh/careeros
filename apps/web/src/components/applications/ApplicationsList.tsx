@@ -86,7 +86,13 @@ export function ApplicationsList() {
         >
           <div className="flex flex-col gap-1 min-w-0">
             <div className="flex items-center gap-2 truncate text-[15px] font-medium text-fg">
-              <span className="truncate">{a.jobTitle ?? '(job removed)'}</span>
+              <Link
+                href={`/applications/${a.id}`}
+                className="truncate hover:text-[hsl(var(--accent))]"
+                data-testid="application-detail-link"
+              >
+                {a.jobTitle ?? '(job removed)'}
+              </Link>
               {a.jobCompany && <span className="text-fg-muted"> @ {a.jobCompany}</span>}
               {a.jobUrl && (
                 <a

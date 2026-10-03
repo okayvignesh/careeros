@@ -11,7 +11,12 @@
   { "name": "MinIO", "slug": "minio", "role": "Object storage", "version": "2024.10" },
   { "name": "Docker", "slug": "docker", "role": "Deployment", "version": "Compose v2" },
   { "name": "Electron", "slug": "electron", "role": "Desktop agent", "version": "31.3.1" },
+  { "name": "Expo", "slug": "expo", "role": "Mobile companion (React Native)", "version": "SDK 57" },
   { "name": "Playwright", "slug": "playwright", "role": "E2E & agent automation", "version": "1.63" },
   { "name": "DeepSeek", "slug": "deepseek", "role": "Default LLM provider", "version": "DeepSeek Chat / Reasoner" },
+  { "name": "OpenAI", "slug": "openai", "role": "OpenAI-compatible LLM provider", "version": "adapter" },
+  { "name": "Ollama", "slug": "ollama", "role": "Local LLM fallback", "version": "adapter" },
+  { "name": "Hugging Face", "slug": "huggingface", "role": "Local embeddings (bge-small-en-v1.5)", "version": "@xenova/transformers" },
+  { "name": "nginx", "slug": "nginx", "role": "TLS reverse proxy", "version": "alpine" },
   { "name": "Slack", "slug": "slack", "role": "Daily assistant channel", "version": "Web API 7" }
 ]

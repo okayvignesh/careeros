@@ -19,6 +19,13 @@ import {
 import { createDocsGate, createNonceInjector } from './openapi/docs.middleware';
 import { SessionService } from './modules/auth/session.service';
 import { runStartupChecks } from './startup-check';
+import {
+  captureException,
+  flushSentry,
+  initSentry,
+  sentryEnabled,
+  setupSentryExpressErrorHandler,
+} from './common/sentry';
 
 // A-H2: exported so main.test.ts can assert against the EXACT middleware chain
 // the process boots with, not an inline copy that drifts silently.
@@ -92,6 +99,9 @@ export function buildSecurityMiddleware(): RequestHandler[] {
 }
 
 async function bootstrap() {
+  // Error tracking first (no-op when SENTRY_DSN/GLITCHTIP_DSN is unset) so
+  // every later boot failure ships to GlitchTip with the git-SHA release tag.
+  initSentry();
   // A-H8/T6: Node global fetch ignores proxy env vars by default; install the
   // undici dispatcher BEFORE any outbound call so egress goes through Squid.
   // Fails closed if a proxy is configured but the agent cannot be built.
@@ -146,15 +156,24 @@ async function bootstrap() {
     customSiteTitle: 'Career OS API',
   });
 
+  // Registered after every route so Nest's exception layer bubbles unmatched
+  // errors here. No-op when Sentry is disabled.
+  setupSentryExpressErrorHandler(instance);
+
   const port = Number(process.env.API_PORT ?? 3001);
   await app.listen(port, '0.0.0.0');
 
-  app.get(Logger).log(`listening on :${port}  env=${process.env.NODE_ENV}`, 'Bootstrap');
+  app.get(Logger).log(
+    `listening on :${port}  env=${process.env.NODE_ENV}  sentry=${sentryEnabled() ? 'on' : 'off'}`,
+    'Bootstrap',
+  );
 }
 
 // Only auto-boot when executed as the entry (skip when imported by tests).
 if (require.main === module) {
-  bootstrap().catch((err) => {
+  bootstrap().catch(async (err) => {
+    captureException(err);
+    await flushSentry();
     // Boot failure: no logger yet, use stderr directly.
     // eslint-disable-next-line no-console
     console.error('[careeros-api] failed to start:', err);

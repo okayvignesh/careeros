@@ -6,9 +6,9 @@
 //   registry (via a caller-registered factory) and runs against real DeepSeek.
 //   Skipped when the registry is empty so CI never accidentally spends tokens.
 //
-// Also emits eval-results/junit.xml and eval-results/summary.json so
-// .github/workflows/nightly-evals.yml can upload them as artifacts and
-// (once wired) diff summary.json against a 7-day baseline for drift.
+// Writes an eval-results/parts/<suite>.json part file; global-setup.ts merges
+// all parts into junit.xml + summary.json, which .github/workflows/
+// nightly-evals.yml uploads and diffs against a 7-day baseline for drift.
 import { describe, it, expect, beforeAll } from 'vitest';
 import { resolve } from 'node:path';
 import { runSkillExtractEvals, SKILL_EXTRACT_FIXTURES } from './index';

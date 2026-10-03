@@ -7,6 +7,12 @@
 # stage for prod images when we split dev and prod Dockerfiles.
 FROM node:20-alpine
 
+# Release tag for error tracking: CI passes the git SHA as a build arg, which
+# `apps/api/src/common/sentry.ts` reports as the Sentry release. Defaults to
+# `unknown`, which the CLI treats as "no release".
+ARG GIT_SHA=unknown
+ENV GIT_SHA=$GIT_SHA
+
 RUN apk add --no-cache libc6-compat openssl wget age
 
 # Non-root UID 1001:1001 (matches the convention we already use for MinIO's

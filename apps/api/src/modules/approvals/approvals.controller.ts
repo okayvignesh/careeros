@@ -10,14 +10,19 @@ import {
   Post,
   Query,
   Req,
+  UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { PrismaService } from '../../prisma/prisma.service';
+import { clientIp } from '../../common/client-ip';
 import { RequireAdminGuard } from '../../common/guards/require-admin.guard';
+import { SensitivityGateService } from '../../common/sensitivity-gate.service';
+import { AuthService } from '../auth/auth.service';
 import { SessionService } from '../auth/session.service';
+import { RateLimitAuth } from '../auth/throttle.decorator';
 import { ApprovalsService } from './approvals.service';
-import { isApprovalKind } from './state-machine';
+import { APPROVAL_REAUTH_OP, isApprovalKind } from './state-machine';
 
 /**
  * F.1c: approvals REST surface. Session-guarded (all routes read
@@ -30,7 +35,35 @@ export class ApprovalsController {
     private readonly approvals: ApprovalsService,
     private readonly session: SessionService,
     private readonly prisma: PrismaService,
+    private readonly auth: AuthService,
+    private readonly gate: SensitivityGateService,
   ) {}
+
+  /**
+   * Re-verify the signed-in user's password to mint a fresh re-auth window for
+   * `approval.decide`. The approve() path reads the same singleton gate, so a
+   * successful call here is what turns a 403 "Fresh re-authentication required"
+   * into an approvable item. Reuses the password lockout + tight rate limit so
+   * this can't become a credential oracle.
+   */
+  @Post('reauth')
+  @HttpCode(200)
+  @RateLimitAuth()
+  async reauth(@Body() body: { password?: string }, @Req() req: Request) {
+    const userId = this.session.requireUserId(req);
+    const password = body?.password;
+    if (typeof password !== 'string' || password.length === 0) {
+      throw new BadRequestException('password is required');
+    }
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true },
+    });
+    if (!user) throw new UnauthorizedException('Not signed in');
+    await this.auth.verifyCredentialsWithLockout(user.email, password, clientIp(req));
+    const { expiresAt } = this.gate.withReauthWindow(userId, APPROVAL_REAUTH_OP);
+    return { expiresAt };
+  }
 
   @Get()
   async list(

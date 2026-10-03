@@ -1,10 +1,15 @@
 # C-P0.5c: nightly LLM eval suite + drift alerting.
-# Owning specs: ai-safety.md item 5, testing.md test-type 4.
+# Owning specs: ai-safety.md item 5, testing.md test-type 4 (§5 "CI wiring").
 #
-# No eval-runner package script exists yet (grep for eval:ai / test:evals in
-# package.json returns nothing). packages/ai/src/evals/runner.ts is present
-# but not wired to a workspace target. When a runner target lands, drop the
-# guard in the "Run evals" step.
+# Runs `pnpm --filter @careeros/ai test:evals` for real, writes junit.xml +
+# summary.json, compares the case pass rate to the average of the previous 7
+# days of `eval-summary` artifacts, and opens/updates a tracking issue when the
+# drop exceeds 5 percentage points (testing.md §5 threshold).
+#
+# Mode is honest: with DEEPSEEK_API_KEY set the suite runs live (setup.live.ts
+# registers a real provider); without it the suite runs EVAL_MOCK=1 and both
+# the summary and the job surface say "mock" — a mock pass never claims to
+# validate model quality.
 name: Nightly Evals
 
 on:
@@ -12,11 +17,24 @@ on:
     - cron: '0 2 * * *'
   workflow_dispatch:
 
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+concurrency:
+  group: nightly-evals
+  cancel-in-progress: false
+
 jobs:
   evals:
     name: LLM eval suite
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      EVAL_OUT_DIR: ${{ github.workspace }}/eval-results
+      # ponytail: temperature pin for determinism (testing.md §5).
+      EVAL_TEMPERATURE: '0'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -32,95 +50,168 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      # TODO(C-P0.2 / packages/ai): register an `eval:ai` script (or
-      # `pnpm --filter @careeros/ai test:evals`) that emits JUnit XML to
-      # ./eval-results/junit.xml. Until then this step short-circuits with
-      # exit 0 so the cron does not spam failure noise while the runner is
-      # under construction.
+      # Runs the real eval target. continue-on-error lets artifact emission +
+      # drift computation finish even when a suite goes red; the final Gate
+      # step turns a non-zero exit back into a failed job.
       - name: Run evals
         id: run
         continue-on-error: true
         env:
-          # ponytail: temperature pin for determinism (testing.md §5).
-          # Real provider keys injected via repo secrets once the runner
-          # supports cached-response mode.
-          EVAL_TEMPERATURE: '0'
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
-          mkdir -p eval-results
-          if pnpm run --filter @careeros/ai --if-present test:evals; then
-            echo "ran=true" >> "$GITHUB_OUTPUT"
+          rm -rf "$EVAL_OUT_DIR"; mkdir -p "$EVAL_OUT_DIR"
+          if [ -n "${DEEPSEEK_API_KEY:-}" ]; then
+            export EVAL_LIVE=1
+            echo "requested=live" >> "$GITHUB_OUTPUT"
           else
-            echo "eval runner not yet registered (test:evals script missing)." >&2
-            echo "TODO: enable once packages/ai/src/evals/runner.ts is wired to a workspace target." >&2
-            echo "ran=false" >> "$GITHUB_OUTPUT"
-            # Emit a placeholder JUnit doc so the artifact upload has something.
-            cat > eval-results/junit.xml <<'EOF'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <testsuites name="careeros-evals" tests="0" failures="0" skipped="1">
-            <testsuite name="placeholder" tests="0" skipped="1">
-              <testcase name="runner-not-registered" classname="ci">
-                <skipped message="test:evals script not yet registered"/>
-              </testcase>
-            </testsuite>
-          </testsuites>
-          EOF
+            export EVAL_MOCK=1
+            echo "requested=mock" >> "$GITHUB_OUTPUT"
+            echo "::warning::DEEPSEEK_API_KEY absent — running EVAL_MOCK=1. Results are synthetic and do not validate model quality."
           fi
+          set +e
+          pnpm --filter @careeros/ai test:evals
+          code=$?
+          set -e
+          echo "exit=$code" >> "$GITHUB_OUTPUT"
+          # The recorded mode reflects whether a live provider actually
+          # registered, not just which env flag was requested.
+          if [ -f "$EVAL_OUT_DIR/summary.json" ]; then
+            mode=$(node -e "process.stdout.write(require(process.env.EVAL_OUT_DIR+'/summary.json').mode||'mock')")
+          else
+            mode=unknown
+          fi
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          exit 0
 
-      - name: Upload JUnit artifact
+      - name: Assert eval artifacts exist
+        run: |
+          test -f "$EVAL_OUT_DIR/summary.json" || { echo "::error::summary.json missing — runner produced no result"; exit 1; }
+          test -f "$EVAL_OUT_DIR/junit.xml" || { echo "::error::junit.xml missing — runner produced no result"; exit 1; }
+
+      # Pull prior nightly `eval-summary` artifacts from the last 7 days so the
+      # drift step compares against a real rolling baseline. Tolerant of no
+      # history (first runs) and transient API errors.
+      - name: Collect 7-day baseline
+        id: baseline
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p eval-baseline
+          cutoff=$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts?name=eval-summary&per_page=100" \
+            --jq ".artifacts[] | select(.created_at >= \"$cutoff\") | select(.workflow_run.id != ${{ github.run_id }}) | .workflow_run.id" \
+            2>/dev/null | sort -u | while read -r run_id; do
+              [ -z "$run_id" ] && continue
+              gh run download "$run_id" -n eval-summary -D "eval-baseline/$run_id" >/dev/null 2>&1 || true
+            done
+          count=$(find eval-baseline -name summary.json | wc -l | tr -d ' ')
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "baseline runs available: $count"
+
+      # Produces eval-results/drift.json from the current + baseline summaries.
+      - name: Compute drift vs 7-day baseline
+        env:
+          CURRENT_SUMMARY: ${{ github.workspace }}/eval-results/summary.json
+          BASELINE_DIR: ${{ github.workspace }}/eval-baseline
+          OUT_PATH: ${{ github.workspace }}/eval-results/drift.json
+          THRESHOLD: '0.05'
+        run: node scripts/eval-drift.mjs
+
+      - name: Assert drift artifact exists
+        run: test -f "$EVAL_OUT_DIR/drift.json" || { echo "::error::drift.json missing — drift step did not run"; exit 1; }
+
+      - name: File or update drift issue
+        if: always()
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = `${process.env.EVAL_OUT_DIR}/drift.json`;
+            if (!fs.existsSync(path)) {
+              core.warning('drift.json missing; skipping issue update');
+              return;
+            }
+            const d = JSON.parse(fs.readFileSync(path, 'utf8'));
+            if (!d.regressed) {
+              core.notice(`no eval regression (delta ${(d.delta * 100).toFixed(1)}pp, baseline runs ${d.baseline.runs})`);
+              return;
+            }
+            const pct = (v) => (v == null ? 'n/a' : `${(v * 100).toFixed(1)}%`);
+            const modeLabel = d.mode === 'live' ? 'live provider' : 'MOCK (no provider key)';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const title = 'LLM eval pass-rate regression (>5% vs 7-day baseline)';
+            const body = [
+              'The nightly eval suite reported a pass-rate drop beyond the 5pp threshold.',
+              '',
+              `- Mode: **${modeLabel}**`,
+              `- Current pass rate: **${pct(d.current.passRate)}** (${d.current.passed}/${d.current.total})`,
+              `- 7-day baseline: **${pct(d.baseline.passRate)}** over ${d.baseline.runs} run(s)`,
+              `- Delta: **${(d.delta * 100).toFixed(1)}pp**`,
+              `- Workflow run: ${runUrl}`,
+              '',
+              'See testing.md test-type 4 and ai-safety.md item 5.',
+            ].join('\n');
+            const { owner, repo } = context.repo;
+            const { data: open } = await github.rest.issues.listForRepo({
+              owner,
+              repo,
+              state: 'open',
+              labels: 'eval-drift',
+              per_page: 20,
+            });
+            const existing = open.find((i) => i.title === title);
+            if (existing) {
+              await github.rest.issues.createComment({ owner, repo, issue_number: existing.number, body });
+              core.notice(`updated eval drift issue #${existing.number}`);
+            } else {
+              const created = await github.rest.issues.create({
+                owner,
+                repo,
+                title,
+                body,
+                labels: ['eval-drift', 'ai-safety'],
+              });
+              core.notice(`opened eval drift issue #${created.data.number}`);
+            }
+
+      - name: Upload eval results
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: eval-junit
+          name: eval-summary
           path: eval-results/
           if-no-files-found: warn
           retention-days: 30
 
-      # Drift alerting: when the runner writes eval-results/drift.json with
-      # {"regressed": true, "delta": <float>}, open a tracking issue.
-      # testing.md §5 threshold: pass-rate drop > 5% vs 7-day baseline.
-      - name: Check drift
-        if: steps.run.outputs.ran == 'true'
-        id: drift
+      # Regression + real failures fail the job; a missing baseline does not.
+      - name: Gate
+        if: always()
         run: |
-          if [[ -f eval-results/drift.json ]]; then
-            regressed=$(node -e "try{const d=require('./eval-results/drift.json');process.stdout.write(String(d.regressed===true))}catch(e){process.stdout.write('false')}")
-            delta=$(node -e "try{const d=require('./eval-results/drift.json');process.stdout.write(String(d.delta||0))}catch(e){process.stdout.write('0')}")
-            echo "regressed=${regressed}" >> "$GITHUB_OUTPUT"
-            echo "delta=${delta}" >> "$GITHUB_OUTPUT"
-          else
-            echo "regressed=false" >> "$GITHUB_OUTPUT"
-            echo "delta=0" >> "$GITHUB_OUTPUT"
+          exit_code='${{ steps.run.outputs.exit }}'
+          regressed=$(node -e "try{const d=require(process.env.EVAL_OUT_DIR+'/drift.json');process.stdout.write(String(d.regressed===true))}catch(e){process.stdout.write('false')}")
+          if [ -z "$exit_code" ] || [ "$exit_code" != "0" ]; then
+            echo "::error::eval suite exited ${exit_code:-unknown}"
+            exit 1
           fi
-
-      - name: File drift issue
-        if: steps.drift.outputs.regressed == 'true'
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
-        with:
-          script: |
-            const delta = '${{ steps.drift.outputs.delta }}';
-            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: `LLM eval drift detected (delta ${delta})`,
-              body: [
-                'Nightly eval suite reported a pass-rate regression beyond the 5% threshold.',
-                '',
-                `Delta vs 7-day baseline: **${delta}**`,
-                `Workflow run: ${runUrl}`,
-                '',
-                'See testing.md test-type 4 and ai-safety.md item 5.'
-              ].join('\n'),
-              labels: ['eval-drift', 'ai-safety']
-            });
+          if [ "$regressed" = "true" ]; then
+            echo "::error::eval pass rate regressed beyond threshold (see drift.json)"
+            exit 1
+          fi
+          echo "evals ok"
 
       - name: Summary
         if: always()
         run: |
+          mode='${{ steps.run.outputs.mode }}'
           {
             echo "## Nightly evals"
             echo ""
-            echo "- Runner registered: ${{ steps.run.outputs.ran }}"
-            echo "- Drift regression: ${{ steps.drift.outputs.regressed || 'n/a' }}"
-            echo "- Delta: ${{ steps.drift.outputs.delta || 'n/a' }}"
+            echo "- Mode: **${mode:-unknown}** (requested: ${{ steps.run.outputs.requested }})"
+            if [ "${mode:-unknown}" = "mock" ]; then
+              echo "  - \`mock\` = synthetic stub run; **does not validate model quality**."
+            fi
+            echo "- Eval exit: ${{ steps.run.outputs.exit }}"
+            echo "- Baseline runs (7d): ${{ steps.baseline.outputs.count }}"
+            node -e "const d=require(process.env.EVAL_OUT_DIR+'/drift.json');console.log('- Current pass rate: '+(d.current.passRate*100).toFixed(1)+'% ('+d.current.passed+'/'+d.current.total+')');console.log('- Baseline pass rate: '+(d.baseline.passRate==null?'n/a':(d.baseline.passRate*100).toFixed(1)+'%'));console.log('- Delta: '+(d.delta*100).toFixed(1)+'pp');console.log('- Regressed: '+d.regressed+' ('+d.reason+')');" || true
           } >> "$GITHUB_STEP_SUMMARY"

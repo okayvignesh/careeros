@@ -1,12 +1,14 @@
 ---
-commit: dead1a4
-generated: 2026-10-02
+commit: d31dead
+generated: 2026-10-03
 scope: plain-language product overview
 ---
 
 # Career OS — Product Overview
 
 A plain-language guide to what Career OS is, what it does, and how it is built. No technical background needed.
+
+> Career OS is **free and open-source software**, released under the **GNU AGPL-3.0-or-later** license. You can run it, read its code, and modify it.
 
 ## What Career OS is
 
@@ -27,7 +29,8 @@ It is not a public website, not a recruiting product, and not something your emp
 - **Watches the job market.** It collects job listings from reputable sources, cleans and de-duplicates them, checks how fresh they are, and matches them to your real skills, so you see the roles that genuinely fit. It can also discover postings on public company career sites and job boards (including Workday and other major applicant-tracking systems) using a managed web-crawling service, always respecting each site's published rules and only for public pages.
 - **Helps you apply.** It can prepare resumes and cover letters tailored to a specific job, but only by rephrasing facts you have already confirmed. Anything it cannot back up is blocked before you ever see it.
 - **Keeps you organized.** It tracks each application through every stage, reminds you what needs doing, and follows up on replies.
-- **Reaches you where you are.** It can send a daily summary and take simple commands through Slack, and it reads job-related email to keep your application tracker up to date.
+- **Reaches you where you are.** It can send a daily summary and take simple commands through Slack, read job-related email to keep your application tracker up to date, and offer a **free companion mobile app** (iOS and Android) showing your daily brief, matched jobs, and pending approvals on the go.
+- **Works on desktop too.** A small companion program for your own computer lets you review devices, pair the desktop agent, and run job-site browsing from your own logged-in session.
 
 ## How people use it
 
@@ -40,9 +43,9 @@ It is not a public website, not a recruiting product, and not something your emp
 
 ## How it is built (in general terms)
 
-Career OS is a self-contained application. You run a web interface that you open in your browser, backed by a secure database that stores your information, plus background helpers that fetch and organize job data. For public company career pages and job boards, it uses a managed crawling service and direct adapters that honor each site's rules and rate limits; sites that forbid automated access are not crawled. A small companion program you install on your own computer can, with your permission, browse job sites using your own logged-in session, which avoids the legal and ethical problems of mass-scraping those sites from a server.
+Career OS is a self-contained application. You run a web interface that you open in your browser, backed by a secure database that stores your information, plus background helpers that fetch and organize job data. A companion mobile app (Expo/React Native, iOS and Android) reads the same data from your server, and a small desktop program can browse job sites using your own logged-in session, with your permission. For public company career pages and job boards, it uses a managed crawling service and direct adapters that honor each site's rules and rate limits; sites that forbid automated access are not crawled. It is free and open-source software (AGPL-3.0-or-later), so the whole system is inspectable and self-hostable.
 
-It is designed to be provider-agnostic for artificial intelligence: the intelligence layer is a replaceable component, so the system can work with different AI providers instead of being tied to one.
+It is designed to be provider-agnostic for artificial intelligence: the intelligence layer is a replaceable component, so the system can work with different AI providers instead of being tied to one. It ships with a sensible default and can fall back to a locally run model if your preferred service is unavailable.
 
 ## Trust and privacy
 
@@ -59,4 +62,4 @@ It is designed to be provider-agnostic for artificial intelligence: the intellig
 - **Rules and roadmap:** see `AGENTS.md` and `plan/PLAN.md`.
 - **Security posture:** see `SECURITY.md` and `plan/security.md`.
 
-> Current state: Career OS is an early alpha, under active development. Some features described above are partially built and clearly marked as such in the technical documents. Treat this overview as the intended product, and the engineering knowledge base as the accurate picture of what exists today.
+> Current state: Career OS is an early alpha, under active development. Some features described above are partially built and clearly marked as such in the technical documents. The mobile app is read-only for now (no push or offline support yet). Treat this overview as the intended product, and the engineering knowledge base as the accurate picture of what exists today.

@@ -102,13 +102,13 @@ Never installed: Jest (Vitest replaces), Cypress (Playwright replaces), Mocha/Ch
 See §5 for the full pattern.
 
 **Acceptance:**
-- [ ] `packages/ai/evals/<prompt_id>/examples.json` + `evaluator.ts`
-- [ ] 20+ examples per critical prompt (skill-extract, fact-check, injection-scan, resume-tailor, question-generator, assessment-grader)
-- [ ] Assertions are structural + property-based, never exact-string
-- [ ] `pnpm eval:ai` runs full suite; `pnpm eval:ai --prompt=skill-extract` runs one
-- [ ] CI: on change to `packages/ai/prompts/` or `packages/ai/agents/` → run affected evals; block on regression
-- [ ] Nightly: full suite; alert if pass rate drops > 5% vs 7-day baseline
-- [ ] Response cached by prompt hash to avoid hammering paid providers in CI
+- [x] Fixtures + judge live in TS under `packages/ai/src/evals/<prompt>/` (`fixtures.ts` + `judge.ts`), not `examples.json`/`evaluator.ts` — the TS shape is what landed (C-P1.4c skill-extract 24 fixtures, C-P4.7e fact-check 15).
+- [ ] 20+ examples per critical prompt (skill-extract ✅ 24, fact-check ✅ 15; injection-scan / resume-tailor / question-generator / assessment-grader still open)
+- [x] Assertions are structural + property-based, never exact-string (judges score F1/precision/recall + kept/dropped counts, per `judge.ts`).
+- [ ] `pnpm eval:ai` — the suite runs via `pnpm --filter @careeros/ai test:evals`; a root `eval:ai` alias and a `--prompt=` filter are still open.
+- [ ] CI: on change to `packages/ai/prompts/` or `packages/ai/agents/` → run affected evals; block on regression. Not wired into `pr.yml` yet.
+- [x] Nightly (`.github/workflows/nightly-evals.yml`): runs the full eval suite, merges per-suite parts into `junit.xml` + `summary.json`, compares the case pass rate to the previous 7 days of `eval-summary` artifacts, and opens/updates an issue when the drop exceeds 5pp. With no `DEEPSEEK_API_KEY` it runs `EVAL_MOCK=1` and marks the result **mock** (synthetic — does not validate model quality), never a fake live pass.
+- [ ] Response cached by prompt hash to avoid hammering paid providers in CI.
 
 ### 5. Contract tests (external adapters)
 **What:** each `JobSourceAdapter`, LLM provider adapter, ATS adapter, Slack/Gmail integration verified against recorded fixtures. Fixtures re-recorded periodically to catch upstream API drift.
@@ -136,12 +136,12 @@ See §5 for the full pattern.
 **What:** weekly job restores latest backup into fresh volumes and boots the stack, verifies parity.
 
 **Acceptance:**
-- [x] `.github/workflows/restore-test.yml` — weekly cron (Mondays 03:00 UTC, C-P0.5b). Round-trip body is still gated on the seed-test/manifest wiring; see the TODO block at lines 46-57 for the concrete steps.
-- [ ] Fresh Docker volumes → `scripts/restore.sh` with test backup → `docker compose up -d`
-- [ ] Assert `setup_state = complete`
-- [ ] Assert row counts match snapshot manifest
-- [ ] Assert `age` encryption failed cleanly with wrong key (negative test)
-- [ ] Fail → GitHub issue auto-filed
+- [x] `.github/workflows/restore-test.yml` — weekly cron (Mondays 03:00 UTC, C-P0.5b). Real round-trip: migrate + `seed:test` → `scripts/manifest.sh` snapshots row counts → `scripts/backup.sh` writes an age-encrypted dump with an ephemeral in-job key → wipe volumes (`down -v`) → fresh datastores → `scripts/restore.sh` rehydrates → boot API. No repo secret required; skips loudly (never silently) only when Docker/scripts are unavailable.
+- [x] Fresh Docker volumes → `scripts/restore.sh` with test backup → `docker compose up -d`
+- [x] Assert `setup_state = complete` (queries `setup_state` for the seeded user after boot)
+- [x] Assert row counts match snapshot manifest (`scripts/verify-restore-parity.sh`)
+- [x] Assert `age` encryption failed cleanly with wrong key (negative test; `restore.sh` now dies explicitly on decrypt failure instead of falling through)
+- [x] Fail → GitHub issue auto-filed (search-or-create on the `restore-test` label)
 
 ### 8. Sandbox security tests
 **What:** P2 code sandbox limits enforced. Memory bomb killed. Network blocked. Fork bomb killed. Timeout respected.
@@ -240,13 +240,17 @@ packages/ai/evals/skill-extract/
 
 - On PR touching `packages/ai/prompts/` OR `packages/ai/agents/`:
   - Determine affected prompts (via import graph)
-  - Run `pnpm eval:ai --prompts=<list>` against **cached responses** (keyed by prompt hash)
+  - Run affected evals against **cached responses** (keyed by prompt hash)
   - If any cached response missing → hit real API once, cache
   - Block merge on regression
-- Nightly against real APIs:
-  - Full suite against DeepSeek + Ollama fallback
-  - Write results to `eval_results` table
-  - Alert if pass rate drops > 5% vs 7-day baseline
+  - **Status:** not wired in `pr.yml` yet.
+- Nightly (`.github/workflows/nightly-evals.yml`):
+  - Runs `pnpm --filter @careeros/ai test:evals` (skill-extract + fact-check; 39 eval cases today)
+  - Suites write per-suite part files; the vitest global setup merges them into `junit.xml` + `summary.json` so all suites land (not just the last one to finish)
+  - Baseline = average pass rate of `eval-summary` artifacts from the previous 7 days, downloaded via the Actions artifacts API; `scripts/eval-drift.mjs` computes the delta and writes `drift.json`
+  - Alert (issue, label `eval-drift`) and fail the job if the drop exceeds 5pp
+  - `DEEPSEEK_API_KEY` set → live provider (`setup.live.ts` registers it); absent → `EVAL_MOCK=1`, and the summary/JUnit/job label the run **mock** so a synthetic pass never masquerades as model validation
+  - Deferred vs the original spec: writing to an `eval_results` table and the DeepSeek + Ollama fallback matrix; baseline is artifact-based, not DB-based
 
 ### Low-temperature settings
 
@@ -336,7 +340,7 @@ On tag:
 pnpm test              # unit + integration (fast feedback)
 pnpm test:watch        # Vitest watch mode
 pnpm test:e2e:ui       # Playwright UI mode (best for e2e work)
-pnpm eval:ai           # LLM evals (needs provider key)
+pnpm test:evals        # LLM evals (EVAL_MOCK=1 by default; export DEEPSEEK_API_KEY + EVAL_LIVE=1 for a real run)
 pnpm test:visual --update-snapshots  # accept baseline changes
 pnpm test:a11y         # a11y checks only
 pnpm fixtures:record   # re-record adapter fixtures (needs real creds)

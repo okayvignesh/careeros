@@ -1,12 +1,12 @@
 ---
-commit: dead1a4
-generated: 2026-10-02
+commit: d31dead
+generated: 2026-10-03
 scope: external APIs, data stores, secrets and observability
 ---
 
 # External Integrations
 
-Career OS integrates with LLM, code-host, job-source, messaging, and email systems — all behind a deny-by-default egress proxy. Datastores run on a private Docker network.
+Career OS integrates with LLM, code-host, job-source, messaging, and email systems — all behind a deny-by-default egress proxy. Datastores run on a private Docker network, and nginx is the single public TLS entrypoint.
 
 ## Core Sections (Required)
 
@@ -14,7 +14,9 @@ Career OS integrates with LLM, code-host, job-source, messaging, and email syste
 
 | System | Type | Purpose | Auth model | Criticality | Evidence |
 |--------|------|---------|------------|-------------|----------|
-| DeepSeek API | HTTP (OpenAI-compatible) | Primary LLM: skill extract, grading, resume/cover-letter, market brief, dossier, email classify | Per-install API key, encrypted at rest | High | `packages/ai/src/providers/deepseek.ts`, `packages/ai/src/pricing.ts` |
+| DeepSeek API | HTTP (OpenAI-compatible) | Default LLM: skill extract, grading, resume/cover-letter, market brief, dossier, email classify | Per-install API key, encrypted at rest | High | `packages/ai/src/providers/deepseek.ts`, `packages/ai/src/pricing.ts` |
+| OpenAI / OpenRouter / any OpenAI-compatible | HTTP | Alternate/backup LLM providers via one `openai-compatible.ts` adapter | Encrypted API key + optional per-user base URL (SSRF-gated) | Medium | `packages/ai/src/providers/openai-compatible.ts`, `create.ts` |
+| Ollama (local) | HTTP (`/api/chat`) | Last-resort local LLM fallback; never leaves the host | Local endpoint, no key | Low | `packages/ai/src/providers/ollama.ts` |
 | GitHub | REST (Octokit) | Repo list + sync, commit analysis for skill evidence | PAT (OAuth optional); scope-gated to `repo`/`public_repo`/`read:user`/`user:email` | High | `apps/worker/src/github-sync.ts`, `apps/api/src/modules/integrations/github/github.service.ts` |
 | GitLab | REST | Public + self-hosted repo sync (PAT) | PAT + per-user host allowlist via `assertPublicUrl` | Medium | `apps/worker/src/gitlab-sync.ts`, `packages/shared/src/net/assert-public-url.ts` |
 | Ashby / Greenhouse | ATS REST | Verified job source (highest trust tier) + ATS submission | Public boards (no auth); submission via API later | High | `packages/job-pipeline/src/adapters/`, `apps/api/src/modules/ats-submit/adapters/` |
@@ -27,16 +29,19 @@ Career OS integrates with LLM, code-host, job-source, messaging, and email syste
 | Qdrant | Vector DB | Semantic search over verified/user content | Private network, no public auth in MVP | Medium | `packages/embeddings/src/qdrant.ts` |
 | MinIO | Object storage | Resumes, generated artifacts, agent screenshots | Root credentials + per-user signed URLs | High | `apps/api/src/common/storage.service.ts`, `infra/docker/docker-compose.yml` |
 | Squid | Forward proxy | Deny-by-default egress allowlist | Network policy | High | `infra/docker/squid/squid.conf` |
-| GlitchTip | Error tracking (Sentry-compatible) | Self-hosted error capture | DSN (planned wiring) | Low | `plan/observability.md`; `[TODO]` not in compose yet |
-| Desktop agent | WSS | Server→laptop task execution, pairing | Device-code pairing → JWT + refresh, OS keychain | Medium | `apps/desktop/src/wss-client.ts`, `apps/api/src/modules/agent/` |
+| nginx | Reverse proxy + TLS | Public entrypoint: terminates TLS, ACME HTTP-01, routes `/`→web, `/api/*`→api (prefix stripped) | Network policy; self-signed or Let's Encrypt cert | High | `infra/nginx/nginx.conf`, `infra/nginx/templates/careeros.conf.template` |
+| certbot | ACME client | Renews issued Let's Encrypt certs every 12h into the shared volume | `ACME_EMAIL`; operator issues first cert | Medium | `infra/docker/docker-compose.yml` (certbot service) |
+| GlitchTip | Error tracking (Sentry-compatible) | Self-hosted error capture (all-in-one, profile `ops`/`observability`) | `SENTRY_DSN`/`GLITCHTIP_DSN`; blank = SDK no-op | Low | `apps/api/src/common/sentry.ts`, `apps/worker/src/sentry.ts`, `docs/observability.md`, `infra/docker/docker-compose.yml` |
+| whisper.cpp | Local speech-to-text HTTP server | P2 verbal defense + P6 talk-track transcription (profile `speech`) | Private network via `WHISPER_URL`; blank = client inert | Medium | `packages/stt/`, `infra/docker/Dockerfile.whisper`, `docs/stt.md` |
+| Desktop / mobile clients | WSS + REST | Desktop agent pairing/execution; mobile read-only companion | Device-code pairing → JWT + refresh; `expo-secure-store`/keychain | Medium | `apps/desktop/src/wss-client.ts`, `apps/mobile/src/lib/auth.tsx`, `apps/api/src/modules/{agent,mobile}/` |
 
 ### 2) Data Stores
 
 | Store | Role | Access layer | Key risk | Evidence |
 |-------|------|--------------|----------|----------|
-| Postgres 16 | System of record (55 models, 39 migrations, append-only `jobs_raw`/`audit_events`/`llm_calls`) | Prisma 6 (`apps/api`, `apps/worker`, `@careeros/aggregator`) | AppConfig not yet user-scoped (multitenant TODO) | `apps/api/prisma/schema.prisma`, `apps/api/package.json`, `apps/worker/package.json`, `packages/aggregator/package.json` |
+| Postgres 16 | System of record (56 models, 40 migrations, append-only `jobs_raw`/`audit_events`/`llm_calls`/`llm_injection_log`) | Prisma 6 (`apps/api`, `apps/worker`, `@careeros/aggregator`) | AppConfig not yet user-scoped (multitenant TODO) | `apps/api/prisma/schema.prisma`, `apps/api/package.json`, `apps/worker/package.json`, `packages/aggregator/package.json` |
 | Redis 7 | BullMQ queues, throttler store, cache | `ioredis`, BullMQ | Queue loss if Redis down (documented degradation) | `apps/worker/src/main.ts`, `apps/api/src/modules/auth/auth.module.ts` |
-| Qdrant | Vector index (semantic content) | `@qdrant/js-client-rest` via `QdrantStore` | Embeddings are a placeholder today | `packages/embeddings/src/local.ts`, `src/qdrant.ts` |
+| Qdrant | Vector index (semantic content) | `@qdrant/js-client-rest` via `QdrantStore` | Vectors are semantic when `EMBEDDING_MODE=local` and weights are available; pre-switch vectors are deterministic and need re-embedding | `packages/embeddings/src/{provider.ts,qdrant.ts}`, `apps/worker/src/embedding-job.ts` |
 | MinIO | Files (resumes, PDFs, screenshots) | `minio` SDK wrapped in `StorageService` | Credentials must be strong; presign TTL 5 min | `apps/api/src/common/storage.service.ts` |
 | Local filesystem (agent) | Playwright profile, screenshots, logs | `keytar`, `fs` | Screenshot/log retention bounded to 30d/10MB/14d | `apps/desktop/src/screenshot-cleanup.ts`, `log-rotation.ts` |
 
@@ -44,7 +49,7 @@ Career OS integrates with LLM, code-host, job-source, messaging, and email syste
 
 - **Credential sources:** environment variables for boot/master secrets (`ENCRYPTION_KEY`, `SESSION_SECRET`, datastore passwords) and AES-256-GCM-encrypted DB rows for per-integration secrets (`EncryptedSecret`, `Integration`, `ProviderConfig`). Master key must be 64-char hex or 44-char base64 (`packages/secrets/src/master-key.ts`); field encryption uses HKDF subkeys with AAD context (`packages/secrets/src/field.ts`).
 - **Hardcoding checks:** `.gitleaks.toml` + `gitleaks.yml` CI + lefthook pre-commit; `startup-check.ts` refuses known-weak values (`careeros`, `minioadmin`, `changeme`, …) and <24-byte datastore creds.
-- **Rotation lifecycle:** master `ENCRYPTION_KEY` rotation flow is described (`docs/architecture.md` §6) as decrypt-all → re-encrypt-all with fresh re-auth; not yet proven by an end-to-end test. OAuth tokens stored encrypted; GitHub PAT scope validation rejects over-broad/`admin:*` scopes (`github.service.ts:55`).
+- **Rotation lifecycle:** master `ENCRYPTION_KEY` rotation is **implemented** (Wave C). `POST /me/security/rotate-key` (session + fresh re-auth via `SensitivityGateService.hasFreshReauth`) runs `MasterKeyRotationService`, which walks every `encrypted_secrets` row and every `enc:v1:`-prefixed `ENCRYPTED_FIELDS` value one transaction per row using the pure, idempotent `rotateMasterKey` primitive (`packages/secrets/src/rotation.ts`). It stops at the first row neither key can decrypt and reports `{scanned, rotated, alreadyRotated, skippedPlaintext, failed, failure}` without ever returning ciphertext; re-running resumes. On success the operator updates `ENCRYPTION_KEY` and restarts (the endpoint never writes env). OAuth tokens stored encrypted; GitHub PAT scope validation rejects over-broad/`admin:*` scopes (`github.service.ts:55`).
 
 ### 4) Reliability and Failure Behavior
 
@@ -57,16 +62,17 @@ Career OS integrates with LLM, code-host, job-source, messaging, and email syste
 ### 5) Observability for Integrations
 
 - **Logging around external calls:** yes — `pino`, with `provider`/`model`/`prompt_id`/`prompt_hash`/`job_id`/`duration_ms` context (`plan/observability.md`).
-- **Metrics:** `prom-client` `/metrics` on api + worker, including `llm_*`, `queue_*`, `jobs_*`, `agent_*`, and auth counters. `[TODO]` worker `/metrics` wiring and GlitchTip service are not yet present in `docker-compose.yml`.
-- **Per-call LLM audit is now wired:** `makeLlmAuditor` (`apps/api/src/common/llm-audit.ts`) is passed into `DeepSeekProvider` via `ProviderLoaderService`, so each provider call writes one `llm_calls` row (tokens, cost estimate, latency) and emits metrics; ledger-write failures log a warn rather than disappearing. Remaining gaps: no tracing in MVP (interface reserved); no GlitchTip compose service; tokenizer/pricing coverage still maturing (`plan/ai-safety.md` item 9).
+- **Metrics:** `prom-client` `/metrics` on api + worker, including `llm_*`, `queue_*`, `jobs_*`, `agent_*`, and auth counters. `[TODO]` worker `/metrics` wiring is still pending; the GlitchTip error-tracking service and `whisper.cpp` speech service now exist in `docker-compose.yml` (profiles `ops`/`observability` and `speech`).
+- **Per-call LLM + injection audit are wired:** `makeLlmAuditor` (`apps/api/src/common/llm-audit.ts`) is passed into the provider via `ProviderLoaderService`, so each call writes one `LlmCall` (`llm_calls`: prompt id/hash, sensitivity, tokens — `js-tiktoken` pre-flight estimate + provider `usage` — cost split, latency, validation verdict) through a bounded drop-loudly queue and emits metrics. `InjectionAuditModule` installs wrap/scan hooks so every suspect/blocked hit also writes one `LlmInjectionLog` (`llm_injection_log`). Remaining gaps: no tracing in MVP (interface reserved); worker `/metrics` not wired; tokenizer/pricing coverage still maturing (`plan/ai-safety.md` item 9).
 
 ### 6) Evidence
 
-- `packages/ai/src/providers/deepseek.ts`, `packages/ai/src/pricing.ts`, `apps/api/src/common/llm-audit.ts`
+- `packages/ai/src/providers/`, `packages/ai/src/pricing.ts`, `apps/api/src/common/{llm-audit.ts,injection-log.ts}`, `packages/ai/src/tokenize.ts`
 - `packages/job-pipeline/src/adapters/`, `packages/firecrawl/src/client.ts`, `packages/email-parsers/src/senders/allowlist.ts`, `docs/job-sources.md`
-- `apps/api/src/modules/integrations/`, `apps/api/src/modules/{slack,gmail,agent}/`
-- `infra/docker/docker-compose.yml`, `infra/docker/squid/squid.conf`, `scripts/smoke/egress.sh`, `infra/slack/manifest.yml`
-- `.env.example`, `packages/secrets/src/`, `packages/shared/src/net/{assert-public-url,proxy-dispatcher}.ts`
+- `apps/api/src/modules/integrations/`, `apps/api/src/modules/{slack,gmail,agent,mobile}/`
+- `infra/docker/docker-compose.yml`, `infra/nginx/`, `infra/docker/Dockerfile.backup`, `infra/docker/squid/squid.conf`, `scripts/smoke/egress.sh`, `infra/slack/manifest.yml`
+- `.env.example`, `packages/secrets/src/` (incl. `rotation.ts`), `apps/api/src/modules/me/master-key-rotation.service.ts`, `packages/shared/src/net/{assert-public-url,proxy-dispatcher}.ts`
+- `packages/embeddings/src/provider.ts`, `apps/worker/src/embedding-job.ts`
 - `plan/security.md` items 4, 6, 8, 10; `plan/observability.md`; `docs/architecture.md` §2, §7, §8
 
 ## Extended Sections
@@ -75,11 +81,12 @@ Career OS integrates with LLM, code-host, job-source, messaging, and email syste
 
 ```mermaid
 flowchart LR
-    Internet((Internet)) -->|443| Reverse["Reverse proxy / TLS [TODO: infra/nginx absent]"]
+    Internet((Internet)) -->|443| Nginx["nginx (TLS, ACME) :80/:443"]
 
     subgraph compose["Docker Compose: careeros"]
-        Reverse --> Web["web :3000"]
-        Web --> API["api :3001"]
+        Nginx --> Web["web :3000"]
+        Nginx --> API["api :3001"]
+        Web --> API
         API --> Internal
         Worker["worker"] --> Internal
         API --> Squid["squid :3128"]
@@ -89,9 +96,11 @@ flowchart LR
         Internal --> Redis[("redis :6379")]
         Internal --> Qdrant[("qdrant :6333")]
         Internal --> MinIO[("minio :9000")]
+        Certbot["certbot (renew 12h)"] -.-> Nginx
     end
 
-    Agent["desktop agent"] -.WSS.-> API
+    Agent["desktop agent"] -.WSS.-> Nginx
+    Mobile["mobile app"] -.REST /api.-> Nginx
 ```
 
 ### Authentication sequence (browser session + CSRF)

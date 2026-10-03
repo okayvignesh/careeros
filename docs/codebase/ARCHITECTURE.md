@@ -1,20 +1,20 @@
 ---
-commit: dead1a4
-generated: 2026-10-02
+commit: d31dead
+generated: 2026-10-03
 scope: system flow, layers, patterns and risks
 ---
 
 # Architecture
 
-Career OS is a layered, modular monolith plus async workers and a local desktop agent. Postgres is the source of truth; LLMs never are (`AGENTS.md` §1, `docs/architecture.md` §9).
+Career OS is a layered, modular monolith plus async workers, a local desktop agent, and an Expo mobile client. Postgres is the source of truth; LLMs never are (`AGENTS.md` §1, `docs/architecture.md` §9).
 
 ## Core Sections (Required)
 
 ### 1) Architectural Style
 
-- **Primary style:** layered + feature-modular monolith (`apps/api` NestJS modules over a Prisma data layer), with an event/queue side-car (`apps/worker` + BullMQ) and an out-of-process agent (`apps/desktop`).
-- **Why this classification (evidence):** `apps/api/src/app.module.ts:14-124` registers 38 feature modules plus infra modules (`PrismaModule`, `StorageModule`, `QueueModule`, `SensitivityGateModule`, `ProviderLoaderModule`, `MetricsModule`); each module owns controller + service + Prisma access. `apps/worker/src/main.ts` boots independent queue consumers via the shared `registerWorker` helper. `packages/*` hold capability interfaces consumed by both.
-- **Single sources of truth (post-cleanup):** job-match scoring lives once in `packages/job-pipeline/src/stages/match.ts` (`computeMatch` for detail, `computeMatchResult` for the jobs list); provider construction goes through `ProviderLoaderService` (`apps/api/src/common/provider-loader.service.ts`); sensitivity policy has one authority, `SensitivityGateService` (`apps/api/src/common/sensitivity-gate.service.ts`) over the pure rank primitives in `@careeros/ai`; skill-state sync is `@careeros/aggregator`. Approval dispatch for an unhandled kind fails loud (audit + `markFailed`) rather than dropping the item.
+- **Primary style:** layered + feature-modular monolith (`apps/api` NestJS modules over a Prisma data layer), with an event/queue side-car (`apps/worker` + BullMQ), an out-of-process agent (`apps/desktop`), and a thin REST mobile client (`apps/mobile`).
+- **Why this classification (evidence):** `apps/api/src/app.module.ts` registers 49 modules — 42 feature modules plus infra (`PrismaModule`, `StorageModule`, `QueueModule`, `SensitivityGateModule`, `ProviderLoaderModule`, `InjectionAuditModule`, `MetricsModule`); each feature module owns controller + service + Prisma access. `apps/worker/src/main.ts` boots independent queue consumers via the shared `registerWorker` helper. `packages/*` hold capability interfaces consumed by both apps; `apps/mobile` is standalone and talks REST only.
+- **Single sources of truth (post-cleanup):** job-match scoring lives once in `packages/job-pipeline/src/stages/match.ts` (`computeMatch` for detail, `computeMatchResult` for the jobs list); provider construction + fallback goes through `ProviderLoaderService` (`apps/api/src/common/provider-loader.service.ts`); sensitivity policy has one authority, `SensitivityGateService` (`apps/api/src/common/sensitivity-gate.service.ts`) over the pure rank primitives in `@careeros/ai`; skill-state sync is `@careeros/aggregator`; embeddings go through one `EmbeddingProvider` seam (`packages/embeddings/src/provider.ts`); master-key rotation is the pure `rotateMasterKey` primitive (`packages/secrets/src/rotation.ts`) driven by `MasterKeyRotationService`. Approval dispatch for an unhandled kind fails loud (audit + `markFailed`) rather than dropping the item.
 - **Primary constraints (evidence):**
   1. **Evidence over claims** — Postgres evidence graph is authoritative; LLMs interpret only (`AGENTS.md` §1, §11).
   2. **Privacy/egress control** — server scraping of LinkedIn/Indeed/Naukri/Glassdoor is prohibited; only partner APIs, the user's own agent session, or parsed email alerts (`AGENTS.md` §3.4, §15).
@@ -26,13 +26,15 @@ Career OS is a layered, modular monolith plus async workers and a local desktop 
 Browser (Next.js) → middleware setup-gate → /api HTTP (NestJS controllers)
   → domain service (modules/*) → packages/* capability (ai, job-pipeline, secrets…)
   → Postgres / Qdrant / Redis / MinIO  → response
+Nginx (TLS :443) → / → web:3000 · /api/* → api:3001 (prefix stripped)
+Expo mobile app → same REST API (mobile:* bearer, no cookie)
 Async: API enqueues BullMQ job → apps/worker processor → external API
   → Postgres evidence/pipeline rows → (optionally) WSS push back to browser
 ```
 
 Concretely, a GitHub connect (`docs/architecture.md` §4.2): web `POST /integrations/github/select` → API enqueues `github.sync` → worker lists repos via Octokit → evidence rows → KnowledgeAggregator updates `candidate_skill_state` and appends `skill_state_event` → dashboard reads `/me/skills`.
 
-An LLM call (`docs/architecture.md` §5.3): build versioned prompt → sensitivity gate → provider registry → `chatStructured<T>({schema})` → Zod validation (one retry) → `llm_calls` audit row → optional fact-check gate before rendering.
+An LLM call (`docs/architecture.md` §5.3): build versioned prompt → sensitivity gate → provider fallback chain → `chatStructured<T>({schema})` → Zod validation (one retry) → `llm_calls` audit row → optional fact-check gate before rendering. Untrusted content that trips the wrap/scan boundary additionally writes a `llm_injection_log` row.
 
 ### 3) Layer/Module Responsibilities
 
@@ -43,7 +45,8 @@ An LLM call (`docs/architecture.md` §5.3): build versioned prompt → sensitivi
 | `apps/api/common` | Guards, pipes, filters, storage, metrics, redaction | Feature domain logic | `apps/api/src/common/` |
 | `apps/worker` | Queue processors, cron jobs, external sync | HTTP handling | `apps/worker/src/*.worker.ts`, `main.ts` |
 | `apps/desktop` | Local Playwright, keychain, WSS, OS integration | Server business logic, server-side scraping | `apps/desktop/src/main.ts`, `task-runner.ts` |
-| `packages/ai` | Provider abstraction, prompts, grounding, injection/sensitivity | DB writes | `packages/ai/src/provider.ts`, `providers/deepseek.ts` |
+| `apps/mobile` | Read-only mobile UI, secure-store token, REST calls | Server business logic, write actions | `apps/mobile/src/app/`, `apps/mobile/src/lib/api.ts` |
+| `packages/ai` | Provider abstraction + DeepSeek/OpenAI-compatible/Ollama adapters + fallback chain, prompts, tokenizer, grounding, injection/sensitivity | DB writes | `packages/ai/src/provider.ts`, `providers/` |
 | `packages/job-pipeline` | Source-agnostic ingestion stages + adapters; the canonical weighted match scorer (`computeMatch`/`computeMatchResult`) | Persistence (caller writes) | `packages/job-pipeline/src/stages/`, `stages/match.ts`, `adapters/` |
 | `packages/aggregator` | Skill-state aggregation + `skill_state_event` audit (type-only Prisma) | HTTP / domain rules | `packages/aggregator/src/index.ts` |
 | `packages/firecrawl` | Firecrawl search/scrape/crawl client (Zod-validated, typed errors) | Job-source policy (lives in `docs/job-sources.md`) | `packages/firecrawl/src/client.ts` |
@@ -53,7 +56,9 @@ An LLM call (`docs/architecture.md` §5.3): build versioned prompt → sensitivi
 
 | Pattern | Where found | Why it exists |
 |---------|-------------|---------------|
-| Provider/Adapter (Strategy) | `packages/ai/src/provider.ts` + `registry.ts`; `packages/job-pipeline/src/adapters/`; `packages/embeddings/src/qdrant.ts` | Swap LLM/job source without touching domain code |
+| Provider/Adapter (Strategy) | `packages/ai/src/provider.ts` + `registry.ts` + `providers/`; `packages/embeddings/src/provider.ts`; `packages/job-pipeline/src/adapters/`; `packages/embeddings/src/qdrant.ts` | Swap LLM/embedding/job source without touching domain code |
+| Decorator fallback chain | `packages/ai/src/providers/fallback.ts` + `CircuitBreaker` (primary → backup → Ollama) | Availability failover without changing call sites; gate runs per candidate |
+| Bounded fire-and-forget audit queue | `apps/api/src/common/llm-audit.ts` (`makeLlmAuditor`), `apps/api/src/common/injection-log.ts` | Persist `llm_calls` + `llm_injection_log` without blocking or unbounded memory |
 | Single-loader / single-authority | `ProviderLoaderService` (budget → config → sensitivity → decrypt → construct provider), `SensitivityGateService` (one egress decision per provider) | Remove near-duplicate call-site logic and divergent policy |
 | Canonical pure scorer | `packages/job-pipeline/src/stages/match.ts` — same `computeMatch` backs list + detail | One score per job/candidate pair |
 | Registry (explicit, no FS scan) | `ProviderRegistry`, prompt registry `packages/ai/src/prompts/index.ts`, adapter registry | Predictable boot; unknown ID = hard fail |
@@ -70,18 +75,19 @@ An LLM call (`docs/architecture.md` §5.3): build versioned prompt → sensitivi
 
 - **Multi-user not enforced by default.** Most modules call `SessionService.requireUserId`, but there is no global session guard; global `AppConfig` writes are explicitly blocked when a second user exists (`UsageService.assertSingleUserForGlobalConfig`, `plan/security.md` item 1). A missed `requireUserId` could expose data before multi-tenant work lands. See `CONCERNS.md`.
 - **Schema is string-typed, not enum-enforced.** 55 Prisma models, 0 `enum` blocks — states are `String` with documented unions (`Application.state`, `Evidence.kind`, `NormalizedJob.state`). Invalid states are only prevented by app code.
-- **Placeholder embedding** means semantic search is not yet real, and **Anthropic/Azure have no adapter** (DeepSeek, OpenAI/OpenRouter, and Ollama do, with a real fallback chain) (`packages/embeddings/src/local.ts`, `packages/ai/src/providers/`).
+- **Anthropic/Azure have no adapter** (DeepSeek, OpenAI/OpenRouter, and Ollama do, with a real fallback chain), and circuit-breaker state is in-process (`packages/ai/src/providers/`, `apps/api/src/common/provider-loader.service.ts`).
 - **N+1 / pagination ceiling** already identified by the team: `plan/PLAN.md:69` parks N+1 in `JobsService.sync` and a match-score pagination pool ceiling as debt. Skill extraction and adapter fetch/persist still run inline in the API request path rather than on a `jobs` BullMQ queue.
-- **Deferred phase slices** (see `plan/DEFERRED.md`) mean several documented flows are partial. Most formerly-missing paths now resolve (`packages/ui/src/motion.ts`, `scripts/dev-host.sh`, `scripts/seed-test.ts`, `infra/docker/docker-compose.host-dev.yml`); only `infra/nginx/` is still absent.
-- **Resolved during cleanup (no longer risks):** Prisma is aligned on 6.x across api/worker/aggregator; egress for Node global `fetch` is enforced via `undici`; Swagger/OpenAPI is implemented; api/worker/web containers are hardened; GitHub Actions are SHA-pinned.
+- **Deferred phase slices** (see `plan/DEFERRED.md`) mean several documented flows are partial: the `verbal_sessions` table and its P2/P6 consumers, web `@sentry/nextjs` instrumentation, mobile push/offline, desktop installer signing, and prompt-eval registration are still open. GlitchTip and `whisper.cpp` now exist in compose (profiles `ops`/`observability` and `speech`), and the formerly-absent deployment paths (`infra/nginx/`, `infra/docker/Dockerfile.backup`) exist.
+- **Resolved during cleanup + Waves A–C (no longer risks):** Prisma is aligned on 6.x across api/worker/aggregator; egress for Node global `fetch` is enforced via `undici`; Swagger/OpenAPI is implemented; api/worker/web containers are hardened; GitHub Actions are SHA-pinned; the embedding provider seam is real (`bge-small-en` + deterministic fallback); `@careeros/messaging` is instantiated through `ChannelRegistry`; the desktop devices UI ships; nginx/TLS/certbot/backup are in compose. See `CONCERNS.md`.
 
 ### 6) Evidence
 
 - `docs/architecture.md` (system topology, golden paths, data lifecycles, failure modes)
 - `AGENTS.md` §1-§14, `plan/PLAN.md` (locked decisions, status board)
 - `apps/api/src/main.ts`, `apps/api/src/app.module.ts`, `apps/api/src/modules/`
-- `apps/api/src/common/{provider-loader.service.ts,sensitivity-gate.service.ts}`, `packages/job-pipeline/src/stages/match.ts`, `packages/aggregator/src/index.ts`, `apps/api/src/modules/approvals/{approvals.service.ts,state-machine.ts}`
-- `apps/worker/src/main.ts`, `apps/worker/src/register-worker.ts`, `packages/ai/src/{provider,registry,grounded,wrap}.ts`
+- `apps/api/src/common/{provider-loader.service.ts,sensitivity-gate.service.ts,llm-audit.ts,injection-log.ts,injection-audit.module.ts}`, `packages/job-pipeline/src/stages/match.ts`, `packages/aggregator/src/index.ts`, `packages/embeddings/src/provider.ts`, `packages/secrets/src/rotation.ts`, `apps/api/src/modules/me/master-key-rotation.service.ts`
+- `apps/worker/src/main.ts`, `apps/worker/src/register-worker.ts`, `packages/ai/src/{provider,registry,grounded,wrap}.ts`, `packages/ai/src/providers/`
+- `apps/mobile/src/`, `apps/desktop/src/`, `infra/nginx/`, `infra/docker/Dockerfile.backup`
 - `apps/api/prisma/schema.prisma`
 
 ## Extended Sections
@@ -93,9 +99,11 @@ flowchart TB
     subgraph client["Clients"]
         Browser["User browser"]
         Agent["Desktop agent (Electron + Playwright + Chrome)"]
+        Mobile["Mobile app (Expo / React Native)"]
     end
 
     subgraph vps["Self-hosted host (Docker Compose)"]
+        Nginx["nginx (TLS :80/:443)"]
         Web["web (Next.js :3000)"]
         API["api (NestJS :3001)"]
         Worker["worker (BullMQ)"]
@@ -117,7 +125,10 @@ flowchart TB
         Gmail["Gmail + Pub/Sub"]
     end
 
-    Browser -->|HTTP| Web --> API
+    Browser -->|HTTPS| Nginx --> Web
+    Nginx -->|/api/*| API
+    Web -->|server-side API_URL| API
+    Mobile -->|REST /api| Nginx
     Agent <-.WSS pairing.-> API
     API --> PG
     API --> Redis

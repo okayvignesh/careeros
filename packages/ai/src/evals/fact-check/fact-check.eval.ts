@@ -5,8 +5,9 @@
 // EVAL_LIVE=1: real DeepSeek via a caller-registered ProviderRegistry
 //   (mirrors skill-extract.eval.ts pattern).
 //
-// Emits eval-results/junit.xml + summary.json when EVAL_OUT_DIR is set
-// so the nightly-evals workflow can upload them as CI artifacts.
+// Writes an eval-results/parts/<suite>.json part file when EVAL_OUT_DIR is set;
+// global-setup.ts merges all parts into junit.xml + summary.json for the
+// nightly-evals workflow to upload and diff against the 7-day baseline.
 import { describe, it, expect, beforeAll } from 'vitest';
 import { resolve } from 'node:path';
 import {

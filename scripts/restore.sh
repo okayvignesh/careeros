@@ -97,12 +97,16 @@ restore_postgres() {
   [[ -r "$src" ]] || die "postgres backup not readable: $src"
   local dump="$TMPDIR_R/postgres.dump"
   log INFO "postgres decrypt $src -> $dump"
-  age -d -i "$AGE_KEY" -o "$dump" "$src"
+  # restore_postgres runs from an `||` list, which disables `set -e` inside this
+  # function; make each failure explicit so a wrong age key exits non-zero
+  # instead of falling through to a misleading "restore complete".
+  age -d -i "$AGE_KEY" -o "$dump" "$src" || die "age decrypt failed for $src"
 
   log INFO "postgres restore db=$PGDATABASE"
   # --clean --if-exists drops objects before restore; --no-owner keeps this
   # portable across environments where the restore role differs.
-  pg_restore --clean --if-exists --no-owner -d "$PGDATABASE" "$dump"
+  pg_restore --clean --if-exists --no-owner -d "$PGDATABASE" "$dump" \
+    || die "pg_restore failed for $dump"
 
   local rows
   rows="$(psql -tA -d "$PGDATABASE" -c 'SELECT count(*) FROM users' 2>/dev/null || echo unknown)"
@@ -120,12 +124,13 @@ restore_minio() {
   local extract="$TMPDIR_R/minio"
 
   log INFO "minio decrypt $src"
-  age -d -i "$AGE_KEY" -o "$tar_out" "$src"
+  age -d -i "$AGE_KEY" -o "$tar_out" "$src" || die "age decrypt failed for $src"
   mkdir -p "$extract"
-  tar -C "$extract" -xzf "$tar_out"
+  tar -C "$extract" -xzf "$tar_out" || die "tar extract failed for $tar_out"
 
   log INFO "minio mirror -> $MC_ALIAS/$MC_BUCKET"
-  mc mirror --overwrite --quiet "$extract/" "$MC_ALIAS/$MC_BUCKET"
+  mc mirror --overwrite --quiet "$extract/" "$MC_ALIAS/$MC_BUCKET" \
+    || die "mc mirror failed -> $MC_ALIAS/$MC_BUCKET"
 
   local count
   count="$(mc ls --recursive "$MC_ALIAS/$MC_BUCKET" 2>/dev/null | wc -l | tr -d ' ')"
@@ -154,7 +159,7 @@ restore_qdrant() {
 
   local plain="$TMPDIR_R/qdrant-$name.snapshot"
   log INFO "qdrant decrypt collection=$name $src"
-  age -d -i "$AGE_KEY" -o "$plain" "$src"
+  age -d -i "$AGE_KEY" -o "$plain" "$src" || die "age decrypt failed for $src"
 
   # Documented upload endpoint: POST multipart form to
   # /collections/{name}/snapshots/upload with `snapshot` file field.

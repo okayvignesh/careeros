@@ -69,6 +69,7 @@ import {
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { installEgressProxy } from '@careeros/shared/net';
+import { initSentry, captureException, flushSentry } from './sentry.js';
 import { registerWorker } from './register-worker.js';
 import {
   FIRECRAWL_SEARCH_CRON,
@@ -77,6 +78,9 @@ import {
   QUEUE_FIRECRAWL_SEARCH,
   type FirecrawlSearchPayload,
 } from './firecrawl-search.worker.js';
+
+// Error tracking first: no-op when neither SENTRY_DSN nor GLITCHTIP_DSN is set.
+initSentry();
 
 const logger = pino({
   name: 'careeros-worker',
@@ -325,8 +329,10 @@ async function bootstrap() {
   );
 }
 
-bootstrap().catch((err) => {
+bootstrap().catch(async (err) => {
   logger.error({ err: (err as Error).message }, 'worker bootstrap failed');
+  captureException(err);
+  await flushSentry();
   process.exit(1);
 });
 
@@ -334,6 +340,7 @@ const shutdown = async (signal: string) => {
   logger.info({ signal }, 'shutting down');
   await prisma.$disconnect().catch(() => {});
   heartbeat.disconnect();
+  await flushSentry();
   process.exit(0);
 };
 process.on('SIGINT', () => void shutdown('SIGINT'));

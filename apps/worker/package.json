@@ -19,6 +19,7 @@
     "@careeros/shared": "workspace:*",
     "@octokit/rest": "^21.1.0",
     "@prisma/client": "^6.19.3",
+    "@sentry/node": "^11.4.0",
     "bullmq": "^5.13.0",
     "google-auth-library": "^9.15.0",
     "googleapis": "^144.0.0",

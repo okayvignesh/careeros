@@ -109,10 +109,18 @@ function route(req: NextRequest, pathname: string, body: SetupState, nonce: stri
   const isSignIn = pathname === SIGN_IN_PATH;
   const setupComplete = body.state === 'complete';
 
-  // Post-setup: /setup/* and /sign-in redirect to /dashboard so the wizard
-  // and login form aren't reachable to an authenticated, done user.
-  if (setupComplete && (isSetup || isSignIn)) {
+  // Post-setup: /setup/* always redirects to /dashboard (the wizard is done).
+  if (setupComplete && isSetup) {
     return redirectTo(req, '/dashboard', nonce);
+  }
+
+  // /sign-in must stay reachable while logged out; only bounce an
+  // already-authenticated user (session cookie present) to the dashboard.
+  // (Previously this redirected unconditionally, leaving no path back to login.)
+  if (setupComplete && isSignIn) {
+    const hasSession =
+      req.cookies.has('careeros_session') || req.cookies.has('__Host-careeros_session');
+    if (hasSession) return redirectTo(req, '/dashboard', nonce);
   }
 
   // Setup complete + protected route: let the app render.

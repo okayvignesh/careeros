@@ -1,12 +1,12 @@
 ---
-commit: dead1a4
-generated: 2026-10-02
+commit: d31dead
+generated: 2026-10-03
 scope: directory layout, entry points, module boundaries
 ---
 
 # Codebase Structure
 
-Career OS is a pnpm + Turborepo monorepo with four applications and fifteen shared packages. There is no path-alias indirection: cross-workspace imports use the `@careeros/*` package names declared in each `package.json`; within a workspace imports are relative.
+Career OS is a pnpm + Turborepo monorepo with five applications and fifteen shared packages. There is no path-alias indirection: cross-workspace imports use the `@careeros/*` package names declared in each `package.json`; within a workspace imports are relative.
 
 ## Core Sections (Required)
 
@@ -14,26 +14,27 @@ Career OS is a pnpm + Turborepo monorepo with four applications and fifteen shar
 
 | Path | Purpose | Evidence |
 |------|---------|----------|
-| `apps/web/` | Next.js 16 App Router user app (48 pages): setup wizard, dashboard, arena, market, jobs, settings | `apps/web/src/app/**/page.tsx`; `apps/web/package.json` |
-| `apps/api/` | NestJS HTTP API: 38 feature modules, Prisma data layer, WebSockets gateway, seed data | `apps/api/src/app.module.ts:14-124`; `apps/api/src/modules/` |
+| `apps/web/` | Next.js 16 App Router user app: setup wizard, dashboard, arena, market, jobs, settings, devices | `apps/web/src/app/**/page.tsx`; `apps/web/package.json` |
+| `apps/api/` | NestJS HTTP API: 41 feature-module directories (49 modules registered in `app.module.ts`), Prisma data layer, WebSockets gateway, seed data | `apps/api/src/app.module.ts`; `apps/api/src/modules/` |
 | `apps/worker/` | BullMQ workers on Redis (sync, embedding, retention, market snapshot, Gmail watch, selector health, corpus refresh) | `apps/worker/src/main.ts`; `apps/worker/src/*.worker.ts` |
-| `apps/desktop/` | Electron desktop companion agent (Playwright + user's Chrome, WSS pairing) | `apps/desktop/src/main.ts`; `apps/desktop/package.json` |
-| `packages/ai/` | `AIProvider` abstraction, DeepSeek adapter, versioned prompts, grounding/injection/sensitivity, evals | `packages/ai/src/` |
+| `apps/desktop/` | Electron desktop companion agent (Playwright + user's Chrome, WSS pairing, tray/pairing UI) | `apps/desktop/src/main.ts`; `apps/desktop/renderer/pair.html` |
+| `apps/mobile/` | Expo (React Native SDK 57) mobile companion — read-only daily brief, jobs, approvals, settings; `expo-router` + `expo-secure-store` | `apps/mobile/package.json`, `apps/mobile/src/app/` |
+| `packages/ai/` | `AIProvider` abstraction, DeepSeek/OpenAI-compatible/Ollama adapters + fallback, versioned prompts, tokenizer, grounding/injection/sensitivity, evals | `packages/ai/src/` |
 | `packages/shared/` | Zod schemas, constants, knowledge rules, queues, retry, redact, git-analysis, SSRF guard | `packages/shared/src/` |
 | `packages/job-pipeline/` | Source-agnostic job ingestion funnel: stages + adapters (`ashby`, `greenhouse`, `adzuna`, `arbeitnow`, `remotive`, `firecrawl`, `workday`, `lever`, `smartrecruiters`, `workable`, `icims`, `successfactors`) | `packages/job-pipeline/src/stages/`, `packages/job-pipeline/src/adapters/` |
 | `packages/aggregator/` | Single skill-state write path: evidence → `candidate_skill_state` + `skill_state_event` (type-only Prisma import); used by api + worker | `packages/aggregator/src/index.ts` |
 | `packages/firecrawl/` | Firecrawl API client (search/scrape/crawl), Zod-validated, typed errors, retry | `packages/firecrawl/src/` |
-| `packages/embeddings/` | Qdrant store wrapper + local (placeholder) embedder | `packages/embeddings/src/` |
+| `packages/embeddings/` | Qdrant store wrapper + embedding provider seam (local `bge-small-en` / deterministic fallback / external) | `packages/embeddings/src/` |
 | `packages/auth/` | Argon2id hashing + sealed session cookie helpers | `packages/auth/src/` |
-| `packages/secrets/` | AES-256-GCM field encryption + master-key validation | `packages/secrets/src/` |
+| `packages/secrets/` | AES-256-GCM field encryption + master-key validation + rotation primitive | `packages/secrets/src/` |
 | `packages/browser-agent/` | Agent task contract, YAML allowlist, pacing, kill-switch, selector health | `packages/browser-agent/src/` |
 | `packages/email-parsers/` | LinkedIn/Indeed/Naukri alert-HTML parsers | `packages/email-parsers/src/` |
 | `packages/resume-render/` | PDF/DOCX resume + cover-letter rendering and templates | `packages/resume-render/src/` |
 | `packages/sandbox/` | Docker-per-run code execution with resource/kill limits | `packages/sandbox/src/` |
-| `packages/messaging/` | Transport-free `Channel` interface (Slack/Web/WhatsApp/Discord) | `packages/messaging/src/` |
+| `packages/messaging/` | Transport-free `Channel` interface + `ChannelRegistry` (Slack/Web registered at runtime) | `packages/messaging/src/` |
 | `packages/ui/` | Design-system primitives, tokens, layout | `packages/ui/src/` |
 | `packages/testing/` | Testcontainers harness, MSW handlers, axe, arbitraries | `packages/testing/src/index.ts` |
-| `infra/` | Docker Compose, Postgres init, Squid config, Slack manifest | `infra/docker/`, `infra/postgres/`, `infra/slack/` |
+| `infra/` | Docker Compose + per-service Dockerfiles (incl. `Dockerfile.backup`), nginx reverse proxy + TLS templates, Postgres init, Squid config, Slack manifest | `infra/docker/`, `infra/nginx/`, `infra/postgres/`, `infra/slack/` |
 | `plan/` | Living implementation plan, per-phase checklists, cross-cutting specs (security, ai-safety, testing, observability, release) | `plan/PLAN.md` and siblings |
 | `docs/` | Operator docs + authoritative product blueprint (`.docx`) | `docs/architecture.md`, `docs/*.docx` |
 | `careeros-screens/` | 60+ static HTML wireframes (information architecture only, not final design) | `careeros-screens/index.html` |
@@ -43,11 +44,12 @@ Career OS is a pnpm + Turborepo monorepo with four applications and fifteen shar
 
 ### 2) Entry Points
 
-- **Main runtime entry (API):** `apps/api/src/main.ts` — boots after `startup-check.ts`, installs the egress proxy (`installEgressProxy()`), registers global `LockoutExceptionFilter`, helmet security middleware, and serves Swagger UI at `/api/docs` + OpenAPI JSON at `/api/openapi.json` (`apps/api/src/openapi/`).
-- **Web entry:** `apps/web/src/app/layout.tsx` + `apps/web/src/middleware.ts` (setup-state gate).
+- **Main runtime entry (API):** `apps/api/src/main.ts` — boots after `startup-check.ts`, installs the egress proxy (`installEgressProxy()`), registers global `LockoutExceptionFilter` + `TokenCapExceptionFilter`, helmet security middleware, and serves Swagger UI at `/api/docs` + OpenAPI JSON at `/api/openapi.json` (`apps/api/src/openapi/`).
+- **Web entry:** `apps/web/src/app/layout.tsx` + `apps/web/src/middleware.ts` (setup-state gate + Next security headers/nonce).
 - **Worker entry:** `apps/worker/src/main.ts` — pino + Prisma + heartbeat + Qdrant + seed skills + register workers.
-- **Desktop entry:** `apps/desktop/src/main.ts` (Electron main process, tray + pairing window).
-- **Secondary entry points:** NestJS `AgentGateway` (`apps/api/src/modules/agent/agent.gateway.ts`); scheduled BullMQ repeatables registered in `apps/worker/src/main.ts`; `scripts/backup.sh` / `restore.sh`.
+- **Desktop entry:** `apps/desktop/src/main.ts` (Electron main process, tray + pairing window; renderer `apps/desktop/renderer/pair.html`).
+- **Mobile entry:** `apps/mobile/src/app/_layout.tsx` (expo-router root; `(auth)/sign-in` + `(app)/*` read-only screens).
+- **Secondary entry points:** NestJS `AgentGateway` (`apps/api/src/modules/agent/agent.gateway.ts`); `MobileAuthMiddleware` + `MobileController` (`apps/api/src/modules/mobile/`); scheduled BullMQ repeatables registered in `apps/worker/src/main.ts`; `scripts/backup.sh` / `restore.sh`.
 - **How entry is selected:** root `package.json` scripts drive `turbo run dev`; each workspace declares its own `dev`/`start`; API production start runs `prisma migrate deploy` first (`apps/api/package.json:11`).
 
 ### 3) Module Boundaries
@@ -58,6 +60,7 @@ Career OS is a pnpm + Turborepo monorepo with four applications and fifteen shar
 | `apps/api` | HTTP/WS controllers, domain services, Prisma access, guards | Long-running batch jobs (those go to worker); provider SDK calls outside `packages/ai` |
 | `apps/worker` | BullMQ processors, scheduled jobs, external sync | HTTP request handling |
 | `apps/desktop` | Local Playwright execution, keychain, WSS client, OS integration | Server-side business logic; server scraping |
+| `apps/mobile` | Expo/React Native read-only client, secure-store token, REST only | Server-side business logic; write actions (stay on web for now) |
 | `packages/*` | Reusable capability with a stable interface | Feature-specific controller/service logic (belongs in `apps/api`) |
 | `packages/ai` | Provider abstraction, prompts, grounding/safety | Direct DB access (agents write through domain services) |
 
@@ -75,8 +78,9 @@ Rule from `AGENTS.md` §5: never import an adapter from `apps/web` directly; go 
 
 - `apps/api/src/app.module.ts`, `apps/api/src/main.ts`, `apps/api/src/modules/`, `apps/api/src/openapi/`
 - `apps/web/src/app/`, `apps/web/src/components/`, `packages/ui/src/index.ts`, `packages/ui/src/motion.ts`
+- `apps/mobile/src/app/`, `apps/mobile/package.json`, `apps/desktop/renderer/pair.html`
 - `packages/job-pipeline/src/adapters/index.ts` (all registered adapters), `packages/aggregator/src/index.ts`, `packages/firecrawl/src/index.ts`
-- `pnpm-workspace.yaml`, `turbo.json`, `packages/*/package.json`, `docs/codebase/.codebase-scan.txt` (DIRECTORY TREE)
+- `infra/nginx/`, `infra/docker/Dockerfile.backup`, `pnpm-workspace.yaml`, `turbo.json`, `packages/*/package.json`, `docs/codebase/.codebase-scan.txt` (DIRECTORY TREE)
 
 ## Extended Sections
 
@@ -89,6 +93,7 @@ flowchart TB
         API["apps/api<br/>NestJS 10"]
         WORKER["apps/worker<br/>BullMQ"]
         DESKTOP["apps/desktop<br/>Electron"]
+        MOBILE["apps/mobile<br/>Expo / RN"]
     end
 
     subgraph pkgs["Shared packages"]
@@ -128,6 +133,7 @@ flowchart TB
     WORKER --> AGG
     WORKER --> FIRE
     DESKTOP --> BROWSER
+    MOBILE -->|REST| API
 
     AI --> SHARED
     PIPE --> SHARED
@@ -155,4 +161,4 @@ flowchart TB
 
 ### Empty / not-yet-created paths referenced by config
 
-`[TODO]` `infra/nginx/` is still referenced by the deployment narrative but does not exist in the tree (cleanup task T3 did not cover it). The previously-dangling paths — `packages/ui/src/motion.ts`, `scripts/dev-host.sh`, `scripts/seed-test.ts`, and `infra/docker/docker-compose.host-dev.yml` — now exist and resolve (`pnpm dev:host`, `pnpm seed:test`, `pnpm docker:infra` all point at real files). See `CONCERNS.md`.
+No dangling config paths remain for the deployment surface: `infra/nginx/` (config, templates, self-signed script, README), `infra/docker/Dockerfile.backup`, `infra/docker/Dockerfile.whisper`, and the `ops`-profiled `backup` / `glitchtip` and `speech`-profiled `whisper` services now exist, alongside the earlier-resolved `packages/ui/src/motion.ts`, `scripts/dev-host.sh`, `scripts/seed-test.ts`, and `infra/docker/docker-compose.host-dev.yml`. The remaining absent-but-documented consumer work is the P2 `verbal_sessions` table and the web `@sentry/nextjs` layer (see `CONCERNS.md`).

@@ -39,6 +39,7 @@
     "@nestjs/throttler": "^6.4.0",
     "@nestjs/websockets": "^10.4.4",
     "@prisma/client": "^6.19.3",
+    "@sentry/node": "^11.4.0",
     "@simplewebauthn/server": "^11",
     "@simplewebauthn/types": "^11",
     "@slack/web-api": "^7.11.0",

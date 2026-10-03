@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Activity, Briefcase, FileCheck, LayoutDashboard, MonitorSmartphone, Newspaper, Receipt, Settings, Swords, Target, Wrench } from 'lucide-react';
+import { Activity, Briefcase, FileCheck, LayoutDashboard, MonitorSmartphone, Newspaper, Receipt, ScrollText, Settings, ShieldCheck, Swords, Target, Wrench } from 'lucide-react';
 import { cn } from '@careeros/ui';
 
 const groups = [
@@ -14,6 +14,7 @@ const groups = [
       { href: '/arena', label: 'Arena', icon: Swords },
       { href: '/jobs', label: 'Jobs', icon: Briefcase },
       { href: '/applications', label: 'Applications', icon: Target },
+      { href: '/approvals', label: 'Approvals', icon: ShieldCheck },
       { href: '/brief', label: 'Market brief', icon: Newspaper },
       { href: '/evidence', label: 'Evidence', icon: Activity },
       { href: '/facts', label: 'Fact base', icon: FileCheck },
@@ -26,6 +27,7 @@ const groups = [
       { href: '/settings/usage', label: 'Usage & costs', icon: Receipt },
       { href: '/settings/integrations', label: 'Integrations', icon: Activity },
       { href: '/settings/devices', label: 'Devices', icon: MonitorSmartphone },
+      { href: '/settings/audit', label: 'Audit log', icon: ScrollText },
     ],
   },
 ];

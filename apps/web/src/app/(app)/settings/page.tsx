@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Activity, ArrowUpRight, Boxes, Briefcase, Cpu, MonitorSmartphone, Receipt, Sparkles } from 'lucide-react';
+import { Activity, ArrowUpRight, Boxes, Briefcase, Cpu, MonitorSmartphone, Receipt, ScrollText, Sparkles } from 'lucide-react';
 import { Eyebrow } from '@careeros/ui';
 
 const cards = [
@@ -44,6 +44,12 @@ const cards = [
     icon: Briefcase,
     title: 'Job preferences',
     body: 'Target roles, remote-only, comp range, must-have skills, dealbreakers. Drives the /jobs relevance filter.',
+  },
+  {
+    href: '/settings/audit',
+    icon: ScrollText,
+    title: 'Audit log',
+    body: 'Append-only record of every approval, outbound action, and credential change — with redacted payload detail.',
   },
 ];
 

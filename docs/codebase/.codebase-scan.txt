@@ -1,9 +1,16 @@
 
 === DIRECTORY TREE (max depth 3, source files only) ===
+.dockerignore
 .editorconfig
+.env
 .env.example
 .eslintrc.cjs
 .github
+.github/ISSUE_TEMPLATE
+.github/ISSUE_TEMPLATE/bug_report.md
+.github/ISSUE_TEMPLATE/config.yml
+.github/ISSUE_TEMPLATE/feature_request.md
+.github/PULL_REQUEST_TEMPLATE.md
 .github/renovate.json
 .github/workflows
 .github/workflows/adapter-contract.yml
@@ -24,7 +31,9 @@
 .vscode/settings.json
 AGENTS.md
 CHANGELOG.md
+CODE_OF_CONDUCT.md
 CONTRIBUTING.md
+LICENSE
 Makefile
 NOTICES
 README.md
@@ -78,12 +87,30 @@ apps/desktop/src/updater.ts
 apps/desktop/src/wss-client.test.ts
 apps/desktop/src/wss-client.ts
 apps/desktop/tsconfig.json
+apps/mobile
+apps/mobile/.gitignore
+apps/mobile/README.md
+apps/mobile/app.json
+apps/mobile/assets
+apps/mobile/assets/adaptive-icon.png
+apps/mobile/assets/icon.png
+apps/mobile/assets/splash-icon.png
+apps/mobile/eslint.config.js
+apps/mobile/expo-env.d.ts
+apps/mobile/package.json
+apps/mobile/src
+apps/mobile/src/app
+apps/mobile/src/components
+apps/mobile/src/lib
+apps/mobile/src/theme
+apps/mobile/tsconfig.json
 apps/web
 apps/web/e2e
 apps/web/e2e/README.md
 apps/web/e2e/golden-connect-repo.spec.ts
 apps/web/e2e/post-setup.spec.ts
 apps/web/e2e/pre-setup.spec.ts
+apps/web/e2e/security-headers.spec.ts
 apps/web/e2e/seed-storage-state.mjs
 apps/web/eslint.config.mjs
 apps/web/next-env.d.ts
@@ -99,13 +126,17 @@ apps/web/src/middleware.test.ts
 apps/web/src/middleware.ts
 apps/web/src/no-analytics-sdk.test.ts
 apps/web/tailwind.config.ts
+apps/web/test-results
+apps/web/test-results/.last-run.json
 apps/web/tsconfig.json
+apps/web/tsconfig.tsbuildinfo
 apps/worker
 apps/worker/package.json
 apps/worker/src
 apps/worker/src/audit-log-retention.test.ts
 apps/worker/src/audit-log-retention.worker.ts
 apps/worker/src/corpus
+apps/worker/src/embedding-job.test.ts
 apps/worker/src/embedding-job.ts
 apps/worker/src/firecrawl-budget.ts
 apps/worker/src/firecrawl-crawl.ts
@@ -169,37 +200,6 @@ careeros-screens/phase-2-assessment-arena/23-knowledge-runner.html
 careeros-screens/phase-2-assessment-arena/24-build-code-runner.html
 careeros-screens/phase-2-assessment-arena/28-attempt-result.html
 careeros-screens/phase-2-assessment-arena/29-quest-detail.html
-careeros-screens/phase-2-assessment-arena/31-progression.html
-careeros-screens/phase-2-assessment-arena/index.html
-careeros-screens/phase-3-market-engine
-careeros-screens/phase-3-market-engine/32-market-brief.html
-careeros-screens/phase-3-market-engine/33-skill-demand.html
-careeros-screens/phase-3-market-engine/34-technology-signals.html
-careeros-screens/phase-3-market-engine/55-job-sources.html
-careeros-screens/phase-3-market-engine/56-search-providers.html
-careeros-screens/phase-3-market-engine/index.html
-careeros-screens/phase-4-the-hunt
-careeros-screens/phase-4-the-hunt/36-job-matches.html
-careeros-screens/phase-4-the-hunt/37-match-report.html
-careeros-screens/phase-4-the-hunt/38-company-dossier.html
-careeros-screens/phase-4-the-hunt/39-source-verification.html
-careeros-screens/phase-4-the-hunt/41-resume-studio.html
-careeros-screens/phase-4-the-hunt/42-fact-check.html
-careeros-screens/phase-4-the-hunt/43-cover-letter.html
-careeros-screens/phase-4-the-hunt/44-applications.html
-careeros-screens/phase-4-the-hunt/index.html
-careeros-screens/phase-5-daily-assistant
-careeros-screens/phase-5-daily-assistant/49-daily-brief.html
-careeros-screens/phase-5-daily-assistant/50-inbox-triage.html
-careeros-screens/phase-5-daily-assistant/58-notifications.html
-careeros-screens/phase-5-daily-assistant/index.html
-careeros-screens/phase-6-controlled-execution
-careeros-screens/phase-6-controlled-execution/45-application-detail.html
-careeros-screens/phase-6-controlled-execution/46-approval-queue.html
-careeros-screens/phase-6-controlled-execution/47-interview-prep.html
-careeros-screens/phase-6-controlled-execution/48-outreach-composer.html
-careeros-screens/phase-6-controlled-execution/57-storage.html
-careeros-screens/phase-6-controlled-execution/59-security.html
 
 === STACK DETECTION (manifest files) ===
 
@@ -252,6 +252,12 @@ clean:
   "name": "career-os",
   "version": "0.0.1",
   "private": true,
+  "license": "AGPL-3.0-or-later",
+  "author": "Vignesh (https://github.com/okayvignesh)",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/okayvignesh/careeros.git"
+  },
   "packageManager": "pnpm@9.12.0",
   "engines": {
     "node": ">=20"
@@ -359,6 +365,9 @@ importers:
       '@careeros/auth':
         specifier: workspace:*
         version: link:../../packages/auth
+      '@careeros/browser-agent':
+        specifier: workspace:*
+        version: link:../../packages/browser-agent
       '@careeros/email-parsers':
         specifier: workspace:*
         version: link:../../packages/email-parsers
@@ -368,6 +377,9 @@ importers:
       '@careeros/job-pipeline':
         specifier: workspace:*
         version: link:../../packages/job-pipeline
+      '@careeros/messaging':
+        specifier: workspace:*
+        version: link:../../packages/messaging
       '@careeros/resume-render':
         specifier: workspace:*
         version: link:../../packages/resume-render
@@ -377,14 +389,8 @@ importers:
       '@careeros/secrets':
         specifier: workspace:*
         version: link:../../packages/secrets
-      '@careeros/shared':
-        specifier: workspace:*
-        version: link:../../packages/shared
-      '@nest-lab/throttler-storage-redis':
-        specifier: ^1.2.0
-        version: 1.2.0(@nestjs/common@10.4.22(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@10.4.22)(@nestjs/throttler@6.7.1(@nestjs/common@10.4.22(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@10.4.22)(reflect-metadata@0.2.2))(ioredis@5.11.1)(reflect-metadata@0.2.2)
 
-[TRUNCATED] Showing first 80 of 14642 lines.
+[TRUNCATED] Showing first 80 of 19590 lines.
 
 === ENTRY POINTS ===
 No common entry points found. Check 'main' or 'scripts.start' in manifest files above.
@@ -422,6 +428,17 @@ DATABASE_URL=postgresql://careeros:REPLACE_ME_WITH_openssl_rand_base64_32@postgr
 REDIS_URL=redis://redis:6379
 QDRANT_URL=http://qdrant:6333
 
+# ─── Embeddings ─────────────────────────────────────────────
+# local (default): `bge-small-en-v1.5` via @xenova/transformers. Downloads model
+#   weights from Hugging Face on first use; if the model is missing/offline the
+#   api logs a warning and degrades to the deterministic embedder (never crashes).
+# deterministic: SHA-256 fallback vector, never touches the network (offline/CI).
+# external: pluggable hosted adapter, configured in the setup wizard.
+EMBEDDING_MODE=local
+# Where local model weights are cached. Defaults to the library cache; point at a
+# mounted volume in Docker so weights survive container restarts.
+# EMBEDDING_MODEL_CACHE_DIR=/data/models
+
 # ─── MinIO (REQUIRED; no defaults, refuses on weak) ────────
 MINIO_ROOT_USER=careeros
 MINIO_ROOT_PASSWORD=REPLACE_ME_WITH_openssl_rand_base64_32
@@ -456,9 +473,18 @@ SESSION_TTL_HOURS=168
 LOG_LEVEL=info
 LOG_DEBUG=
 
-# ─── Feature flags ──────────────────────────────────────────
-NEXT_TELEMETRY_DISABLED=1
+# ─── Public entrypoint: nginx + TLS (see infra/nginx/README.md) ──
+# SERVER_NAME is the public DNS name nginx answers on (server_name) and the CN
+# of the local self-signed dev cert. Default localhost works with no domain.
+SERVER_NAME=localhost
+# Host ports published by the nginx service.
+HTTP_PORT=80
+HTTPS_PORT=443
+# TLS cert/key paths INSIDE the nginx container. Defaults are the self-signed
+# files written by ./infra/nginx/self-signed.sh (bind-mounted from
+# infra/nginx/certs). For real certs, point these at the certbot volume after
 
+[TRUNCATED] Showing first 80 of 103 lines.
 
 === TODO / FIXME / HACK (production code only, test dirs excluded) ===
 apps/api/src/modules/agent/agent.controller.ts:34: * be < 5 min old (mirrors recovery.controller.ts pattern). TODO(C-P0.3):
@@ -466,18 +492,12 @@ apps/api/src/modules/assessments/assessments.service.ts:1480: * The sandbox call
 apps/api/src/modules/auth/recovery.controller.ts:18: * TODO(C-P0.3): replace with the shared guard once C-P0.3 lands.
 apps/api/src/modules/auth/recovery.controller.ts:36: // TODO(C-P0.3): swap for shared hasFreshReauth() when it lands.
 apps/api/src/modules/dossier/dossier.service.test.ts:460: // Employer-confidential redaction (TODO for C-P0.3 sensitivity-gate)
-apps/api/src/modules/dossier/dossier.service.ts:630: // TODO(C-P0.3): the sensitivity-gate + `User.currentEmployerCompanyId` flag
-apps/api/src/modules/me/me.controller.ts:34: * TODO(C-P0.3): swap for shared hasFreshReauth() when it lands.
+apps/api/src/modules/dossier/dossier.service.ts:633: // TODO(C-P0.3): the sensitivity-gate + `User.currentEmployerCompanyId` flag
+apps/api/src/modules/me/me.controller.ts:43: * recovery.controller.ts + agent.controller.ts; TODO(C-P0.3): swap for shared
 apps/api/src/modules/usage/usage.controller.ts:96: // A-M6: TODO(multitenant): scope AppConfig by userId once multi-user lands.
 apps/api/src/modules/usage/usage.controller.ts:116: // A-M6: TODO(multitenant): scope AppConfig by userId once multi-user lands.
 apps/api/src/modules/usage/usage.controller.ts:137: // A-M6: TODO(multitenant): scope AppConfig by userId once multi-user lands.
 apps/api/src/modules/usage/usage.service.ts:122: * TODO(multitenant): scope AppConfig by userId; drop this guard.
-apps/web/src/components/market-demand/SkillDemandTable.tsx:13: * TODO(api): implement GET /api/market/skill-demand?window=<days>
-apps/web/src/components/market-demand/SkillDemandTable.tsx:38: // Endpoint missing (see TODO above): a failure must not resolve to data,
-apps/web/src/components/market-demand/TrendSignalsPanel.tsx:10: * TODO(api): implement GET /api/market/trends
-apps/web/src/components/market-demand/TrendSignalsPanel.tsx:45: // Endpoint missing (see TODO above): a failure must not resolve to data,
-apps/web/src/components/search-providers/SearchProvidersPanel.tsx:10: * TODO(api): implement GET /api/search-providers (and .../workloads)
-apps/web/src/components/search-providers/SearchProvidersPanel.tsx:57: // Endpoints missing (see TODO above): a failure must not resolve to
 docs/codebase/codebase.index.json:255: "usage": "Load this file first to discover the knowledge base, then read documents in readingOrder or by topic. Every non-trivial claim cites committed file paths; [TODO] = unknown from source, [ASK USER] = needs team intent. Docs are Markdown by design so any AI/agent can read them."
 packages/ai/src/evals/skill-extract.ts:4: // TODO(slice 7b+): grow to 20+ cases (blueprint target) with a mix of clean and
 scripts/browser-agent/linkedin-discover.ts:42: // TODO(D.1): swap in RateLimiter when @careeros/browser-agent ships
@@ -485,6 +505,9 @@ scripts/browser-agent/probe-linkedin-selectors.ts:22: * TODO(D.1): replace the i
 scripts/browser-agent/probe-linkedin-selectors.ts:34: // TODO(D.1): swap in selectorHealth from @careeros/browser-agent
 
 === GIT RECENT COMMITS (last 20) ===
+d31dead feat: AI-safety completion, web quality, embeddings/providers, key rotation (Wave C)
+34d312a feat: desktop UI, mobile (Expo), OSS-AGPL, embeddings, providers, deploy (Waves A-B)
+30006b5 docs: refresh knowledge base for the cleanup (D4) + add .dockerignore
 dead1a4 cleanup: Swagger, integration tests, testcontainers fixes (Wave 13-14)
 cd222c9 cleanup: more ATS adapters, assessment outcome, candidate search (Waves 11-12)
 73dcce1 cleanup: unified match + Firecrawl/Workday adapters + CI gates (Waves 9-10)
@@ -502,31 +525,28 @@ c2585e2 plan-sync: I1 D.6 + D.8 shipped 4746494
 28d4e29 plan-sync: H1 + H2 shipped
 f65cd96 H2: D.4 Electron desktop scaffold (minimal viable)
 ca93a9c H1: no-analytics-in-web guard test (direct + transitive via lockfile)
-c879c2a plan-sync: flip G1 + G2 + G3 status rows to shipped SHAs
-49292e9 plan-sync: G1 + G2 + G3 shipped
-5f6f76d G3: lefthook + eslint rules + verify-esco script
 
 === HIGH-CHURN FILES (last 90 days, top 20) ===
-  27 pnpm-lock.yaml
-  19 apps/api/src/app.module.ts
-  18 apps/api/package.json
+  29 pnpm-lock.yaml
+  21 apps/api/src/app.module.ts
+  19 apps/api/prisma/schema.prisma
+  19 apps/api/package.json
+  18 plan/COMPLETION_PLAN.md
   17 plan/security.md
-  17 plan/COMPLETION_PLAN.md
-  17 apps/api/prisma/schema.prisma
-  14 packages/ai/src/index.ts
+  16 packages/ai/src/index.ts
   14 plan/HANDOFF.md
   13 plan/DEFERRED.md
+  12 apps/api/src/modules/jobs/jobs.service.ts
   11 plan/SESSION_COORDINATION.md
-  10 apps/api/src/modules/jobs/jobs.service.ts
+  10 infra/docker/docker-compose.yml
+  10 package.json
   10 apps/worker/src/main.ts
+   9 apps/api/src/modules/market-brief/market-brief.service.ts
    9 packages/job-pipeline/src/index.ts
-   9 infra/docker/docker-compose.yml
-   9 package.json
    8 .github/workflows/pr.yml
    8 apps/api/src/modules/jobs/jobs.service.test.ts
    8 packages/shared/src/index.ts
-   7 apps/api/src/modules/assessments/assessments.service.ts
-   7 apps/worker/package.json
+   7 apps/api/src/main.ts
 
 === MONOREPO SIGNALS ===
 Monorepo tool detected: pnpm-workspace.yaml
@@ -535,26 +555,26 @@ Sub-package directory found: packages/
 Sub-package directory found: apps/
 
 === CODE METRICS ===
-Total files scanned: 1214
-Total lines of code: 101447
+Total files scanned: 1323
+Total lines of code: 111935
 
 Files by language:
-  TypeScript: 687
-  Other: 401
-  TypeScript/React: 125
-  JavaScript: 1
+  TypeScript: 757
+  Other: 426
+  TypeScript/React: 138
+  JavaScript: 2
 
 Top 10 largest files:
 docs/personal_ai_career_os_blueprint_v1_2_self_hosted_provider_agnostic.docx: 1646.7KB
 docs/personal_ai_career_os_blueprint_rendered_diagrams.docx: 1391.8KB
-pnpm-lock.yaml: 465.9KB
+apps/web/tsconfig.tsbuildinfo: 1053.6KB
+pnpm-lock.yaml: 664.2KB
 careeros-screens/phase-0-install-and-first-run/index.html: 410.1KB
 careeros-screens/phase-1-personal-intelligence/index.html: 405.6KB
+apps/worker/tsconfig.tsbuildinfo: 397.6KB
 careeros-screens/phase-6-controlled-execution/index.html: 395.8KB
-apps/worker/tsconfig.tsbuildinfo: 391.4KB
 careeros-screens/phase-2-assessment-arena/22-assessment-arena.html: 384.7KB
 careeros-screens/phase-6-controlled-execution/64-audit-log.html: 383.7KB
-careeros-screens/phase-6-controlled-execution/46-approval-queue.html: 383.2KB
 
 === CI/CD PIPELINES ===
 CI/CD: GitHub Actions

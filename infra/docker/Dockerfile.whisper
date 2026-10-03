@@ -1,0 +1,68 @@
+# whisper.cpp HTTP server for the `speech` compose profile.
+#
+# Built from the pinned upstream release tag rather than the published
+# ghcr.io/ggml-org/whisper.cpp image: that image ships the CLI (`main`) but
+# does not build/document the `whisper-server` target this stack needs. The
+# tag below is the only knob; bump it deliberately and re-run
+# `scripts/verify-image-pins.sh` (compose build services are exempt from the
+# digest check, so the source tag *is* the pin).
+#
+# The `small.en` model is downloaded once at image build time and seeded into
+# the `whisperdata` volume on first boot, so the running container needs no
+# egress (it sits on the `internal` network only).
+ARG WHISPER_VERSION=v1.9.4
+ARG WHISPER_MODEL=small.en
+
+FROM ubuntu:22.04 AS build
+ARG WHISPER_VERSION
+ARG WHISPER_MODEL
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential cmake git ca-certificates curl wget \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+RUN git clone --depth 1 --branch "${WHISPER_VERSION}" https://github.com/ggml-org/whisper.cpp.git .
+
+# Only the server binary is needed; skip tests to keep the build short.
+RUN cmake -B build \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DWHISPER_BUILD_TESTS=OFF \
+      -DWHISPER_BUILD_SERVER=ON \
+ && cmake --build build --target whisper-server -j"$(nproc)"
+
+# `small.en` (~466 MiB) is the English model the observability/plan specs call
+# for. Override WHISPER_MODEL to ship a different one (e.g. small.en-q5_1).
+RUN ./models/download-ggml-model.sh "${WHISPER_MODEL}" \
+ && mkdir -p /opt/whisper/models \
+ && mv "models/ggml-${WHISPER_MODEL}.bin" /opt/whisper/models/
+
+FROM ubuntu:22.04 AS runtime
+ARG WHISPER_VERSION
+ARG WHISPER_MODEL
+LABEL org.opencontainers.image.title="careeros-whisper" \
+      org.opencontainers.image.description="whisper.cpp HTTP server (${WHISPER_MODEL})" \
+      org.opencontainers.image.version="${WHISPER_VERSION}" \
+      org.opencontainers.image.source="https://github.com/ggml-org/whisper.cpp"
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates curl ffmpeg libgomp1 \
+ && rm -rf /var/lib/apt/lists/* \
+ && useradd --system --uid 1001 --create-home --shell /usr/sbin/nologin whisper
+
+COPY --from=build /src/build/bin/whisper-server /usr/local/bin/whisper-server
+COPY --from=build /opt/whisper/models /opt/whisper/models
+COPY infra/docker/whisper-entrypoint.sh /usr/local/bin/whisper-entrypoint.sh
+RUN chmod 0755 /usr/local/bin/whisper-entrypoint.sh \
+ && mkdir -p /models \
+ && chown whisper:whisper /models
+
+# VOLUME makes Docker seed the named volume with this directory's ownership so
+# the unprivileged user can write to /models.
+VOLUME ["/models"]
+
+USER whisper
+ENV WHISPER_MODEL=${WHISPER_MODEL}
+EXPOSE 4001
+
+ENTRYPOINT ["/usr/local/bin/whisper-entrypoint.sh"]

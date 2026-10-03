@@ -2,9 +2,12 @@
 // provider.chatStructured wrap that renders the suite's prompt), scores each case,
 // and returns an EvalReport per suite. Runner is offline-safe: pass a stub `run`
 // for CI so a bad connection or missing key doesn't turn into flaky red.
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, readFileSync, readdirSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { EvalReport, EvalSuite } from './types';
+
+/** `mock` = stub provider (no key in CI); `live` = real provider call. */
+export type EvalMode = 'mock' | 'live';
 
 export type CaseRunner<Input> = (suite: EvalSuite<Input, unknown>, input: Input) => Promise<unknown>;
 
@@ -52,11 +55,12 @@ function escapeXml(s: string): string {
     .replace(/'/g, '&apos;');
 }
 
-export function toJunitXml(reports: EvalReport[]): string {
+export function toJunitXml(reports: EvalReport[], mode?: EvalMode): string {
   const totals = reports.reduce(
     (a, r) => ({ tests: a.tests + r.total, failures: a.failures + (r.total - r.passed) }),
     { tests: 0, failures: 0 },
   );
+  const rootName = mode ? `careeros-evals [${mode}]` : 'careeros-evals';
   const suites = reports
     .map((r) => {
       const failures = r.total - r.passed;
@@ -82,7 +86,7 @@ export function toJunitXml(reports: EvalReport[]): string {
     .join('\n');
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
-    `<testsuites name="careeros-evals" tests="${totals.tests}" failures="${totals.failures}">`,
+    `<testsuites name="${rootName}" tests="${totals.tests}" failures="${totals.failures}">`,
     suites,
     '</testsuites>',
     '',
@@ -91,11 +95,14 @@ export function toJunitXml(reports: EvalReport[]): string {
 
 export interface JsonSummary {
   generatedAt: string;
+  mode: EvalMode;
   reports: EvalReport[];
   overall: { total: number; passed: number; meanScore: number };
+  /** Case pass rate in [0, 1]; what the nightly drift check compares. */
+  passRate: number;
 }
 
-export function toJsonSummary(reports: EvalReport[]): JsonSummary {
+export function toJsonSummary(reports: EvalReport[], mode: EvalMode = 'mock'): JsonSummary {
   const total = reports.reduce((a, r) => a + r.total, 0);
   const passed = reports.reduce((a, r) => a + r.passed, 0);
   const meanScore =
@@ -104,13 +111,68 @@ export function toJsonSummary(reports: EvalReport[]): JsonSummary {
       : reports.reduce((a, r) => a + r.meanScore * r.total, 0) / total;
   return {
     generatedAt: new Date().toISOString(),
+    mode,
     reports,
     overall: { total, passed, meanScore },
+    passRate: total === 0 ? 0 : passed / total,
   };
 }
 
-export function writeEvalArtifacts(reports: EvalReport[], outDir: string): void {
-  mkdirSync(dirname(`${outDir}/junit.xml`), { recursive: true });
-  writeFileSync(`${outDir}/junit.xml`, toJunitXml(reports));
-  writeFileSync(`${outDir}/summary.json`, JSON.stringify(toJsonSummary(reports), null, 2));
+const PARTS_DIR = 'parts';
+
+function partPath(outDir: string, reports: EvalReport[]): string {
+  const key = reports.map((r) => `${r.suite}-${r.promptId}`).join('_') || 'batch';
+  const safe = key.toLowerCase().replace(/[^a-z0-9_-]+/g, '-');
+  return `${outDir}/${PARTS_DIR}/${safe}.json`;
+}
+
+/**
+ * Persist one suite's reports to a unique part file. Suites run in parallel
+ * workers, so writing a shared summary.json here would race and clobber (only
+ * one suite would survive). `aggregateEvalArtifacts` merges the parts after the
+ * run; `global-setup.ts` calls it in vitest teardown.
+ */
+export function writeEvalArtifacts(
+  reports: EvalReport[],
+  outDir: string,
+  opts: { mode?: EvalMode } = {},
+): void {
+  const file = partPath(outDir, reports);
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, JSON.stringify({ mode: opts.mode ?? 'mock', reports }, null, 2));
+}
+
+/** Read every per-suite part file written by `writeEvalArtifacts`. */
+export function readEvalParts(outDir: string): EvalReport[] {
+  const dir = `${outDir}/${PARTS_DIR}`;
+  if (!existsSync(dir)) return [];
+  const reports: EvalReport[] = [];
+  for (const name of readdirSync(dir)) {
+    if (!name.endsWith('.json') || name.startsWith('.')) continue;
+    try {
+      const parsed = JSON.parse(readFileSync(`${dir}/${name}`, 'utf8')) as {
+        reports?: EvalReport[];
+      };
+      if (Array.isArray(parsed.reports)) reports.push(...parsed.reports);
+    } catch {
+      // ponytail: skip a malformed part rather than sink the whole run.
+    }
+  }
+  return reports;
+}
+
+/**
+ * Merge all part files into the canonical `junit.xml` + `summary.json`
+ * artifacts. Mode is passed in by the caller because only it knows whether a
+ * live provider was actually registered (see setup.live.ts).
+ */
+export function aggregateEvalArtifacts(outDir: string, opts: { mode?: EvalMode } = {}): JsonSummary {
+  const reports = readEvalParts(outDir);
+  const mode =
+    opts.mode ?? ((process.env.EVAL_MODE as EvalMode | undefined) || 'mock');
+  mkdirSync(dirname(`${outDir}/summary.json`), { recursive: true });
+  writeFileSync(`${outDir}/junit.xml`, toJunitXml(reports, mode));
+  const summary = toJsonSummary(reports, mode);
+  writeFileSync(`${outDir}/summary.json`, JSON.stringify(summary, null, 2));
+  return summary;
 }

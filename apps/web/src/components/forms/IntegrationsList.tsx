@@ -3,14 +3,14 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowRight, CheckCircle2, Github, Mail, MessageSquare, Slash } from 'lucide-react';
+import { ArrowRight, CheckCircle2, Github, Gitlab, Mail, MessageSquare, Slash } from 'lucide-react';
 import { ThinkingOrb } from 'thinking-orbs';
 import { motion } from 'framer-motion';
 import { Button } from '@careeros/ui';
 import { apiGet, apiPost } from '@/lib/api-client';
 
 interface Integration {
-  kind: 'github' | 'slack' | 'gmail';
+  kind: 'github' | 'gitlab' | 'slack' | 'gmail';
   status: 'connected' | 'revoked';
   connectedAt: string;
   metadata?: Record<string, unknown> | null;
@@ -18,6 +18,7 @@ interface Integration {
 
 const CATALOG = [
   { kind: 'github' as const, icon: Github, name: 'GitHub', body: 'Repository + commit analysis', status: 'available' },
+  { kind: 'gitlab' as const, icon: Gitlab, name: 'GitLab', body: 'Public or self-hosted merge-request analysis', status: 'available' },
   { kind: 'slack' as const, icon: MessageSquare, name: 'Slack', body: 'Daily brief + slash commands', status: 'coming-later' },
   { kind: 'gmail' as const, icon: Mail, name: 'Gmail', body: 'Recruiter mail + alert parsing', status: 'coming-later' },
 ];
@@ -35,7 +36,7 @@ export function IntegrationsList() {
       .finally(() => setReady(true));
   }, []);
 
-  const status = (kind: 'github' | 'slack' | 'gmail') =>
+  const status = (kind: Integration['kind']) =>
     items.find((i) => i.kind === kind && i.status === 'connected');
 
   async function continueForward() {
@@ -99,7 +100,7 @@ export function IntegrationsList() {
                 </span>
               ) : (
                 <Link
-                  href="/setup/07-github"
+                  href={kind === 'github' ? '/setup/07-github' : '/settings/integrations'}
                   className="text-[12.5px] font-medium text-fg-muted transition-colors hover:text-fg"
                 >
                   Connect →

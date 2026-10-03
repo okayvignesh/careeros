@@ -1,6 +1,6 @@
 ---
-commit: dead1a4
-generated: 2026-10-02
+commit: d31dead
+generated: 2026-10-03
 scope: test stack, layout, mocking and CI gates
 ---
 
@@ -32,7 +32,7 @@ pnpm test:evals           # @careeros/ai evals (EVAL_MOCK=1 default); real run n
 - **Placement pattern:** unit tests are **co-located** next to source (`apps/api/src/modules/skills/skills.service.test.ts`); integration tests are `*.integration.test.ts`; e2e specs live in `apps/web/e2e/`; LLM evals live in `packages/ai/src/evals/<prompt>/`; contract tests are `*.contract.test.ts` in `packages/job-pipeline/src/adapters/`.
 - **Naming convention:** `foo.ts` + `foo.test.ts`; integration `foo.integration.test.ts`; e2e `*.spec.ts`; evals `*.eval.ts`; contracts `*.contract.test.ts`.
 - **Setup files:** root `vitest.setup.ts` seeds `ENCRYPTION_KEY` (64 hex), `DATABASE_URL`, `REDIS_URL`, `QDRANT_URL`; included via `vitest.config.ts` `setupFiles`. Playwright config lives only at `apps/web/playwright.config.ts`.
-- **Counts in the tree:** 229 `*.test.ts(x)`, 7 `*.integration.test.ts`, 3 `*.spec.ts` (e2e), 14 `*.contract.test.ts`, 2 `*.eval.ts` (tracked sources via `git ls-files`). The cleanup's central gate recorded 1609+ Vitest tests passing / 0 failed with web lint clean (`plan/CLEANUP_TASKS.md` progress log).
+- **Counts in the tree:** 234 unit `*.test.ts(x)` (excluding integration + contract), 7 `*.integration.test.ts`, 14 `*.contract.test.ts`, 4 `*.spec.ts` (e2e), 2 `*.eval.ts` (tracked sources via `git ls-files`). The prior cleanup's central gate recorded 1609+ Vitest tests passing / 0 failed with web lint clean (`plan/CLEANUP_TASKS.md` progress log); Waves A–C added the unit suites for the provider fallback, embeddings seam, tokenizer, injection log, master-key rotation, mobile, and market-demand/search-providers.
 
 ### 3) Test Scope Matrix
 
@@ -40,7 +40,7 @@ pnpm test:evals           # @careeros/ai evals (EVAL_MOCK=1 default); real run n
 |-------|----------|----------------|-------|
 | Unit | Yes | Services, parsers, aggregators, crypto, schemas, priority/XP math | Vitest; colocated; `pnpm test:unit` |
 | Integration | Yes (partial) | Prisma queries, encrypted-field opacity, append-only audit, storage, job ingestion, approvals, skill-state sync | Testcontainers gated behind `TESTCONTAINERS_E2E=1` + `isDockerAvailable`; 7 files today |
-| E2E | Yes (partial) | Setup wizard, post-setup widgets, connect-repo golden flow | `pr.yml` runs `pre-setup` on a fresh DB and mints an `E2E_STORAGE_STATE` for `post-setup`; `golden-connect-repo` still skips (needs `E2E_STUB_MODE=1` + server-side stubs) |
+| E2E | Yes (partial) | Setup wizard, post-setup widgets, connect-repo golden flow, security headers | `pr.yml` runs `pre-setup` on a fresh DB and mints an `E2E_STORAGE_STATE` for `post-setup`, plus the header-only `security-headers.spec.ts`; `golden-connect-repo` still skips (needs `E2E_STUB_MODE=1` + server-side stubs) |
 | LLM evals | Yes (partial) | skill-extract, knowledge-grader, question-generator, fact-check, email-classifier | `EVAL_MOCK=1` by default; nightly workflow exists but runner registration is deferred |
 | Contract | Yes | 12 job adapters (`ashby`, `greenhouse`, `adzuna` MSW, `arbeitnow`, `remotive`, `firecrawl`, `workday`, `lever`, `smartrecruiters`, `workable`, `icims`, `successfactors`) + 2 ATS-submit adapters | 14 files; weekly live revalidation via `adapter-contract.yml` |
 | Sandbox security | Yes | Memory/network/fork/wallclock/fs limits | Real Docker (`packages/sandbox/src/security.test.ts`) |
@@ -60,14 +60,15 @@ pnpm test:evals           # @careeros/ai evals (EVAL_MOCK=1 default); real run n
 - **Coverage tool + threshold:** none. **No coverage percentage target** (`plan/testing.md` §10). Behavior coverage is the bar: each phase checkbox needs at least one verifying test.
 - **Current reported coverage:** `[TODO]` not measured/committed.
 - **Quality gates in CI:** `pr.yml` has dedicated jobs for **lint** (`apps/web` eslint 9 is the real gate; `@careeros/api` is excluded because it has no flat config), typecheck (`pnpm -r typecheck` after an explicit `prisma generate`), unit tests, integration tests (Testcontainers, `TESTCONTAINERS_E2E=1`), and **Playwright** (pre-setup on a fresh migrated DB, then `pnpm seed:test` + minted storage state for the authenticated suite). Plus `pnpm audit --prod --audit-level=high`, image-pin check, prompt-version check, Trivy, CodeQL, gitleaks, adapter contracts (weekly), evals (nightly), restore test (weekly).
-- **Known gaps/flaky areas:** `golden-connect-repo` e2e self-skips without stub mode + server-side stubs; `@careeros/api` still has no working eslint flat config (its `lint` script is excluded from CI); only 7 integration files; no visual baselines; embedder is a placeholder so semantic tests assert shape, not quality; the live Docker egress smoke (`scripts/smoke/egress.sh`) is not in CI and remains unrun; T29 (migrate web fetch-on-mount to a data hook) leaves 21 `react-hooks/set-state-in-effect` warnings in `apps/web`.
+- **Known gaps/flaky areas:** `golden-connect-repo` e2e self-skips without stub mode + server-side stubs; `@careeros/api` still has no working eslint flat config (its `lint` script is excluded from CI); only 7 integration files; no visual baselines; the live Docker egress smoke (`scripts/smoke/egress.sh`) is not in CI and remains unrun; `apps/mobile` ships no tests yet. The embedder is now real (`bge-small-en` with deterministic fallback), and T29 is resolved — `useApi` (`apps/web/src/lib/use-api.ts`) backs 19 components and `react-hooks/set-state-in-effect` is back to `error`.
 
 ### 6) Evidence
 
-- `vitest.config.ts`, `vitest.setup.ts`, `apps/web/playwright.config.ts`, `apps/web/e2e/*.spec.ts`
+- `vitest.config.ts`, `vitest.setup.ts`, `apps/web/playwright.config.ts`, `apps/web/e2e/*.spec.ts` (incl. `security-headers.spec.ts`)
 - `packages/testing/src/index.ts` (Testcontainers, MSW handlers, axe, arbitraries, migration-safety)
 - `.github/workflows/pr.yml`, `nightly-evals.yml`, `adapter-contract.yml`, `restore-test.yml`
 - `packages/job-pipeline/src/adapters/**/*.contract.test.ts`, `apps/api/src/**/*.integration.test.ts`
+- `apps/web/src/lib/use-api.ts` + migrated panels, `apps/web/src/lib/security-headers.test.ts`
 - `plan/testing.md`, `CONTRIBUTING.md` §Testing conventions, `plan/CLEANUP_TASKS.md` (verified gate counts)
 - `docs/codebase/.codebase-scan.txt` (CI/CD PIPELINES, GIT RECENT COMMITS)
 
@@ -77,7 +78,7 @@ pnpm test:evals           # @careeros/ai evals (EVAL_MOCK=1 default); real run n
 
 | Workflow | Trigger | Gates |
 |----------|---------|-------|
-| `pr.yml` | PR + push main/master | lint (`@careeros/web` only), vitest, `pnpm -r typecheck` (after explicit `prisma generate`), `pnpm audit`, Testcontainers integration, **Playwright e2e (pre-setup + seeded post-setup + axe)**, image pins, prompt versions |
+| `pr.yml` | PR + push main/master | lint (`@careeros/web` only), vitest, `pnpm -r typecheck` (after explicit `prisma generate`), `pnpm audit`, Testcontainers integration, **Playwright e2e (pre-setup + seeded post-setup + axe + security-headers)**, image pins, prompt versions |
 | `trivy.yml` | PR + push + Mon 06:00 | HIGH/CRITICAL image CVEs → SARIF |
 | `codeql.yml` | PR + push + Mon 05:00 | JS/TS security-extended SAST |
 | `gitleaks.yml` | PR + push + Mon 07:00 | secret scanning |
@@ -89,4 +90,4 @@ pnpm test:evals           # @careeros/ai evals (EVAL_MOCK=1 default); real run n
 
 ### E2E golden-flow coverage by phase (`plan/testing.md` §3)
 
-P0 wizard+sign-in (`pre-setup.spec.ts`), P1 connect-repo (`golden-connect-repo.spec.ts`), plus the wider post-setup widget/a11y spec. P2-P6 golden flows are specified but the current e2e tree only contains the three P0/P1 specs — the rest are `[TODO]`.
+P0 wizard+sign-in (`pre-setup.spec.ts`), P1 connect-repo (`golden-connect-repo.spec.ts`), the wider post-setup widget/a11y spec (`post-setup.spec.ts`), and a header-only `security-headers.spec.ts` (security spec item 2). P2-P6 golden flows are specified but the current e2e tree contains only these four specs — the rest are `[TODO]`.

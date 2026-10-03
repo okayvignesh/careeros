@@ -529,8 +529,8 @@ P6: User approves submission
 | qdrant | `qdrant/qdrant` (pinned) | private 6333 | `qdrantdata` | — |
 | minio | `minio/minio` (pinned) | private 9000 | `miniodata` | — |
 | embedding | `careeros/embedding` (bge-small-en) | private 4000 | model cache | — |
-| whisper | `careeros/whisper` (whisper.cpp small en) | private 4001 | model cache | — |
-| glitchtip | `glitchtip/glitchtip` | private 9000 | — | postgres, redis |
+| whisper | built from `infra/docker/Dockerfile.whisper` (whisper.cpp v1.9.4, `small.en`; `speech` profile) | private 4001 | `whisperdata` model cache | — |
+| glitchtip | `glitchtip/glitchtip:6.2.6` (digest `sha256:a3d8eb1b…`; `ops`/`observability` profile) | private 8000 | `glitchtipdata` | postgres, redis |
 | backup | built from `infra/docker/Dockerfile.backup` (age + busybox cron; `ops` profile) | none | `backupdata` | postgres, minio, qdrant |
 | certbot | `certbot/certbot` (digest `sha256:f70ad0ad…`) | none | `letsencrypt`, `certbot-www` | — |
 

@@ -1,6 +1,10 @@
 # Dev-oriented image. Mirrors Dockerfile.api. Production hardening lands in P6.
 FROM node:20-alpine
 
+# Release tag for error tracking; see infra/docker/Dockerfile.api.
+ARG GIT_SHA=unknown
+ENV GIT_SHA=$GIT_SHA
+
 RUN apk add --no-cache libc6-compat openssl wget
 
 # Non-root UID 1001:1001 (matches Dockerfile.api and MinIO's bitnami user).

@@ -1,6 +1,6 @@
 ---
-commit: dead1a4
-generated: 2026-10-02
+commit: d31dead
+generated: 2026-10-03
 scope: naming, formatting, imports, errors and logging
 ---
 
@@ -80,6 +80,6 @@ Conventions below are stated in `AGENTS.md`, `CONTRIBUTING.md`, and enforced (or
 ### Known convention violations / drift
 
 - The root ESLint chain is **still not active** in any workspace that hasn't opted in (`.eslintrc.cjs:10-13`), so the three cross-cutting rules are not universally enforced today. `apps/web` ships its own eslint 9 flat config and is the only workspace gated in CI.
-- `apps/web` has T29 work outstanding: `react-hooks/set-state-in-effect` is downgraded to `warn` (21 fetch-on-mount warnings) pending a data-hook migration (`apps/web/eslint.config.mjs`).
+- T29 is **resolved**: `react-hooks/set-state-in-effect` is back to `error` in `apps/web/eslint.config.mjs`, and the `useApi` hook (`apps/web/src/lib/use-api.ts`) backs 19 panels so fetch-on-mount no longer sets state inside the effect synchronously.
 - `AGENTS.md` §5 lists a `packages/storage` and `packages/github` that do not exist as packages; storage lives at `apps/api/src/common/storage.service.ts` and GitHub logic lives in `apps/api/src/modules/integrations/github/` plus `apps/worker/src/github-sync.ts`.
 - `docs/dev-setup.md` now labels the remaining unwired commands (`pnpm seed:dev`, `pnpm ai:probe`) as "planned" rather than presenting them as available. See `CONCERNS.md`.

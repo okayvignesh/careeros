@@ -13,8 +13,13 @@ export default defineConfig({
   test: {
     root: repoRoot,
     include: ['packages/ai/src/evals/**/*.eval.ts', 'packages/ai/src/evals/**/*.test.ts'],
-    exclude: ['**/node_modules/**', '**/dist/**'],
-    setupFiles: [resolve(repoRoot, 'vitest.setup.ts')],
+    exclude: ['**/node_modules/**', '**/dist/**', '**/._*'],
+    setupFiles: [
+      resolve(repoRoot, 'vitest.setup.ts'),
+      resolve(here, 'src/evals/setup.live.ts'),
+    ],
+    // Merges per-suite part files into junit.xml + summary.json after the run.
+    globalSetup: [resolve(here, 'src/evals/global-setup.ts')],
     watch: false,
     testTimeout: 60_000,
   },

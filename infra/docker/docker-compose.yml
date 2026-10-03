@@ -137,6 +137,9 @@ services:
     build:
       context: ../..
       dockerfile: infra/docker/Dockerfile.api
+      args:
+        # Release tag baked into the image and reported to GlitchTip.
+        GIT_SHA: ${GIT_SHA:-unknown}
     restart: unless-stopped
     logging: *default-logging
     environment:
@@ -159,12 +162,18 @@ services:
       TRUSTED_ORIGINS: ${TRUSTED_ORIGINS:-http://localhost:3000}
       SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-168}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Error tracking (observability profile). Blank DSN = SDK no-op.
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      GLITCHTIP_DSN: ${GLITCHTIP_DSN:-}
+      SENTRY_RELEASE: ${SENTRY_RELEASE:-}
+      # whisper.cpp (speech profile). Blank = @careeros/stt client inert.
+      WHISPER_URL: ${WHISPER_URL:-}
       # A-H8: force every outbound HTTP(S) through the Squid allowlist proxy.
       # NO_PROXY exempts the private datastore names so intra-compose traffic
       # stays on the internal net without a proxy hop.
       HTTP_PROXY: http://squid:3128
       HTTPS_PROXY: http://squid:3128
-      NO_PROXY: postgres,redis,minio,qdrant,localhost,127.0.0.1
+      NO_PROXY: postgres,redis,minio,qdrant,whisper,localhost,127.0.0.1
     depends_on:
       postgres:
         condition: service_healthy
@@ -207,6 +216,8 @@ services:
     build:
       context: ../..
       dockerfile: infra/docker/Dockerfile.worker
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
     restart: unless-stopped
     logging: *default-logging
     environment:
@@ -217,9 +228,13 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      GLITCHTIP_DSN: ${GLITCHTIP_DSN:-}
+      SENTRY_RELEASE: ${SENTRY_RELEASE:-}
+      WHISPER_URL: ${WHISPER_URL:-}
       HTTP_PROXY: http://squid:3128
       HTTPS_PROXY: http://squid:3128
-      NO_PROXY: postgres,redis,minio,qdrant,localhost,127.0.0.1
+      NO_PROXY: postgres,redis,minio,qdrant,whisper,localhost,127.0.0.1
     depends_on:
       postgres:
         condition: service_healthy
@@ -253,6 +268,13 @@ services:
       NEXT_TELEMETRY_DISABLED: 1
       API_URL: http://api:3001
       NEXT_PUBLIC_API_URL: ${API_URL:-http://localhost:3001}
+      # Error tracking (observability profile). Blank DSN = SDK no-op. The
+      # @sentry/nextjs instrumentation files are a documented follow-up; these
+      # envs let them land without another compose edit. See docs/observability.md.
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      GLITCHTIP_DSN: ${GLITCHTIP_DSN:-}
+      NEXT_PUBLIC_SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_RELEASE: ${SENTRY_RELEASE:-}
     depends_on:
       api:
         condition: service_healthy
@@ -377,6 +399,91 @@ services:
       # Backups read datastores over the private network; no outbound needed.
       - internal
 
+  # ─── Error tracking: self-hosted GlitchTip (ops + observability) ──────────
+  # Sentry-compatible. Runs all-in-one (`SERVER_ROLE=all_in_one`): the granian
+  # ASGI server also hosts the task worker + scheduler in a single process.
+  # Own database (`glitchtip`) on the shared Postgres, Redis DB 1, private
+  # network only. Reach the UI by adding an nginx server block, or for a
+  # one-off: `docker compose --profile observability run --rm --service-ports
+  # glitchtip`. Full copy lives at glitchtip.com/documentation/install.
+  glitchtip:
+    profiles: ['ops', 'observability']
+    # glitchtip/glitchtip:6.2.6 (digest via `docker buildx imagetools inspect`, 2026-10-03)
+    image: glitchtip/glitchtip@sha256:a3d8eb1b36c1e1603d55ab32711ea3dd8115874742a781a57391a62a16e0dff6
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${GLITCHTIP_DB:-glitchtip}
+      VALKEY_URL: redis://redis:6379/1
+      # Required. Generate with `openssl rand -hex 48`. Kept optional in compose
+      # so `docker compose config` stays valid without the observability
+      # profile; GlitchTip itself refuses to boot on a blank secret.
+      SECRET_KEY: ${GLITCHTIP_SECRET_KEY:-}
+      GLITCHTIP_DOMAIN: ${GLITCHTIP_DOMAIN:-http://localhost:8000}
+      DEFAULT_FROM_EMAIL: ${GLITCHTIP_FROM_EMAIL:-glitchtip@localhost}
+      # consolemail:// writes mail to the container log; no SMTP required.
+      EMAIL_URL: ${GLITCHTIP_EMAIL_URL:-consolemail://}
+      SERVER_ROLE: all_in_one
+      PORT: '8000'
+      # Retention: master default + per-class overrides (plan/observability.md).
+      GLITCHTIP_RETENTION_DAYS: ${GLITCHTIP_RETENTION_DAYS:-90}
+      GLITCHTIP_EVENT_RETENTION_DAYS: ${GLITCHTIP_EVENT_RETENTION_DAYS:-90}
+      GLITCHTIP_TRANSACTION_RETENTION_DAYS: ${GLITCHTIP_TRANSACTION_RETENTION_DAYS:-30}
+      # Uptime + log ingestion both need extra storage/egress; off by default.
+      GLITCHTIP_ENABLE_UPTIME: 'False'
+      GLITCHTIP_ENABLE_LOGS: 'False'
+    volumes:
+      - glitchtipdata:/code/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # The image is python:3.14-slim based with neither curl nor wget on PATH.
+      test:
+        - CMD
+        - python
+        - -c
+        - "import socket; socket.create_connection(('127.0.0.1', 8000), 3).close()"
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    networks:
+      # Only the private datastore network; the UI is proxied (or tunnels in).
+      - internal
+
+  # ─── Speech-to-text: whisper.cpp HTTP server (speech profile) ─────────────
+  # Built from the pinned upstream tag by infra/docker/Dockerfile.whisper. The
+  # published ghcr image ships the CLI only, not the server target. Serves the
+  # `small.en` model over the private network; the model is seeded once into
+  # the `whisperdata` cache volume and no egress is needed at runtime. Api and
+  # worker reach it via WHISPER_URL. See docs/stt.md.
+  whisper:
+    profiles: ['speech']
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.whisper
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      WHISPER_MODEL: ${WHISPER_MODEL:-small.en}
+      WHISPER_MODELS_DIR: /models
+      WHISPER_PORT: '4001'
+      WHISPER_THREADS: ${WHISPER_THREADS:-4}
+    volumes:
+      - whisperdata:/models
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -sf http://127.0.0.1:4001/health || exit 1']
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      # Model seed + load can take a while on a cold CPU-only host.
+      start_period: 180s
+    networks:
+      - internal
+
 networks:
   # `internal`: no ingress/egress from the outside. Datastores only.
   internal:
@@ -396,3 +503,7 @@ volumes:
   certbot-www:
   # age-encrypted backup artifacts (backup sidecar, ops profile).
   backupdata:
+  # GlitchTip uploads/sourcemaps (observability profile).
+  glitchtipdata:
+  # whisper.cpp model cache, seeded from the image on first boot (speech profile).
+  whisperdata:

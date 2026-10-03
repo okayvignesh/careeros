@@ -6,6 +6,13 @@ function req(path: string): NextRequest {
   return new NextRequest(new URL(`http://web${path}`));
 }
 
+/** A request carrying a session cookie (dev cookie name) for auth-gated routes. */
+function reqWithSession(path: string): NextRequest {
+  return new NextRequest(new URL(`http://web${path}`), {
+    headers: { cookie: 'careeros_session=test-session' },
+  });
+}
+
 interface StateBody {
   state: string;
   hasUser: boolean;
@@ -137,11 +144,18 @@ describe('middleware — setup complete', () => {
     expect(res.headers.get('x-middleware-next')).toBe('1');
   });
 
-  it('/sign-in redirects to /dashboard when setup complete (login-persistence)', async () => {
+  it('/sign-in redirects to /dashboard when setup complete AND a session cookie is present', async () => {
     mockState(stateComplete);
-    const res = await middleware(req('/sign-in'));
+    const res = await middleware(reqWithSession('/sign-in'));
     expect(res.status).toBe(307);
     expect(new URL(res.headers.get('location')!).pathname).toBe('/dashboard');
+  });
+
+  it('/sign-in stays reachable when setup complete but logged out (no session cookie)', async () => {
+    mockState(stateComplete);
+    const res = await middleware(req('/sign-in'));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-middleware-next')).toBe('1');
   });
 
   it('/setup/03-provider redirects to /dashboard when setup complete', async () => {

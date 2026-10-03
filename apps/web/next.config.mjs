@@ -4,6 +4,12 @@ const nextConfig = {
   poweredByHeader: false,
   transpilePackages: ['@careeros/ui', '@careeros/shared'],
   typedRoutes: false,
+  // Next 16 defaults to Turbopack, which cannot run the webpack() block below.
+  // The webpack block is required for dev (client node:* shims), so dev/build
+  // run with --webpack explicitly for now (see package.json scripts).
+  // Disable Next's auto-generated AGENTS.md/CLAUDE.md so it never clobbers the
+  // repo's own AGENTS.md.
+  agentRules: false,
   // @careeros/shared re-exports ./net from its barrel (packages/ai on
   // moduleResolution=node needs the barrel access; the subpath ./net export
   // isn't reachable from that resolver). schemas/index.ts imports from

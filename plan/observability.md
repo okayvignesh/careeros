@@ -120,19 +120,31 @@ Cross-cutting spec for logs, metrics, errors, and traces. What we run, where it 
 
 ### GlitchTip
 
-- Compose service in `infra/docker/docker-compose.yml`
-- Backed by same Postgres (separate schema) + Redis
-- Web UI on internal port; behind nginx auth for public exposure (optional)
-- DSN passed to api + worker via env
+- Compose service `glitchtip` in `infra/docker/docker-compose.yml`, profile
+  `ops` / `observability`, digest-pinned (`glitchtip/glitchtip:6.2.6`).
+- All-in-one (`SERVER_ROLE=all_in_one`): one process serves HTTP and drains the
+  task queue. Backed by its own Postgres database (`glitchtip`, created by
+  `infra/postgres/init.sql`) on the shared Postgres plus Redis DB 1.
+- Private `internal` network only; operator reaches the UI through nginx or a
+  one-off `--service-ports` run (see `docs/observability.md`).
+- `SENTRY_DSN` (alias `GLITCHTIP_DSN`) passed to api + worker via compose env.
+  Blank DSN = SDK no-op. Retention via `GLITCHTIP_RETENTION_DAYS` +
+  per-class overrides.
 
 ### Sentry SDK integration (works against GlitchTip)
 
-- `@sentry/node` in api + worker
-- `@sentry/nextjs` in web
+- `@sentry/node` in api (`apps/api/src/common/sentry.ts`) + worker
+  (`apps/worker/src/sentry.ts`); `@sentry/nextjs` in web is a documented
+  follow-up (`docs/observability.md` §"Web").
+- Boot is a **no-op when the DSN is unset** — `initSentry()` returns false and
+  nothing is sent.
 - Sample rate: 100% for errors, 10% for performance transactions
-- **PII scrubbing:** `beforeSend` hook runs `packages/shared/redact.ts`
-- Release tag: git SHA baked at build time via `SENTRY_RELEASE`
-- Source maps uploaded on build
+- **PII scrubbing:** `beforeSend` / `beforeSendTransaction` run
+  `packages/shared/redact.ts`, then drop `event.user` + `event.request`.
+  `sendDefaultPii: false`, `maxBreadcrumbs: 0`, `beforeBreadcrumb: () => null`.
+- Release tag: git SHA (CI bakes `GIT_SHA` via `ARG GIT_SHA` in the api/worker
+  Dockerfiles; `SENTRY_RELEASE` overrides).
+- Source maps uploaded on build — deferred with the web wiring.
 
 ### What we DON'T send
 
