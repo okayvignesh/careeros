@@ -1,6 +1,6 @@
 ---
-commit: d31dead
-generated: 2026-10-03
+commit: ca74dc5
+generated: 2026-10-04
 scope: directory layout, entry points, module boundaries
 ---
 
@@ -14,9 +14,9 @@ Career OS is a pnpm + Turborepo monorepo with five applications and fifteen shar
 
 | Path | Purpose | Evidence |
 |------|---------|----------|
-| `apps/web/` | Next.js 16 App Router user app: setup wizard, dashboard, arena, market, jobs, settings, devices | `apps/web/src/app/**/page.tsx`; `apps/web/package.json` |
-| `apps/api/` | NestJS HTTP API: 41 feature-module directories (49 modules registered in `app.module.ts`), Prisma data layer, WebSockets gateway, seed data | `apps/api/src/app.module.ts`; `apps/api/src/modules/` |
-| `apps/worker/` | BullMQ workers on Redis (sync, embedding, retention, market snapshot, Gmail watch, selector health, corpus refresh) | `apps/worker/src/main.ts`; `apps/worker/src/*.worker.ts` |
+| `apps/web/` | Next.js 16 App Router user app: 68 routes — setup wizard, dashboard, arena (+ verbal), market (+ skill-demand/trends), jobs (+ detail/verification), quests, applications, approvals, inbox, outreach, market/daily briefs, evidence, facts, repository-analysis, dossier, interview-prep, settings (+ security/data/notifications/backup/job-sources/providers/embeddings/search-providers) | `apps/web/src/app/**/page.tsx`; `apps/web/package.json` |
+| `apps/api/` | NestJS HTTP API: 42 feature-module directories (50 modules registered in `app.module.ts`: 43 feature + 7 infra), Prisma data layer, WebSockets gateway, seed data | `apps/api/src/app.module.ts`; `apps/api/src/modules/` |
+| `apps/worker/` | BullMQ workers on Redis (sync, embedding, retention, market snapshot, Gmail watch, selector health, corpus refresh, outreach-send) | `apps/worker/src/main.ts`; `apps/worker/src/*.worker.ts` |
 | `apps/desktop/` | Electron desktop companion agent (Playwright + user's Chrome, WSS pairing, tray/pairing UI) | `apps/desktop/src/main.ts`; `apps/desktop/renderer/pair.html` |
 | `apps/mobile/` | Expo (React Native SDK 57) mobile companion — read-only daily brief, jobs, approvals, settings; `expo-router` + `expo-secure-store` | `apps/mobile/package.json`, `apps/mobile/src/app/` |
 | `packages/ai/` | `AIProvider` abstraction, DeepSeek/OpenAI-compatible/Ollama adapters + fallback, versioned prompts, tokenizer, grounding/injection/sensitivity, evals | `packages/ai/src/` |
@@ -24,14 +24,14 @@ Career OS is a pnpm + Turborepo monorepo with five applications and fifteen shar
 | `packages/job-pipeline/` | Source-agnostic job ingestion funnel: stages + adapters (`ashby`, `greenhouse`, `adzuna`, `arbeitnow`, `remotive`, `firecrawl`, `workday`, `lever`, `smartrecruiters`, `workable`, `icims`, `successfactors`) | `packages/job-pipeline/src/stages/`, `packages/job-pipeline/src/adapters/` |
 | `packages/aggregator/` | Single skill-state write path: evidence → `candidate_skill_state` + `skill_state_event` (type-only Prisma import); used by api + worker | `packages/aggregator/src/index.ts` |
 | `packages/firecrawl/` | Firecrawl API client (search/scrape/crawl), Zod-validated, typed errors, retry | `packages/firecrawl/src/` |
-| `packages/embeddings/` | Qdrant store wrapper + embedding provider seam (local `bge-small-en` / deterministic fallback / external) | `packages/embeddings/src/` |
+| `packages/embeddings/` | Qdrant store wrapper + embedding provider seam: local `bge-small-en` / deterministic fallback / **external OpenAI-compatible `/embeddings` adapter**, plus a secret-aware `app_config` resolver that pins the vector dimension | `packages/embeddings/src/{provider,external,config,qdrant}.ts` |
 | `packages/auth/` | Argon2id hashing + sealed session cookie helpers | `packages/auth/src/` |
 | `packages/secrets/` | AES-256-GCM field encryption + master-key validation + rotation primitive | `packages/secrets/src/` |
-| `packages/browser-agent/` | Agent task contract, YAML allowlist, pacing, kill-switch, selector health | `packages/browser-agent/src/` |
+| `packages/browser-agent/` | Agent task contract, YAML allowlist (with declarative `apply_flow`), pacing, kill-switch, selector health, single-page form-fill + multi-step apply engine + LinkedIn/Indeed/Naukri/Workday/Lever scripts | `packages/browser-agent/src/` |
 | `packages/email-parsers/` | LinkedIn/Indeed/Naukri alert-HTML parsers | `packages/email-parsers/src/` |
 | `packages/resume-render/` | PDF/DOCX resume + cover-letter rendering and templates | `packages/resume-render/src/` |
 | `packages/sandbox/` | Docker-per-run code execution with resource/kill limits | `packages/sandbox/src/` |
-| `packages/messaging/` | Transport-free `Channel` interface + `ChannelRegistry` (Slack/Web registered at runtime) | `packages/messaging/src/` |
+| `packages/messaging/` | Transport-free `Channel` interface + `ChannelRegistry` (Slack/Web registered at runtime) + pure RFC 822 MIME builder for Gmail outbound | `packages/messaging/src/{index,mime}.ts` |
 | `packages/ui/` | Design-system primitives, tokens, layout | `packages/ui/src/` |
 | `packages/testing/` | Testcontainers harness, MSW handlers, axe, arbitraries | `packages/testing/src/index.ts` |
 | `infra/` | Docker Compose + per-service Dockerfiles (incl. `Dockerfile.backup`), nginx reverse proxy + TLS templates, Postgres init, Squid config, Slack manifest | `infra/docker/`, `infra/nginx/`, `infra/postgres/`, `infra/slack/` |
@@ -80,6 +80,8 @@ Rule from `AGENTS.md` §5: never import an adapter from `apps/web` directly; go 
 - `apps/web/src/app/`, `apps/web/src/components/`, `packages/ui/src/index.ts`, `packages/ui/src/motion.ts`
 - `apps/mobile/src/app/`, `apps/mobile/package.json`, `apps/desktop/renderer/pair.html`
 - `packages/job-pipeline/src/adapters/index.ts` (all registered adapters), `packages/aggregator/src/index.ts`, `packages/firecrawl/src/index.ts`
+- `packages/embeddings/src/{provider,external,config,qdrant}.ts`, `apps/api/src/modules/{repository-analysis,gmail,slack,outreach}/`, `apps/api/src/modules/auth/session.controller.ts`, `apps/worker/src/outreach-send.worker.ts`
+- `packages/browser-agent/src/scripts/apply-flow.ts`, `packages/messaging/src/mime.ts`, `apps/web/src/components/{Dialog.tsx,AppNav.tsx}`, `apps/web/src/lib/*`
 - `infra/nginx/`, `infra/docker/Dockerfile.backup`, `pnpm-workspace.yaml`, `turbo.json`, `packages/*/package.json`, `docs/codebase/.codebase-scan.txt` (DIRECTORY TREE)
 
 ## Extended Sections
@@ -156,7 +158,7 @@ flowchart TB
 ### Generated vs source boundaries
 
 - Do not document or edit generated output: `dist/`, `.next/`, `apps/*/dist`, `packages/*/dist`, `prisma/generated/`, coverage. `.gitignore` and `.eslintrc.cjs:29-38` both exclude them.
-- `apps/api/prisma/migrations/` **is** committed source (39 migration directories) and must be treated as reviewable code (`AGENTS.md` §6).
+- `apps/api/prisma/migrations/` **is** committed source (41 migration directories) and must be treated as reviewable code (`AGENTS.md` §6).
 - The product blueprint `docs/*.docx` is the authoritative *product* spec; `docs/architecture.md` is the maintained integration narrative.
 
 ### Empty / not-yet-created paths referenced by config

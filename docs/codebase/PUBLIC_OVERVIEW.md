@@ -1,6 +1,6 @@
 ---
-commit: d31dead
-generated: 2026-10-03
+commit: ca74dc5
+generated: 2026-10-04
 scope: plain-language product overview
 ---
 
@@ -25,10 +25,11 @@ It is not a public website, not a recruiting product, and not something your emp
 ## What it does
 
 - **Builds a digital twin of you.** It gathers your resume, your public code, your practice results, and what you have done in past applications, then keeps a continuously updated picture of your skills. Each skill is shown with how strong it is, how confident the system is, and how recently you used it.
-- **Practices with you.** It offers a range of exercises and assessments, tracks your progress, and suggests what to learn next based on what the job market actually wants.
+- **Practices with you.** It offers a range of exercises and assessments, tracks your progress, and suggests what to learn next based on what the job market actually wants. It can also run spoken practice interviews: record an answer in the browser, get it transcribed locally on your own server, and receive a graded debrief.
 - **Watches the job market.** It collects job listings from reputable sources, cleans and de-duplicates them, checks how fresh they are, and matches them to your real skills, so you see the roles that genuinely fit. It can also discover postings on public company career sites and job boards (including Workday and other major applicant-tracking systems) using a managed web-crawling service, always respecting each site's published rules and only for public pages.
-- **Helps you apply.** It can prepare resumes and cover letters tailored to a specific job, but only by rephrasing facts you have already confirmed. Anything it cannot back up is blocked before you ever see it.
-- **Keeps you organized.** It tracks each application through every stage, reminds you what needs doing, and follows up on replies.
+- **Helps you apply.** It can prepare resumes and cover letters tailored to a specific job, but only by rephrasing facts you have already confirmed. Anything it cannot back up is blocked before you ever see it. It can also draft outreach messages to contacts; each one becomes a staged draft you approve before it can be sent.
+- **Keeps you organized.** It tracks each application through every stage, reminds you what needs doing, follows up on replies, and gathers the notifications worth acting on into one inbox.
+- **Shows the evidence behind your skills.** It reflects how your own repositories contribute to your skill picture, and it lets you see and verify which job sources each posting came from.
 - **Reaches you where you are.** It can send a daily summary and take simple commands through Slack, read job-related email to keep your application tracker up to date, and offer a **free companion mobile app** (iOS and Android) showing your daily brief, matched jobs, and pending approvals on the go.
 - **Works on desktop too.** A small companion program for your own computer lets you review devices, pair the desktop agent, and run job-site browsing from your own logged-in session.
 
