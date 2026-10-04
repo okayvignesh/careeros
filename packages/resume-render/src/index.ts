@@ -6,6 +6,7 @@ import {
   type ResumePdfProps,
 } from './templates/ats-first';
 import { templates } from './templates';
+import { parseTemplateId } from './targeting';
 import type { ResumeDoc, TemplateId } from './types';
 
 /**
@@ -23,21 +24,31 @@ export async function renderCoverLetterPdf(props: CoverLetterPdfProps): Promise<
 }
 
 /**
- * Same as `renderResumePdf` but lets the caller pick a template. Backward-
- * compatible default (`classic`) matches the old byte-stable output.
+ * Same as `renderResumePdf` but lets the caller pick a template. Legacy ids
+ * (`ats-first`, `standard`, `default`) are normalized to canonical ids so the
+ * DB defaults no longer throw; a genuinely unknown id still throws so a typo in
+ * a caller isn't silently rendered with the wrong layout.
  */
 export async function renderResumePdfByTemplate(
   doc: ResumeDoc,
-  opts: { template?: TemplateId } = {},
+  opts: { template?: TemplateId | string } = {},
 ): Promise<Buffer> {
-  const id = opts.template ?? 'classic';
+  const requested = opts.template;
+  const id = requested === undefined ? 'classic' : parseTemplateId(requested);
+  if (!id) throw new Error(`Unknown template: ${requested}`);
   const tpl = templates[id];
-  if (!tpl) throw new Error(`Unknown template: ${id}`);
   return await renderToBuffer(tpl.renderPdf(doc));
 }
 
 export { renderResumeDocx } from './docx';
 export { templates, templateList } from './templates';
 export { AtsFirstResume, AtsFirstCoverLetter };
+export {
+  RESUME_TEMPLATE_IDS,
+  RESUME_REGION_TEMPLATE_MAP,
+  regionToTemplate,
+  parseTemplateId,
+  normalizeTemplateId,
+} from './targeting';
 export type { ResumePdfProps, CoverLetterPdfProps };
-export type { ResumeDoc, ResumeSection, TemplateId, Template } from './types';
+export type { ResumeDoc, ResumeSection, ResumeContact, TemplateId, Template } from './types';

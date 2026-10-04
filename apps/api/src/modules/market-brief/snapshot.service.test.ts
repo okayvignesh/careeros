@@ -22,15 +22,19 @@ type Job = {
   skillIds: string[];
   sourcePostedAt: Date | null;
   firstSeenAt: Date;
+  country?: string | null;
+  region?: string | null;
+  workplaceType?: string | null;
+  remoteScope?: string | null;
 };
 
 function fixturePool(now = new Date('2026-09-27T12:00:00Z')): Job[] {
   const d = (deltaMs: number) => new Date(now.getTime() - deltaMs);
   return [
-    { id: 'j1', title: 'Backend', company: 'Acme', canonicalUrl: 'u1', remote: true, skillIds: ['typescript', 'postgres'], sourcePostedAt: d(1 * 86_400_000), firstSeenAt: d(1 * 86_400_000) },
-    { id: 'j2', title: 'Platform', company: 'Acme', canonicalUrl: 'u2', remote: true, skillIds: ['typescript', 'kubernetes'], sourcePostedAt: d(2 * 86_400_000), firstSeenAt: d(2 * 86_400_000) },
-    { id: 'j3', title: 'Data', company: 'Globex', canonicalUrl: 'u3', remote: true, skillIds: ['python', 'postgres'], sourcePostedAt: d(3 * 86_400_000), firstSeenAt: d(3 * 86_400_000) },
-    { id: 'j4', title: 'Backend', company: 'Initech', canonicalUrl: 'u4', remote: false, skillIds: ['typescript'], sourcePostedAt: d(4 * 86_400_000), firstSeenAt: d(4 * 86_400_000) },
+    { id: 'j1', title: 'Backend', company: 'Acme', canonicalUrl: 'u1', remote: true, skillIds: ['typescript', 'postgres'], sourcePostedAt: d(1 * 86_400_000), firstSeenAt: d(1 * 86_400_000), country: 'US', region: 'north_america', workplaceType: 'remote', remoteScope: 'remote_global' },
+    { id: 'j2', title: 'Platform', company: 'Acme', canonicalUrl: 'u2', remote: true, skillIds: ['typescript', 'kubernetes'], sourcePostedAt: d(2 * 86_400_000), firstSeenAt: d(2 * 86_400_000), country: 'US', region: 'north_america', workplaceType: 'remote', remoteScope: 'remote_global' },
+    { id: 'j3', title: 'Data', company: 'Globex', canonicalUrl: 'u3', remote: true, skillIds: ['python', 'postgres'], sourcePostedAt: d(3 * 86_400_000), firstSeenAt: d(3 * 86_400_000), country: 'DE', region: 'europe', workplaceType: 'remote', remoteScope: 'remote_regional' },
+    { id: 'j4', title: 'Backend', company: 'Initech', canonicalUrl: 'u4', remote: false, skillIds: ['typescript'], sourcePostedAt: d(4 * 86_400_000), firstSeenAt: d(4 * 86_400_000), country: 'DE', region: 'europe', workplaceType: 'onsite', remoteScope: null },
   ];
 }
 
@@ -119,6 +123,9 @@ function fakePrefs(overrides: Partial<{
   locations: string[];
   seniority: string[];
   currency: string;
+  countries: string[];
+  workplaceTypes: string[];
+  remoteScopes: string[];
 }> = {}) {
   return {
     get: async () => ({
@@ -130,6 +137,9 @@ function fakePrefs(overrides: Partial<{
       mustHaveSkills: overrides.mustHaveSkills ?? [],
       dealbreakerSkills: overrides.dealbreakerSkills ?? [],
       companyBlacklist: overrides.companyBlacklist ?? [],
+      countries: overrides.countries ?? [],
+      workplaceTypes: overrides.workplaceTypes ?? [],
+      remoteScopes: overrides.remoteScopes ?? [],
       updatedAt: '2026-09-20T00:00:00.000Z',
     }),
   };
@@ -155,8 +165,8 @@ afterEach(() => vi.useRealTimers());
 
 describe('hashFilter', () => {
   it('is stable across list order (sorted internally)', () => {
-    const a = hashFilter({ remoteOnly: true, mustHaveSkills: ['a', 'b'], dealbreakerSkills: ['x'], companyBlacklist: ['Acme'] });
-    const b = hashFilter({ remoteOnly: true, mustHaveSkills: ['b', 'a'], dealbreakerSkills: ['x'], companyBlacklist: ['acme'] });
+    const a = hashFilter({ ...DEFAULT_FILTER, remoteOnly: true, mustHaveSkills: ['a', 'b'], dealbreakerSkills: ['x'], companyBlacklist: ['Acme'] });
+    const b = hashFilter({ ...DEFAULT_FILTER, remoteOnly: true, mustHaveSkills: ['b', 'a'], dealbreakerSkills: ['x'], companyBlacklist: ['acme'] });
     expect(a).toBe(b);
   });
 
@@ -171,10 +181,20 @@ describe('hashFilter', () => {
     const b = hashFilter({ ...DEFAULT_FILTER, dealbreakerSkills: ['java'] });
     expect(a).not.toBe(b);
   });
+
+  it('changes when the geo scope changes (US vs DE) and is order-stable', () => {
+    const us = hashFilter({ ...DEFAULT_FILTER, countries: ['us'] });
+    const de = hashFilter({ ...DEFAULT_FILTER, countries: ['DE'] });
+    const us2 = hashFilter({ ...DEFAULT_FILTER, countries: ['US'] });
+    expect(us).not.toBe(de);
+    expect(us).toBe(us2);
+    // A workplace/remote-scope constraint also rotates the hash.
+    expect(hashFilter({ ...DEFAULT_FILTER, workplaceTypes: ['onsite'] })).not.toBe(us);
+  });
 });
 
 describe('prefsToFilter', () => {
-  it('drops fields that do not affect the pool (targetRoles, comp, currency, seniority)', () => {
+  it('drops fields that do not affect the pool and carries the geo scope', () => {
     const prefs = {
       targetRoles: ['x'],
       locations: ['NYC'],
@@ -184,6 +204,9 @@ describe('prefsToFilter', () => {
       mustHaveSkills: ['ts'],
       dealbreakerSkills: ['java'],
       companyBlacklist: ['Acme'],
+      countries: ['de', 'us'],
+      workplaceTypes: ['remote' as const],
+      remoteScopes: ['remote_global' as const],
       updatedAt: null,
     };
     const filter = prefsToFilter(prefs);
@@ -192,6 +215,9 @@ describe('prefsToFilter', () => {
       mustHaveSkills: ['ts'],
       dealbreakerSkills: ['java'],
       companyBlacklist: ['Acme'],
+      countries: ['DE', 'US'],
+      workplaceTypes: ['remote'],
+      remoteScopes: ['remote_global'],
     });
   });
 });
@@ -238,6 +264,73 @@ describe('SnapshotService.computeSnapshot', () => {
     const { stats } = await svc.computeSnapshot({ ...DEFAULT_FILTER, companyBlacklist: ['acme'] });
     expect(stats.totalCount).toBe(2);
     expect(stats.topCompanies.find((c) => c.company === 'Acme')).toBeUndefined();
+  });
+});
+
+// -----------------------------------------------------------------------------
+// P2 §8: geo-scoped snapshots. Two profiles over one corpus must produce
+// different demand sets AND different filter hashes.
+// -----------------------------------------------------------------------------
+
+describe('SnapshotService.computeSnapshot geo scope (P2 §8)', () => {
+  it('filters the pool to the target country', async () => {
+    const { svc } = build();
+    const us = await svc.computeSnapshot({ ...DEFAULT_FILTER, countries: ['US'] });
+    const de = await svc.computeSnapshot({ ...DEFAULT_FILTER, countries: ['DE'] });
+    expect(us.stats.totalCount).toBe(2);
+    expect(de.stats.totalCount).toBe(2);
+  });
+
+  it('excludes a null-geo job when a country axis is constrained', async () => {
+    const jobs: Job[] = [
+      ...fixturePool(),
+      {
+        id: 'j-null',
+        title: 'Unlocated',
+        company: 'Nowhere',
+        canonicalUrl: 'u-null',
+        remote: true,
+        skillIds: ['elixir'],
+        sourcePostedAt: new Date('2026-09-26T12:00:00Z'),
+        firstSeenAt: new Date('2026-09-26T12:00:00Z'),
+        country: null,
+        region: null,
+        workplaceType: null,
+        remoteScope: null,
+      },
+    ];
+    const { svc } = build({ jobs });
+    const scoped = await svc.computeSnapshot({ ...DEFAULT_FILTER, countries: ['DE'] });
+    // j3 + j4 only; the null-country row is excluded, not counted.
+    expect(scoped.stats.totalCount).toBe(2);
+    expect(scoped.stats.topSkills.some((s) => s.skillId === 'elixir')).toBe(false);
+    // Unconstrained scope counts it.
+    const all = await svc.computeSnapshot(DEFAULT_FILTER);
+    expect(all.stats.totalCount).toBe(5);
+    expect(all.stats.topSkills.some((s) => s.skillId === 'elixir')).toBe(true);
+  });
+
+  it('US vs DE over one corpus: different demand sets AND different hashes', async () => {
+    const { svc } = build();
+    const us = await svc.computeSnapshot({ ...DEFAULT_FILTER, countries: ['US'] });
+    const de = await svc.computeSnapshot({ ...DEFAULT_FILTER, countries: ['DE'] });
+    const skills = (s: typeof us.stats) =>
+      Object.fromEntries(s.topSkills.map((t) => [t.skillId, t.count]));
+    expect(skills(us.stats)).not.toEqual(skills(de.stats));
+    // US has kubernetes (j2); DE has python (j3).
+    expect(skills(us.stats).kubernetes).toBe(1);
+    expect(skills(de.stats).python).toBe(1);
+    expect(us.filterHash).not.toBe(de.filterHash);
+    // MUTATION SMOKE: drop geo from hashFilter -> the two hashes collide and
+    // the snapshot reuses the wrong market's stats.
+  });
+
+  it('workplace + remote-scope axes filter the pool deterministically', async () => {
+    const { svc } = build();
+    const onsite = await svc.computeSnapshot({ ...DEFAULT_FILTER, workplaceTypes: ['onsite'] });
+    // Only j4 is onsite.
+    expect(onsite.stats.totalCount).toBe(1);
+    expect(onsite.stats.topCompanies[0].company).toBe('Initech');
   });
 });
 

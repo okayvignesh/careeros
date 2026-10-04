@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { AlertTriangle, ArrowUpRight, CheckCircle2, ClipboardCopy, Download, Mail, ShieldQuestion } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { AlertTriangle, ArrowUpRight, CheckCircle2, ClipboardCopy, Download, Mail, RefreshCw, ShieldQuestion } from 'lucide-react';
 import { Button } from '@careeros/ui';
-import { apiBrowserUrl, apiGet } from '@/lib/api-client';
+import { apiBrowserUrl, apiGet, apiPost } from '@/lib/api-client';
 
 interface Paragraph {
   text: string;
@@ -39,10 +40,19 @@ interface Letter {
   jobCompany: string | null;
   roleTarget: string;
   templateId: string;
+  region: string | null;
+  tone: string | null;
   content: Content;
   factRefs: FactRefInfo[];
   audit: FactCheckAudit;
   createdAt: string;
+}
+
+const TONE_OPTIONS = ['professional', 'concise', 'enthusiastic', 'warm'] as const;
+type ToneOption = (typeof TONE_OPTIONS)[number];
+
+function canonicalTone(raw: string | null): ToneOption {
+  return (TONE_OPTIONS as readonly string[]).includes(raw ?? '') ? (raw as ToneOption) : 'professional';
 }
 
 export function CoverLetterView({ id }: { id: string }) {
@@ -88,8 +98,12 @@ export function CoverLetterView({ id }: { id: string }) {
             For <span className="font-medium">{letter.jobTitle ?? letter.roleTarget}</span>
             {letter.jobCompany && <span className="text-fg-muted"> @ {letter.jobCompany}</span>}
           </span>
-          <span className="text-[11.5px] text-fg-faint">
-            Template {letter.templateId} · Generated {new Date(letter.createdAt).toLocaleString()}
+          <span className="flex flex-wrap items-center gap-1.5 text-[11.5px] text-fg-faint">
+            <span data-testid="cover-tone">Tone {canonicalTone(letter.tone)}</span>
+            <span aria-hidden>·</span>
+            <span data-testid="cover-region">Region {letter.region ?? 'unspecified'}</span>
+            <span aria-hidden>·</span>
+            <span>Generated {new Date(letter.createdAt).toLocaleString()}</span>
           </span>
         </div>
         <div className="ml-auto flex items-center gap-2">
@@ -109,6 +123,8 @@ export function CoverLetterView({ id }: { id: string }) {
       </div>
 
       <AuditPanel audit={letter.audit} />
+
+      {letter.jobId && <RegenerateToneControls letter={letter} onError={setError} />}
 
       <article className="flex flex-col gap-4 rounded-[var(--radius)] border border-[hsl(var(--border))] bg-[hsl(var(--bg-elev-1))] px-8 py-8 text-[14px] leading-relaxed text-fg">
         <p>{letter.content.greeting}</p>
@@ -138,6 +154,56 @@ export function CoverLetterView({ id }: { id: string }) {
         ))}
         <p>{letter.content.closing}</p>
       </article>
+    </div>
+  );
+}
+
+/**
+ * P2b: real tone control. The default tone is code-selected from the profile;
+ * this lets the user override it and regenerate through the real endpoint.
+ */
+function RegenerateToneControls({ letter, onError }: { letter: Letter; onError: (e: string) => void }) {
+  const router = useRouter();
+  const [tone, setTone] = useState<ToneOption>(canonicalTone(letter.tone));
+  const [busy, setBusy] = useState(false);
+
+  async function regenerate() {
+    if (!letter.jobId) return;
+    setBusy(true);
+    onError('');
+    try {
+      const next = await apiPost<{ id: string }>(
+        `/me/cover-letters/for-job/${encodeURIComponent(letter.jobId)}?tone=${encodeURIComponent(tone)}`,
+      );
+      router.push(`/cover-letters/${next.id}`);
+    } catch (e) {
+      onError((e as Error).message);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-[var(--radius)] border border-[hsl(var(--border))] bg-[hsl(var(--bg-elev-1))] px-4 py-2.5 text-[12.5px]">
+      <label htmlFor="cover-tone-select" className="text-fg-muted">
+        Tone
+      </label>
+      <select
+        id="cover-tone-select"
+        data-testid="cover-tone-select"
+        value={tone}
+        onChange={(e) => setTone(e.target.value as ToneOption)}
+        disabled={busy}
+        className="rounded-[var(--radius)] border border-[hsl(var(--border-strong))] bg-[hsl(var(--bg))] px-2 py-1 text-[12.5px] text-fg"
+      >
+        {TONE_OPTIONS.map((opt) => (
+          <option key={opt} value={opt}>
+            {opt}
+          </option>
+        ))}
+      </select>
+      <Button size="sm" variant="ghost" onClick={regenerate} disabled={busy} data-testid="cover-regenerate">
+        <RefreshCw className="h-3.5 w-3.5" /> {busy ? 'Regenerating' : 'Regenerate'}
+      </Button>
     </div>
   );
 }

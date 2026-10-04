@@ -472,3 +472,33 @@ describe('AtsSubmitService: P1 eligibility gate', () => {
     expect(prisma._approvalItems).toHaveLength(0);
   });
 });
+
+describe('AtsSubmitService renderResume (P2b region template)', () => {
+  it('renders through renderResumePdfByTemplate and normalizes the legacy `ats-first` id', async () => {
+    const { svc } = mkSvc();
+    const resume = await (
+      svc as unknown as {
+        renderResume: (v: {
+          contentJson: unknown;
+          roleTarget: string | null;
+          templateId: string | null;
+        }) => Promise<{ bytes: Buffer; filename: string }>;
+      }
+    ).renderResume({
+      contentJson: {
+        content: {
+          summary: 'Backend engineer with production experience.',
+          sections: [{ heading: 'Experience', bullets: [{ text: 'Ran production systems.' }] }],
+        },
+        audit: { status: 'passed' },
+        contact: { location: 'Berlin, Germany' },
+      },
+      roleTarget: 'SRE',
+      templateId: 'ats-first',
+    });
+    expect(resume.bytes.slice(0, 5).toString('ascii')).toBe('%PDF-');
+    expect(resume.filename).toBe('resume.pdf');
+    // MUTATION-SMOKE: revert to renderResumePdf and passing `ats-first` to
+    // renderResumePdfByTemplate throws `Unknown template` instead of rendering.
+  });
+});

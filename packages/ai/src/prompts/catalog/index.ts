@@ -4,6 +4,7 @@
 // works without an explicit bootstrap call.
 import { PromptRegistry } from './registry';
 import { resumeFactCheck } from './resume-fact-check';
+import { tailoredResumeWriter } from './tailored-resume-writer';
 import { coverLetterGeneration } from './cover-letter-generation';
 import { skillExtract } from './skill-extract';
 import { marketBriefSynthesis } from './market-brief-synthesis';
@@ -20,6 +21,7 @@ export {
 } from './hash-log';
 
 export { resumeFactCheck } from './resume-fact-check';
+export { tailoredResumeWriter } from './tailored-resume-writer';
 export { coverLetterGeneration } from './cover-letter-generation';
 export { skillExtract } from './skill-extract';
 export { marketBriefSynthesis } from './market-brief-synthesis';
@@ -27,12 +29,13 @@ export { assessmentGraderKnowledge } from './assessment-grader-knowledge';
 export { assessmentGraderCodeReview } from './assessment-grader-code-review';
 
 /**
- * Default catalog registry. Composition-root style: the six ticket-scoped
+ * Default catalog registry. Composition-root style: the ticket-scoped
  * prompts land here at import time so consumers don't need a bootstrap call.
  * Tests that need an isolated registry construct their own PromptRegistry.
  */
 export const promptCatalog = new PromptRegistry();
 promptCatalog.register(resumeFactCheck);
+promptCatalog.register(tailoredResumeWriter);
 promptCatalog.register(coverLetterGeneration);
 promptCatalog.register(skillExtract);
 promptCatalog.register(marketBriefSynthesis);

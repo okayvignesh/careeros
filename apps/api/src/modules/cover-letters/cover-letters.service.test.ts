@@ -33,6 +33,7 @@ function fakePrisma(opts: {
   job?: { id: string; title: string; company: string; description: string } | null;
   facts?: FactRow[];
   providerConfig?: { provider: string; isDefault: boolean; apiKeySecretId: string; baseUrl: string | null; chatModel: string } | null;
+  profile?: Record<string, unknown> | null;
 }) {
   const facts = opts.facts ?? [];
   const created: Persisted[] = [];
@@ -43,6 +44,9 @@ function fakePrisma(opts: {
         if (opts.job && opts.job.id === where.id) return opts.job;
         return null;
       },
+    },
+    userJobPreferences: {
+      findUnique: async () => opts.profile ?? null,
     },
     resumeFact: {
       findMany: async ({ where }: { where: { userId: string; verified?: boolean; id?: { in: string[] } } }) => {
@@ -345,6 +349,10 @@ describe('CoverLettersService.generateForJob - prompt structure (grounded anchor
       jobCompany: 'c',
       jobDescription: 'd',
       facts: '- id=f-1 kind=role x',
+      targetRole: 'Staff Engineer',
+      targetMarket: 'United States',
+      region: 'north_america',
+      tone: 'professional',
     });
     expect(rendered.system).toMatch(/every paragraph must cite at least one factRef/i);
     expect(rendered.system).toMatch(/do not invent/i);
@@ -433,5 +441,61 @@ describe('CoverLettersService.generateForJob - precondition guards', () => {
     // MUTATION-SMOKE: drop `verified: true` from the resumeFact.findMany where
     // clause in the service and the unverified fact reaches the prompt,
     // failing the `.not.toContain` assertions.
+  });
+});
+
+describe('CoverLettersService P2b targeting + tone', () => {
+  const profile = {
+    targetRoles: ['Staff SRE'],
+    countries: ['DE'],
+    homeCountry: null,
+    seniority: ['staff'],
+    relocationWilling: false,
+    relocationCountries: [],
+  };
+
+  it('selects a code-only tone, persists region/tone/role, and renders them into the prompt', async () => {
+    const prisma = fakePrisma({ job, facts: twoFacts, providerConfig: validConfig, profile });
+    const svc = buildService(prisma);
+    const provider = stubProvider([
+      draft([{ text: 'A.', factRefs: ['f-role-1'] }, { text: 'B.', factRefs: ['f-edu-1'] }]),
+      allSupported(2),
+    ]);
+    vi.spyOn(svc as never as { tryLoadProvider: () => Promise<unknown> }, 'tryLoadProvider').mockResolvedValue(provider);
+
+    const out = await svc.generateForJob('u1', 'job-1');
+
+    // staff → concise, picked in code (never by the model).
+    expect(out.tone).toBe('concise');
+    expect(out.region).toBe('europe');
+    expect(out.roleTarget).toBe('Staff SRE');
+    expect(provider.calls[0].user).toContain('Tone: concise');
+    expect(provider.calls[0].user).toContain('Target region: europe');
+    expect(provider.calls[0].user).toContain(
+      'Target role (frame the letter for this role): Staff SRE',
+    );
+    // MUTATION-SMOKE: hardcode tone to a constant and the `toBe('concise')` fails.
+  });
+
+  it('honors an explicit valid tone override', async () => {
+    const prisma = fakePrisma({ job, facts: twoFacts, providerConfig: validConfig, profile });
+    const svc = buildService(prisma);
+    const provider = stubProvider([
+      draft([{ text: 'A.', factRefs: ['f-role-1'] }, { text: 'B.', factRefs: ['f-edu-1'] }]),
+      allSupported(2),
+    ]);
+    vi.spyOn(svc as never as { tryLoadProvider: () => Promise<unknown> }, 'tryLoadProvider').mockResolvedValue(provider);
+
+    const out = await svc.generateForJob('u1', 'job-1', { tone: 'warm' });
+    expect(out.tone).toBe('warm');
+    expect(provider.calls[0].user).toContain('Tone: warm');
+  });
+
+  it('rejects an unknown explicit tone before any LLM call', async () => {
+    const prisma = fakePrisma({ job, facts: twoFacts, providerConfig: validConfig, profile });
+    const svc = buildService(prisma);
+    await expect(svc.generateForJob('u1', 'job-1', { tone: 'angry' })).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
   });
 });

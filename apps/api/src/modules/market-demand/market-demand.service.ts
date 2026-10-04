@@ -7,6 +7,7 @@ import type {
 } from '@careeros/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { JobPreferencesService } from '../job-prefs/job-prefs.service';
+import { jobMatchesMarketScope, marketScope } from './market-scope';
 
 const DAY_MS = 86_400_000;
 /** Rolling-window ceilings. `POOL_ROW_CAP` mirrors market-brief/snapshot so the
@@ -33,6 +34,11 @@ export interface DemandJob {
   primarySource: string;
   sourcePostedAt: Date | null;
   firstSeenAt: Date;
+  /** P1 structured geo; optional so the pure projections don't require it. */
+  country?: string | null;
+  region?: string | null;
+  workplaceType?: string | null;
+  remoteScope?: string | null;
 }
 
 export interface SkillMeta {
@@ -76,10 +82,32 @@ export class MarketDemandService {
   }
 
   /**
-   * Preference-filtered, freshness-bounded pool shared by both endpoints.
-   * Shape mirrors `market-brief.service.ts::loadFilteredPool` (same 500-row
-   * pre-filter cap + same user rules) so a demand table and a brief never
-   * disagree on the pool they describe.
+   * Geo-scoped demand histogram consumed by `LearningPriorityService` (P2 §8
+   * unification): the same preference- + geo-filtered pool the demand table
+   * uses, reduced to `skillId → posting count`. This replaces learning-priority's
+   * old direct `normalizedJob` query — which applied NO prefs/geo filters — so
+   * the two surfaces can no longer disagree.
+   */
+  async demandBySkill(
+    userId: string,
+    windowDays: number,
+    now: Date = new Date(),
+  ): Promise<Map<string, number>> {
+    const jobs = await this.loadPool(userId, windowDays, now);
+    const demand = new Map<string, number>();
+    for (const job of jobs) {
+      for (const skillId of job.skillIds) {
+        demand.set(skillId, (demand.get(skillId) ?? 0) + 1);
+      }
+    }
+    return demand;
+  }
+
+  /**
+   * Preference- and geo-filtered, freshness-bounded pool shared by both
+   * endpoints. Shape mirrors `market-brief.service.ts::loadFilteredPool` (same
+   * 500-row pre-filter cap + same user rules + same market scope) so a demand
+   * table and a brief never disagree on the pool they describe.
    */
   private async loadPool(userId: string, windowDays: number, now: Date): Promise<DemandJob[]> {
     const prefs = await this.prefs.get(userId);
@@ -102,7 +130,12 @@ export class MarketDemandService {
     const blacklist = new Set(prefs.companyBlacklist.map((c) => c.toLowerCase().trim()));
     const mustHave = new Set(prefs.mustHaveSkills);
     const dealbreakers = new Set(prefs.dealbreakerSkills);
+    const scope = marketScope(prefs.countries, prefs.workplaceTypes, prefs.remoteScopes);
     return rows.filter((r) => {
+      // Geo scope first: a job in another market is not demand here, and a
+      // null-geo job is excluded (reason available from `jobMatchesMarketScope`)
+      // when an axis is constrained — never counted as a match.
+      if (!jobMatchesMarketScope(scope, r).inScope) return false;
       if (blacklist.has(r.company.toLowerCase().trim())) return false;
       const jobSkills = new Set(r.skillIds);
       for (const d of dealbreakers) if (jobSkills.has(d)) return false;

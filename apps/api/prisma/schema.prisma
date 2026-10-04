@@ -30,6 +30,7 @@ model User {
   evidence        Evidence[]
   candidateSkillStates CandidateSkillState[]
   skillStateEvents SkillStateEvent[]
+  aimRoleThresholds AimRoleThreshold[]
   setupState      SetupStateRow?
   attempts        Attempt[]
   xpEvents        XpEvent[]
@@ -660,6 +661,27 @@ model SkillStateEvent {
   @@index([userId, skillId, timestamp])
   @@index([evidenceId])
   @@map("skill_state_events")
+}
+
+/// P2 job-targeting §8: per-user, per-role proficiency bar used by the
+/// learning-priority formula. `roleKey` is a `RoleFamily` key from
+/// `skills/role-skill-map.ts`; the row is absent when the user has no explicit
+/// bar, in which case `LearningPriorityService` falls back to the
+/// `TARGET_ROLE_PROF` / `TARGET_DEFAULT_PROF` constants. Unique on
+/// (userId, roleKey) so a role has exactly one bar; schema stays
+/// multi-user-ready.
+model AimRoleThreshold {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  roleKey   String
+  threshold Decimal  @db.Decimal(4, 3) /// [0..1] target readiness for the role's skills
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleKey])
+  @@map("aim_role_thresholds")
 }
 
 /// Grounded-generation hallucination log. One row per suspicious output.

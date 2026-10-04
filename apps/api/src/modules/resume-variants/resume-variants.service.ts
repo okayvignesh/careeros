@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { TailoredResumeContent } from '@careeros/shared';
-import { renderResumePdf } from '@careeros/resume-render';
+import { renderResumePdfByTemplate, type ResumeContact } from '@careeros/resume-render';
 import {
   renderPrompt,
   runFactCheck,
@@ -14,6 +14,12 @@ import { UsageService } from '../usage/usage.service';
 import { UsageCache } from '../usage/usage.cache';
 import { SensitivityGateService } from '../../common/sensitivity-gate.service';
 import { ProviderLoaderService } from '../../common/provider-loader.service';
+import {
+  buildResumeContact,
+  resolveTargetingContext,
+  EMPTY_TARGETING_PROFILE,
+  type TargetingProfile,
+} from './targeting-context';
 
 export interface FactRefInfo {
   id: string;
@@ -44,6 +50,8 @@ export interface ResumeVariantDto {
   jobCompany: string | null;
   roleTarget: string;
   templateId: string;
+  region: string | null;
+  contact: ResumeContact | null;
   content: TailoredResumeContent;
   factRefs: FactRefInfo[];
   audit: FactCheckAudit;
@@ -62,7 +70,9 @@ export class ResumeVariantsService {
     private readonly providerLoader: ProviderLoaderService,
   ) {}
 
-  async listForUser(userId: string): Promise<Array<Omit<ResumeVariantDto, 'content' | 'factRefs' | 'audit'>>> {
+  async listForUser(
+    userId: string,
+  ): Promise<Array<Omit<ResumeVariantDto, 'content' | 'factRefs' | 'audit' | 'contact'>>> {
     const rows = await this.prisma.resumeVariant.findMany({
       where: { userId },
       orderBy: { createdAt: 'desc' },
@@ -85,6 +95,7 @@ export class ResumeVariantsService {
         jobCompany: j?.company ?? null,
         roleTarget: r.roleTarget,
         templateId: r.templateId,
+        region: unwrapContentJson(r.contentJson).region ?? null,
         createdAt: r.createdAt.toISOString(),
       };
     });
@@ -100,7 +111,7 @@ export class ResumeVariantsService {
         })
       : null;
     const factRefs = await this.loadFactRefs(userId, row.factRefs);
-    const { content, audit } = unwrapContentJson(row.contentJson);
+    const { content, audit, region, contact } = unwrapContentJson(row.contentJson);
     return {
       id: row.id,
       jobId: row.jobId,
@@ -108,6 +119,8 @@ export class ResumeVariantsService {
       jobCompany: job?.company ?? null,
       roleTarget: row.roleTarget,
       templateId: row.templateId,
+      region: region ?? null,
+      contact: contact ?? null,
       content,
       audit,
       factRefs,
@@ -115,9 +128,33 @@ export class ResumeVariantsService {
     };
   }
 
-  async generateForJob(userId: string, jobId: string): Promise<ResumeVariantDto> {
+  async generateForJob(
+    userId: string,
+    jobId: string,
+    opts: { template?: string } = {},
+  ): Promise<ResumeVariantDto> {
     const job = await this.prisma.normalizedJob.findUnique({ where: { id: jobId } });
     if (!job) throw new NotFoundException('Job not found');
+
+    // P2b targeting context — role override + region + template, all resolved
+    // in code from the profile (never by the LLM). Missing profile is fine.
+    const profileRow = await this.prisma.userJobPreferences.findUnique({
+      where: { userId },
+      select: {
+        targetRoles: true,
+        countries: true,
+        homeCountry: true,
+        seniority: true,
+        relocationWilling: true,
+        relocationCountries: true,
+      },
+    });
+    const profile: TargetingProfile = profileRow ?? EMPTY_TARGETING_PROFILE;
+    const ctx = resolveTargetingContext(
+      profile,
+      { title: job.title, country: job.country ?? null },
+      opts,
+    );
 
     const facts = await this.prisma.resumeFact.findMany({
       where: { userId, verified: true },
@@ -155,6 +192,9 @@ export class ResumeVariantsService {
       jobDescription: descWrapped.content,
       facts: factsRendered,
       candidateSkills: skillList,
+      targetRole: ctx.targetRole,
+      targetMarket: ctx.targetMarket,
+      region: ctx.region ?? 'unspecified',
     });
     // A-M9: per-user LLM concurrency ceiling.
     const raw = (await this.usage.runWithUserLimit(userId, () =>
@@ -219,15 +259,25 @@ export class ResumeVariantsService {
       new Set(finalSections.flatMap((sec) => sec.bullets.flatMap((b) => b.factRefs))),
     );
 
-    // Store {content, audit} wrapper so historical variants can be re-audited
-    // and the UI can surface what was dropped without re-running the check.
-    const persistPayload = { content: finalContent, audit };
+    // Store {content, audit, targeting metadata} wrapper so historical variants
+    // keep their resolved region/template and re-render identically, and the UI
+    // can surface what was dropped without re-running the check.
+    const contact = buildResumeContact(facts);
+    const persistPayload = {
+      content: finalContent,
+      audit,
+      region: ctx.region,
+      templateId: ctx.templateId,
+      targetMarket: ctx.targetMarket,
+      ...(contact ? { contact } : {}),
+    };
 
     const row = await this.prisma.resumeVariant.create({
       data: {
         userId,
         jobId,
-        roleTarget: job.title,
+        roleTarget: ctx.targetRole,
+        templateId: ctx.templateId,
         contentJson: persistPayload as unknown as Prisma.InputJsonValue,
         factRefs: allRefs,
       },
@@ -371,11 +421,15 @@ export class ResumeVariantsService {
   /** Render the variant as PDF via `@careeros/resume-render`. */
   async renderPdf(userId: string, id: string): Promise<{ buffer: Buffer; filename: string }> {
     const variant = await this.getById(userId, id);
-    const buffer = await renderResumePdf({
-      roleTarget: variant.roleTarget,
-      jobCompany: variant.jobCompany,
-      content: variant.content,
-    });
+    const buffer = await renderResumePdfByTemplate(
+      {
+        roleTarget: variant.roleTarget,
+        jobCompany: variant.jobCompany,
+        ...(variant.contact ? { contact: variant.contact } : {}),
+        content: variant.content,
+      },
+      { template: variant.templateId },
+    );
     const safeCompany = (variant.jobCompany ?? 'job').replace(/[^a-z0-9]+/gi, '-').toLowerCase();
     return { buffer, filename: `resume-${safeCompany}-${variant.id.slice(0, 8)}.pdf` };
   }
@@ -413,13 +467,28 @@ export class ResumeVariantsService {
  */
 function unwrapContentJson(
   raw: Prisma.JsonValue,
-): { content: TailoredResumeContent; audit: FactCheckAudit } {
+): {
+  content: TailoredResumeContent;
+  audit: FactCheckAudit;
+  region?: string | null;
+  contact?: ResumeContact | null;
+} {
   const obj = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   if (obj && 'content' in obj && 'audit' in obj) {
-    return {
+    const out: {
+      content: TailoredResumeContent;
+      audit: FactCheckAudit;
+      region?: string | null;
+      contact?: ResumeContact | null;
+    } = {
       content: obj.content as unknown as TailoredResumeContent,
       audit: obj.audit as unknown as FactCheckAudit,
     };
+    if (typeof obj.region === 'string' || obj.region === null) out.region = obj.region;
+    if (obj.contact && typeof obj.contact === 'object') {
+      out.contact = obj.contact as unknown as ResumeContact;
+    }
+    return out;
   }
   return {
     content: raw as unknown as TailoredResumeContent,

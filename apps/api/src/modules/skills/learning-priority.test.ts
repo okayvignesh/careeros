@@ -13,6 +13,8 @@
 //   5. `targetRoleSkills` is populated via the role-skill map.
 //   6. An empty user still gets a ranked list dominated by demand.
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { NotFoundException } from '@nestjs/common';
 import { computeLearningPriority } from './learning-priority';
@@ -20,6 +22,7 @@ import { LearningPriorityService } from './learning-priority.service';
 import {
   matchRoleFamily,
   resolveRoleSkills,
+  ROLE_FAMILIES,
   ROLE_FAMILY_COUNT,
   skillsForFamily,
 } from './role-skill-map';
@@ -216,6 +219,44 @@ describe('computeLearningPriority (pure)', () => {
     // contract the UI depends on for progress bars.
   });
 
+  it('roleThresholdBySkill overrides the 0.7/0.5 default target; missing skills fall back', () => {
+    const rows = computeLearningPriority({
+      userProficiencyBySkill: new Map([
+        ['nodejs', 0.75],
+        ['go', 0.75],
+      ]),
+      marketDemandBySkill: new Map([
+        ['nodejs', 1],
+        ['go', 1],
+      ]),
+      targetRoleSkills: new Set(['nodejs', 'go']),
+      roleThresholdBySkill: new Map([['nodejs', 0.9]]),
+      now: NOW,
+    });
+    const nodejs = rows.find((r) => r.skillId === 'nodejs')!;
+    const go = rows.find((r) => r.skillId === 'go')!;
+    // nodejs bar 0.9 -> gap 0.15; go has no override -> 0.7 fallback -> gap 0.
+    expect(nodejs.factors.gap).toBeCloseTo(0.15, 5);
+    expect(go.factors.gap).toBe(0);
+    expect(nodejs.priority).toBeGreaterThan(go.priority);
+    // MUTATION SMOKE: ignore roleThresholdBySkill -> nodejs gap collapses to 0.
+  });
+
+  it('gap math uses current readiness, never historical demonstrated proficiency', () => {
+    const rows = computeLearningPriority({
+      // current readiness decayed to 0.3; history says 0.9.
+      userProficiencyBySkill: new Map([['react', 0.3]]),
+      historicalProficiencyBySkill: new Map([['react', 0.9]]),
+      marketDemandBySkill: new Map([['react', 1]]),
+      now: NOW,
+    });
+    const react = rows.find((r) => r.skillId === 'react')!;
+    // default target 0.5 -> gap 0.2 from readiness (not 0 from history).
+    expect(react.factors.gap).toBeCloseTo(0.2, 5);
+    expect(react.factors.historical).toBeCloseTo(0.9, 5);
+    expect(react.reasons).toContain('readiness decayed from demonstrated 0.90');
+  });
+
   it('rows are sorted priority desc, then skillId asc for stable tie-break', () => {
     const rows = computeLearningPriority({
       userProficiencyBySkill: new Map([
@@ -276,25 +317,32 @@ describe('role-skill map', () => {
 
 interface PrismaMock {
   candidateSkillState: { findMany: ReturnType<typeof vi.fn> };
-  normalizedJob: { findMany: ReturnType<typeof vi.fn> };
   evidence: { findMany: ReturnType<typeof vi.fn> };
+  aimRoleThreshold: { findMany: ReturnType<typeof vi.fn> };
 }
 
 function makePrismaMock(opts: {
-  states?: Array<{ skillId: string; proficiency: FakeDecimal }>;
-  jobs?: Array<{ skillIds: string[] }>;
+  states?: Array<{ skillId: string; proficiency: FakeDecimal; recencyDays?: number }>;
   evidence?: Array<{ skillId: string; observedAt: Date }>;
+  thresholds?: Array<{ roleKey: string; threshold: FakeDecimal }>;
 } = {}): PrismaMock {
   return {
     candidateSkillState: {
       findMany: vi.fn(async () => opts.states ?? []),
     },
-    normalizedJob: {
-      findMany: vi.fn(async () => opts.jobs ?? []),
-    },
     evidence: {
       findMany: vi.fn(async () => opts.evidence ?? []),
     },
+    aimRoleThreshold: {
+      findMany: vi.fn(async () => opts.thresholds ?? []),
+    },
+  };
+}
+
+/** Demand is now sourced from MarketDemandService (P2 §8 unification). */
+function makeDemandMock(demandBySkill: Map<string, number>) {
+  return {
+    demandBySkill: vi.fn(async () => demandBySkill),
   };
 }
 
@@ -309,45 +357,53 @@ function makePrefsMock(targetRoles: string[]) {
       mustHaveSkills: [],
       dealbreakerSkills: [],
       companyBlacklist: [],
+      countries: [],
+      workplaceTypes: [],
+      remoteScopes: [],
       updatedAt: null,
     })),
   };
 }
 
+function buildService(opts: {
+  prisma?: PrismaMock;
+  demand?: ReturnType<typeof makeDemandMock>;
+  targetRoles?: string[];
+}) {
+  const prisma = opts.prisma ?? makePrismaMock();
+  const demand = opts.demand ?? makeDemandMock(new Map());
+  const prefs = makePrefsMock(opts.targetRoles ?? []);
+  return {
+    svc: new LearningPriorityService(prisma as never, prefs as never, demand as never),
+    prisma,
+    demand,
+    prefs,
+  };
+}
+
 describe('LearningPriorityService.rankFor', () => {
-  it('queries normalizedJob with a 45-day freshness gate on sourcePostedAt|firstSeenAt', async () => {
-    const prisma = makePrismaMock({ jobs: [{ skillIds: ['react'] }] });
-    const svc = new LearningPriorityService(prisma as never, makePrefsMock([]) as never);
+  it('sources demand from MarketDemandService with the 45-day window and never queries normalizedJob directly (P2 §8)', async () => {
+    const prisma = makePrismaMock();
+    const demand = makeDemandMock(new Map([['react', 1]]));
+    const { svc } = buildService({ prisma, demand });
     await svc.rankFor(USER_ID);
 
-    expect(prisma.normalizedJob.findMany).toHaveBeenCalledOnce();
-    const args = prisma.normalizedJob.findMany.mock.calls[0][0] as {
-      where: { OR: Array<{ sourcePostedAt?: { gte: Date }; firstSeenAt?: { gte: Date } }> };
-      select: { skillIds: boolean };
-    };
-    // Two OR branches: not-null-and-recent, or null-fallback-to-firstSeen-recent.
-    expect(args.where.OR).toHaveLength(2);
-    const gte = args.where.OR[0].sourcePostedAt?.gte ?? args.where.OR[1].firstSeenAt?.gte;
-    expect(gte).toBeInstanceOf(Date);
-    const ageMs = Date.now() - (gte as Date).getTime();
-    const days = ageMs / 86_400_000;
-    // Allow ±1 day slack for the test-vs-service clock.
-    expect(days).toBeGreaterThan(44);
-    expect(days).toBeLessThan(46);
-    expect(args.select.skillIds).toBe(true);
-    // MUTATION SMOKE: change DEMAND_WINDOW_DAYS from 45 to 30 → this fails.
+    expect(demand.demandBySkill).toHaveBeenCalledOnce();
+    expect(demand.demandBySkill).toHaveBeenCalledWith(USER_ID, 45);
+    // Unification: the old raw normalizedJob query is gone.
+    expect(
+      (prisma as unknown as { normalizedJob?: unknown }).normalizedJob,
+    ).toBeUndefined();
   });
 
   it('translates targetRoles=["Backend Engineer"] into a role-boost that lands on nodejs, postgres, docker', async () => {
-    const prisma = makePrismaMock({
-      states: [], // empty user
-      jobs: [
-        { skillIds: ['nodejs'] },
-        { skillIds: ['ruby'] },
-      ],
-    });
-    const prefs = makePrefsMock(['Backend Engineer']);
-    const svc = new LearningPriorityService(prisma as never, prefs as never);
+    const demand = makeDemandMock(
+      new Map([
+        ['nodejs', 1],
+        ['ruby', 1],
+      ]),
+    );
+    const { svc } = buildService({ demand, targetRoles: ['Backend Engineer'] });
 
     const rows = await svc.rankFor(USER_ID);
     const nodejs = rows.find((r) => r.skillId === 'nodejs')!;
@@ -360,69 +416,136 @@ describe('LearningPriorityService.rankFor', () => {
     const postgres = rows.find((r) => r.skillId === 'postgres');
     expect(postgres).toBeDefined();
     expect(postgres!.factors.targetRole).toBe(true);
-    // MUTATION SMOKE: drop the `resolveRoleSkills` call from the service
-    // → targetRoleSkills is empty, nodejs.factors.targetRole flips to false.
   });
 
-  it('empty user (no states, no evidence) still returns rows ranked by demand', async () => {
-    const prisma = makePrismaMock({
-      jobs: [
-        { skillIds: ['react', 'react', 'react'] },
-        { skillIds: ['python'] },
-        { skillIds: ['python'] },
-        { skillIds: ['go'] },
-      ],
-    });
-    const svc = new LearningPriorityService(prisma as never, makePrefsMock([]) as never);
+  it('empty user (no states, no evidence) still returns rows ranked by scoped demand', async () => {
+    const demand = makeDemandMock(
+      new Map([
+        ['react', 3],
+        ['python', 2],
+        ['go', 1],
+      ]),
+    );
+    const { svc } = buildService({ demand });
 
     const rows = await svc.rankFor(USER_ID);
     expect(rows.map((r) => r.skillId).slice(0, 3)).toEqual(['react', 'python', 'go']);
-    // MUTATION SMOKE: drop the demand-histogram loop → all rows tie at 0
-    // demand and sort collapses to skillId asc = ['go','python','react'].
   });
 
-  it('coerces Prisma Decimal proficiency (0..100) into the 0..1 scale the pure formula expects', async () => {
+  it('coerces Decimal proficiency to the 0..1 scale, keeping readiness and historical distinct', async () => {
     const prisma = makePrismaMock({
       states: [{ skillId: 'react', proficiency: new FakeDecimal(80) }],
-      jobs: [{ skillIds: ['react'] }],
     });
-    const svc = new LearningPriorityService(prisma as never, makePrefsMock([]) as never);
+    const demand = makeDemandMock(new Map([['react', 1]]));
+    const { svc } = buildService({ prisma, demand });
     const rows = await svc.rankFor(USER_ID);
     const react = rows.find((r) => r.skillId === 'react')!;
-    // 80/100 = 0.8; target default 0.5 → gap collapses to 0.
+    // recencyDays absent -> treated as fresh, readiness == demonstrated (0.8).
     expect(react.factors.current).toBeCloseTo(0.8, 5);
+    expect(react.factors.historical).toBeCloseTo(0.8, 5);
     expect(react.factors.gap).toBe(0);
-    // MUTATION SMOKE: drop the /100 → current=80, gap ≈ 0, still no crash
-    // but factors.current MUST be in [0..1] for the UI progress bar --
-    // this asserts fails.
+  });
+
+  it('decays current_readiness from historical_demonstrated_proficiency without collapsing them (AGENTS §11)', async () => {
+    const prisma = makePrismaMock({
+      states: [
+        { skillId: 'react', proficiency: new FakeDecimal(80), recencyDays: 365 },
+      ],
+    });
+    const demand = makeDemandMock(new Map([['react', 1]]));
+    const { svc } = buildService({ prisma, demand });
+    const rows = await svc.rankFor(USER_ID);
+    const react = rows.find((r) => r.skillId === 'react')!;
+    // historical = 0.8; readiness = 0.8 * 0.5 (stale) = 0.4.
+    expect(react.factors.historical).toBeCloseTo(0.8, 5);
+    expect(react.factors.current).toBeCloseTo(0.4, 5);
+    // Default target 0.5 -> gap = 0.1 from readiness, not 0 from history.
+    expect(react.factors.gap).toBeCloseTo(0.1, 5);
+    expect(react.reasons).toContain('readiness decayed from demonstrated 0.80');
+    // MUTATION SMOKE: use historical for the gap -> gap 0 and the decay
+    // reason never fires.
+  });
+
+  it('uses an aim_role_thresholds row for a target role and falls back to 0.7 when absent', async () => {
+    const prisma = makePrismaMock({
+      states: [
+        { skillId: 'nodejs', proficiency: new FakeDecimal(75), recencyDays: 1 },
+      ],
+      thresholds: [{ roleKey: 'backend', threshold: new FakeDecimal(0.9) }],
+    });
+    const demand = makeDemandMock(new Map([['nodejs', 1]]));
+    const { svc } = buildService({ prisma, demand, targetRoles: ['Backend Engineer'] });
+    const rows = await svc.rankFor(USER_ID);
+    const nodejs = rows.find((r) => r.skillId === 'nodejs')!;
+    // Stored threshold 0.9 -> gap = 0.15 (vs 0 with the 0.7 fallback).
+    expect(nodejs.factors.gap).toBeCloseTo(0.15, 5);
+    expect(nodejs.reasons.some((r) => r.includes('target 0.9'))).toBe(true);
+
+    // No threshold row -> fallback 0.7: readiness 0.75 >= 0.7 -> gap 0.
+    const fallback = buildService({
+      prisma: makePrismaMock({
+        states: [{ skillId: 'nodejs', proficiency: new FakeDecimal(75), recencyDays: 1 }],
+      }),
+      demand,
+      targetRoles: ['Backend Engineer'],
+    });
+    const fallbackRow = (await fallback.svc.rankFor(USER_ID)).find((r) => r.skillId === 'nodejs')!;
+    expect(fallbackRow.factors.gap).toBe(0);
   });
 
   it('picks the most recent evidence date per skill for the recency band', async () => {
     const old = new Date('2024-01-01T00:00:00Z');
     const recent = new Date();
     const prisma = makePrismaMock({
-      jobs: [{ skillIds: ['react'] }],
       evidence: [
         { skillId: 'react', observedAt: old },
         { skillId: 'react', observedAt: recent },
         { skillId: 'react', observedAt: old },
       ],
     });
-    const svc = new LearningPriorityService(prisma as never, makePrefsMock([]) as never);
+    const { svc } = buildService({ prisma, demand: makeDemandMock(new Map([['react', 1]])) });
     const rows = await svc.rankFor(USER_ID);
     const react = rows.find((r) => r.skillId === 'react')!;
     // Recent evidence → fresh band = 1.0. If we picked the first (or oldest)
     // date, the band would drop to 0.4.
     expect(react.factors.recency).toBe(1.0);
-    // MUTATION SMOKE: replace `if (!prev || e.observedAt > prev)` with
-    // `if (!prev)` → the first (oldest) date sticks and recency drops.
+  });
+
+  it('degrades gracefully when there is no market scope/demand (no fabricated priorities)', async () => {
+    const prisma = makePrismaMock({
+      states: [
+        { skillId: 'nodejs', proficiency: new FakeDecimal(10), recencyDays: 5 },
+      ],
+    });
+    const { svc } = buildService({ prisma, demand: makeDemandMock(new Map()) });
+    const rows = await svc.rankFor(USER_ID);
+    expect(rows.map((r) => r.skillId)).toContain('nodejs');
+    const nodejs = rows.find((r) => r.skillId === 'nodejs')!;
+    expect(nodejs.factors.demand).toBe(0);
+    // No demand -> priority driven by gap alone; still a legitimate number.
+    expect(nodejs.priority).toBeGreaterThan(0);
   });
 
   it('detailFor(userId, skillId) returns the row or throws NotFound', async () => {
-    const prisma = makePrismaMock({ jobs: [{ skillIds: ['react'] }] });
-    const svc = new LearningPriorityService(prisma as never, makePrefsMock([]) as never);
+    const { svc } = buildService({ demand: makeDemandMock(new Map([['react', 1]])) });
     const row = await svc.detailFor(USER_ID, 'react');
     expect(row.skillId).toBe('react');
     await expect(svc.detailFor(USER_ID, 'nope')).rejects.toBeInstanceOf(NotFoundException);
+  });
+});
+
+describe('aim_role_thresholds seed stays in sync with role-skill-map', () => {
+  it('the migration seeds exactly the ROLE_FAMILIES keys at the target-role bar', () => {
+    const sql = readFileSync(
+      resolve(
+        process.cwd(),
+        'apps/api/prisma/migrations/20261014000300_add_aim_role_thresholds/migration.sql',
+      ),
+      'utf8',
+    );
+    for (const family of ROLE_FAMILIES) {
+      expect(sql).toContain(`('${family}')`);
+    }
+    expect(sql).toContain('0.700');
   });
 });

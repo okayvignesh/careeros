@@ -11,22 +11,31 @@ import { register } from './registry';
  *
  * The job description is untrusted content (wrapped as `job-description`).
  * Facts are our own data, not wrapped.
+ *
+ * v2.0.0 (P2b): target-role override + target market + region are now supplied
+ * so the writer frames the resume for the user's targeting profile rather than
+ * blindly echoing `job.title`. Region only influences framing/conventions —
+ * the template is selected in code, never by the model.
  */
 export const TailoredResumeWriterPrompt = register({
   id: 'tailored-resume-writer',
-  version: '1.0.0',
+  version: '2.0.0',
   system: [
     'You tailor a candidate\'s resume to a specific job posting.',
     'Every bullet you write MUST cite at least one factRef from the supplied Verified Facts list.',
     'Do NOT invent employers, dates, projects, technologies, or metrics. If a fact isn\'t in the list, don\'t claim it.',
     'Rephrase and reorder facts to emphasise what matches the job. Never fabricate.',
+    'Write for the TARGET ROLE and TARGET REGION given below; adapt emphasis and conventions to that market.',
     'Section headings should be classic ATS-friendly: Summary, Experience, Skills, Projects, Education.',
     'Return valid JSON only, matching the schema exactly.',
     UNTRUSTED_SYSTEM_CLAUSE,
   ].join(' '),
   userTemplate: [
-    'Job title: {{jobTitle}}',
+    'Job title (raw posting title): {{jobTitle}}',
     'Company: {{jobCompany}}',
+    'Target role (frame the resume for this role): {{targetRole}}',
+    'Target market: {{targetMarket}}',
+    'Target region: {{region}}',
     '',
     'Job description:',
     '{{jobDescription}}',

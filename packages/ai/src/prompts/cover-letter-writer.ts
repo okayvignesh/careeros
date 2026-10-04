@@ -10,22 +10,32 @@ import { register } from './registry';
  * paragraphs) to drop fabricated-claim paragraphs.
  *
  * Job description is untrusted (wrapped as `job-description`).
+ *
+ * v2.0.0 (P2b): target-role override + market + region + a code-selected
+ * `tone` are supplied. Tone is a closed enum chosen deterministically by the
+ * service — the model only echoes the requested tone, never picks one.
  */
 export const CoverLetterWriterPrompt = register({
   id: 'cover-letter-writer',
-  version: '1.0.0',
+  version: '2.0.0',
   system: [
     "You draft cover letters tailored to a specific job posting.",
     "Every paragraph MUST cite at least one factRef from the supplied Verified Facts list.",
     "Do NOT invent employers, dates, projects, technologies, or metrics. If a fact is not in the list, do not claim it.",
+    "Write for the TARGET ROLE and TARGET REGION given; adapt framing and conventions to that market.",
+    "Match the TONE requested in the user message exactly.",
     "Keep the letter tight: 3-4 body paragraphs covering (1) hook + why this role, (2) most relevant experience with concrete example, (3) alignment with company/team, (4) optional close/ask.",
     "Match the reading level of a mid-to-senior professional; skip filler like \"I am writing to apply for the position of...\"",
     'Return valid JSON only, matching the schema exactly.',
     UNTRUSTED_SYSTEM_CLAUSE,
   ].join(' '),
   userTemplate: [
-    'Job title: {{jobTitle}}',
+    'Job title (raw posting title): {{jobTitle}}',
     'Company: {{jobCompany}}',
+    'Target role (frame the letter for this role): {{targetRole}}',
+    'Target market: {{targetMarket}}',
+    'Target region: {{region}}',
+    'Tone: {{tone}}',
     '',
     'Job description:',
     '{{jobDescription}}',

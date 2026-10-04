@@ -12,6 +12,7 @@
  */
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, LevelFormat, BorderStyle, convertInchesToTwip, type IRunOptions, type IParagraphOptions } from 'docx';
 import { templates } from './templates';
+import { parseTemplateId } from './targeting';
 import type { ResumeDoc, TemplateId } from './types';
 
 /** Style hooks each template can override; sensible ATS-first defaults everywhere. */
@@ -77,6 +78,26 @@ export function buildResumeDocument(doc: ResumeDoc, theme: DocxTheme = {}): Docu
         spacing: { after: 240 },
       }),
     );
+  }
+
+  // Verified contact/location line (only fields that exist; never synthesized).
+  if (doc.contact) {
+    const contactParts = [doc.contact.name, doc.contact.location, doc.contact.email].filter(
+      (v): v is string => Boolean(v),
+    );
+    const contactText = [doc.contact.headline, contactParts.join(' · ')]
+      .filter((v): v is string => Boolean(v))
+      .join(' — ');
+    if (contactText) {
+      children.push(
+        new Paragraph({
+          children: [
+            new TextRun({ text: contactText, size: 20, font: t.bodyFont, color: '555555' }),
+          ],
+          spacing: { after: 240 },
+        }),
+      );
+    }
   }
 
   // Summary section.
@@ -175,11 +196,12 @@ function sectionHeading(text: string, t: Required<DocxTheme>): Paragraph {
  */
 export async function renderResumeDocx(
   doc: ResumeDoc,
-  opts: { template?: TemplateId } = {},
+  opts: { template?: TemplateId | string } = {},
 ): Promise<Buffer> {
-  const id = opts.template ?? 'classic';
+  const requested = opts.template;
+  const id = requested === undefined ? 'classic' : parseTemplateId(requested);
+  if (!id) throw new Error(`Unknown template: ${requested}`);
   const tpl = templates[id];
-  if (!tpl) throw new Error(`Unknown template: ${id}`);
   const wordDoc = tpl.renderDocx(doc);
   return await Packer.toBuffer(wordDoc);
 }

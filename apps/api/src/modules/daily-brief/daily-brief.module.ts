@@ -5,6 +5,9 @@ import { AuthModule } from '../auth/auth.module';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SlackModule } from '../slack/slack.module';
 import { SlackService } from '../slack/slack.service';
+import { JobPreferencesModule } from '../job-prefs/job-prefs.module';
+import { MarketDemandModule } from '../market-demand/market-demand.module';
+import { LearningPriorityService } from '../skills/learning-priority.service';
 import { DailyBriefComposerService } from './daily-brief-composer.service';
 import { DailyBriefPreferencesService } from './daily-brief-preferences.service';
 import { DailyBriefController } from './daily-brief.controller';
@@ -25,10 +28,11 @@ import {
  * abstraction).
  */
 @Module({
-  imports: [AuthModule, SlackModule],
+  imports: [AuthModule, SlackModule, JobPreferencesModule, MarketDemandModule],
   controllers: [DailyBriefController],
   providers: [
     DailyBriefPreferencesService,
+    LearningPriorityService,
     DailyBriefComposerService,
     DailyBriefScheduler,
     DailyBriefDeliveryService,

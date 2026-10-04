@@ -32,6 +32,7 @@ type FactRow = { id: string; kind: string; content: Record<string, unknown>; ver
 function fakePrisma(opts: {
   facts?: FactRow[];
   job?: { id: string; title: string; company: string; description: string } | null;
+  profile?: Record<string, unknown> | null;
 }) {
   const facts = opts.facts ?? [];
   const job =
@@ -47,6 +48,9 @@ function fakePrisma(opts: {
     normalizedJob: {
       findUnique: async ({ where }: { where: { id: string } }) =>
         job && job.id === where.id ? job : null,
+    },
+    userJobPreferences: {
+      findUnique: async () => opts.profile ?? null,
     },
     resumeFact: {
       findMany: async ({ where }: { where: { userId: string; verified?: boolean; id?: { in: string[] } } }) => {
@@ -411,5 +415,97 @@ describe('ResumeVariantsService.generateForJob fact-check gate (B-3)', () => {
     expect(loggerWarn.mock.calls[0][0]).toMatch(/fact-check pass failed/);
     // MUTATION-SMOKE: change the catch branch to rethrow instead of marking
     // unchecked, and generateForJob rejects instead of returning a dto.
+  });
+});
+
+// P2b: capture the rendered user prompt so targeting variables can be asserted.
+function capturingProvider(responses: QueuedResponse[]): {
+  provider: { chatStructured: (args: { messages: Array<{ role: string; content: string }> }) => Promise<unknown> };
+  users: string[];
+} {
+  const users: string[] = [];
+  let i = 0;
+  return {
+    users,
+    provider: {
+      chatStructured: async ({ messages }) => {
+        users.push(messages.find((m) => m.role === 'user')?.content ?? '');
+        const r = responses[i++];
+        if (r === undefined) throw new Error(`fake provider: no queued response for call ${i}`);
+        if (r instanceof Error) throw r;
+        return r;
+      },
+    },
+  };
+}
+
+describe('ResumeVariantsService P2b region-aware tailoring', () => {
+  const profile = {
+    targetRoles: ['Staff SRE'],
+    countries: ['DE'],
+    homeCountry: null,
+    seniority: ['staff'],
+    relocationWilling: false,
+    relocationCountries: [],
+  };
+
+  it('resolves role/region/template from the profile and persists them', async () => {
+    const prisma = fakePrisma({ facts: [FACT_A, FACT_B], profile });
+    const writer = writerOutput([
+      { heading: 'Experience', bullets: [{ text: 'Ran Postgres.', factRefs: ['fact-a'] }] },
+    ]);
+    const audit: FactCheckResult = { results: [{ bulletIndex: 0, supported: true, reason: 'ok' }] };
+    const { provider } = makeFakeProvider([writer, audit]);
+    const svc = buildService(prisma, provider);
+
+    const dto = await svc.generateForJob('u1', 'job-1');
+
+    // Target-role override (no longer forced to `job.title`), region template.
+    expect(dto.roleTarget).toBe('Staff SRE');
+    expect(dto.region).toBe('europe');
+    expect(dto.templateId).toBe('international');
+    expect(prisma.getCreated()!.templateId).toBe('international');
+    // MUTATION-SMOKE: force roleTarget back to job.title and the first assertion fails.
+  });
+
+  it('honors a valid explicit template override', async () => {
+    const prisma = fakePrisma({ facts: [FACT_A], profile });
+    const writer = writerOutput([
+      { heading: 'Experience', bullets: [{ text: 'Ran Postgres.', factRefs: ['fact-a'] }] },
+    ]);
+    const audit: FactCheckResult = { results: [{ bulletIndex: 0, supported: true, reason: 'ok' }] };
+    const { provider } = makeFakeProvider([writer, audit]);
+    const svc = buildService(prisma, provider);
+
+    const dto = await svc.generateForJob('u1', 'job-1', { template: 'dense-tech' });
+    expect(dto.templateId).toBe('dense-tech');
+  });
+
+  it('prompt carries targetRole/region and contact comes only from verified facts', async () => {
+    const prisma = fakePrisma({
+      facts: [
+        FACT_A,
+        { id: 'fact-loc', kind: 'location', content: { text: 'Berlin, Germany' }, verified: true },
+        { id: 'fact-loc-bad', kind: 'location', content: { text: 'Invented City' }, verified: false },
+      ],
+      profile: { ...profile, targetRoles: ['Backend Engineer'], seniority: ['mid'] },
+    });
+    const writer = writerOutput([
+      { heading: 'Experience', bullets: [{ text: 'Ran Postgres.', factRefs: ['fact-a'] }] },
+    ]);
+    const audit: FactCheckResult = { results: [{ bulletIndex: 0, supported: true, reason: 'ok' }] };
+    const { provider, users } = capturingProvider([writer, audit]);
+    const svc = buildService(prisma, provider as never);
+
+    const dto = await svc.generateForJob('u1', 'job-1');
+
+    expect(users[0]).toContain('Target role (frame the resume for this role): Backend Engineer');
+    expect(users[0]).toContain('Target region: europe');
+    // Unverified fact text never reaches the prompt.
+    expect(users[0]).not.toContain('Invented City');
+    // ResumeDoc contact block is sourced from the verified `location` fact only.
+    expect(dto.contact).toEqual({ location: 'Berlin, Germany' });
+    // MUTATION-SMOKE: drop `verified: true` from the fact query and the
+    // unverified location leaks into both the prompt and the contact block.
   });
 });

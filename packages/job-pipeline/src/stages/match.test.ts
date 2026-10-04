@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { computeCompFit, computeGeoFit, computeMatch, computeMatchResult } from './match';
+import {
+  computeCompFit,
+  computeGeoFit,
+  computeMatch,
+  computeMatchResult,
+  timezoneOverlapHours,
+} from './match';
 
 describe('computeGeoFit', () => {
   it('scores a matching country/workplace/scope at 1', () => {
@@ -61,6 +67,77 @@ describe('computeCompFit — same-currency only', () => {
         profile: { currency: 'USD', min: 100_000, max: 120_000 },
       }),
     ).toBe(0);
+  });
+});
+
+describe('timezoneOverlapHours — DST-correct', () => {
+  it('same zone => a full 8h working-window overlap', () => {
+    expect(timezoneOverlapHours('UTC', 'UTC', new Date('2026-01-15T12:00:00Z'))).toBe(8);
+    expect(
+      timezoneOverlapHours('America/New_York', 'America/New_York', new Date('2026-07-15T12:00:00Z')),
+    ).toBe(8);
+  });
+
+  it('a DST-observing vs non-observing pair changes overlap between Jan and Jul', () => {
+    // Kolkata never shifts; London shifts +1h in July. Overlap grows from 2.5h
+    // (09:00-17:00 London = 09:00-17:00 UTC) to 3.5h (08:00-16:00 UTC).
+    const jan = timezoneOverlapHours(
+      'Asia/Kolkata',
+      'Europe/London',
+      new Date('2026-01-15T12:00:00Z'),
+    );
+    const jul = timezoneOverlapHours(
+      'Asia/Kolkata',
+      'Europe/London',
+      new Date('2026-07-15T12:00:00Z'),
+    );
+    expect(jan).toBeCloseTo(2.5, 4);
+    expect(jul).toBeCloseTo(3.5, 4);
+    expect(jan).not.toBeCloseTo(jul, 4);
+    // MUTATION SMOKE: ignore the zone offset (difference of raw hours) -> both
+    // calls collapse to the same value and this fails.
+  });
+
+  it('scores the tz axis in geoFit only when BOTH zones are known', () => {
+    // Same zone, only the tz axis constrained -> 8/8 = 1.
+    expect(
+      computeGeoFit({ job: { timezone: 'Europe/London' }, profile: { timezone: 'Europe/London' } }),
+    ).toBe(1);
+    // Unknown job tz leaves the axis UNCOMPUTED: the country axis alone is 1,
+    // so geoFit is 1 (not diluted toward 0.5 by a fabricated tz score).
+    expect(
+      computeGeoFit({
+        job: { country: 'DE', timezone: null },
+        profile: { countries: ['DE'], timezone: 'Asia/Kolkata' },
+      }),
+    ).toBe(1);
+    expect(
+      computeGeoFit({ job: { country: 'DE' }, profile: { countries: ['DE'] } }),
+    ).toBe(1);
+  });
+
+  it('normalizes the overlap by the desired hours when set, else by a workday', () => {
+    // NY vs Berlin overlap ~2h year-round. Desired 8h -> 0.25.
+    expect(
+      computeGeoFit({
+        job: { timezone: 'Europe/Berlin' },
+        profile: { timezone: 'America/New_York', timezoneOverlapHours: 8 },
+      }),
+    ).toBeCloseTo(0.25, 4);
+    // Desired 1h -> clamp(2/1) = 1.
+    expect(
+      computeGeoFit({
+        job: { timezone: 'Europe/Berlin' },
+        profile: { timezone: 'America/New_York', timezoneOverlapHours: 1 },
+      }),
+    ).toBe(1);
+    // No desired -> 2/8 = 0.25.
+    expect(
+      computeGeoFit({
+        job: { timezone: 'Europe/Berlin' },
+        profile: { timezone: 'America/New_York' },
+      }),
+    ).toBeCloseTo(0.25, 4);
   });
 });
 

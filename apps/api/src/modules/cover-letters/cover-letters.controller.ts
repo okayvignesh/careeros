@@ -1,4 +1,4 @@
-import { Controller, Get, HttpCode, Param, Post, Req, Res } from '@nestjs/common';
+import { Controller, Get, HttpCode, Param, Post, Query, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { SessionService } from '../auth/session.service';
 import { CoverLettersService } from './cover-letters.service';
@@ -24,9 +24,13 @@ export class CoverLettersController {
 
   @Post('for-job/:jobId')
   @HttpCode(201)
-  async generateForJob(@Param('jobId') jobId: string, @Req() req: Request) {
+  async generateForJob(
+    @Param('jobId') jobId: string,
+    @Query('tone') tone: string | undefined,
+    @Req() req: Request,
+  ) {
     const userId = this.session.requireUserId(req);
-    return this.letters.generateForJob(userId, jobId);
+    return this.letters.generateForJob(userId, jobId, tone ? { tone } : {});
   }
 
   @Get(':id/pdf')

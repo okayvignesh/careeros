@@ -1,4 +1,4 @@
-import { Controller, Get, HttpCode, Param, Post, Req, Res } from '@nestjs/common';
+import { Controller, Get, HttpCode, Param, Post, Query, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { SessionService } from '../auth/session.service';
 import { ResumeVariantsService } from './resume-variants.service';
@@ -24,9 +24,13 @@ export class ResumeVariantsController {
 
   @Post('for-job/:jobId')
   @HttpCode(201)
-  async generateForJob(@Param('jobId') jobId: string, @Req() req: Request) {
+  async generateForJob(
+    @Param('jobId') jobId: string,
+    @Query('template') template: string | undefined,
+    @Req() req: Request,
+  ) {
     const userId = this.session.requireUserId(req);
-    return this.variants.generateForJob(userId, jobId);
+    return this.variants.generateForJob(userId, jobId, template ? { template } : {});
   }
 
   @Get(':id/pdf')

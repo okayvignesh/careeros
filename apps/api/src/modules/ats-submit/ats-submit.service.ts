@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, Logger, NotFoundException, type OnModu
 import { createHash, randomUUID } from 'node:crypto';
 import { retry } from '@careeros/shared';
 import { decrypt, loadMasterKey } from '@careeros/secrets';
-import { renderResumePdf } from '@careeros/resume-render';
+import { renderResumePdfByTemplate, type ResumeContact } from '@careeros/resume-render';
 import { isEligibleToApply } from '@careeros/job-pipeline';
 import type { TailoredResumeContent } from '@careeros/shared';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -375,7 +375,7 @@ export class AtsSubmitService implements OnModuleInit, ApprovalsWorker {
       app.resumeVariantId
         ? this.prisma.resumeVariant.findUnique({
             where: { id: app.resumeVariantId },
-            select: { contentJson: true, roleTarget: true },
+            select: { contentJson: true, roleTarget: true, templateId: true },
           })
         : Promise.resolve(null),
       this.prisma.integration.findUnique({
@@ -422,16 +422,25 @@ export class AtsSubmitService implements OnModuleInit, ApprovalsWorker {
   private async renderResume(variant: {
     contentJson: unknown;
     roleTarget: string | null;
+    templateId: string | null;
   }): Promise<SubmitPayload['resume']> {
     const content = unwrapResumeContent(variant.contentJson);
-    const bytes = await renderResumePdf({
-      roleTarget: variant.roleTarget ?? '',
-      // ponytail: no jobCompany lookup here - the PDF header line is cosmetic
-      // and the ATS discards it on parse. If a template ever requires it,
-      // add a NormalizedJob join in loadContext.
-      jobCompany: null,
-      content,
-    });
+    const contact = unwrapResumeContact(variant.contentJson);
+    // P2b: honor the variant's region-template (legacy `ats-first`/`standard`
+    // ids normalize to `classic` inside the renderer). The contact block, when
+    // present, comes from verified facts only.
+    const bytes = await renderResumePdfByTemplate(
+      {
+        roleTarget: variant.roleTarget ?? '',
+        // ponytail: no jobCompany lookup here - the PDF header line is cosmetic
+        // and the ATS discards it on parse. If a template ever requires it,
+        // add a NormalizedJob join in loadContext.
+        jobCompany: null,
+        ...(contact ? { contact } : {}),
+        content,
+      },
+      variant.templateId ? { template: variant.templateId } : {},
+    );
     return { bytes, filename: 'resume.pdf' };
   }
 
@@ -626,6 +635,13 @@ function unwrapResumeContent(raw: unknown): TailoredResumeContent {
     return (raw as { content: TailoredResumeContent }).content;
   }
   return raw as TailoredResumeContent;
+}
+
+/** Extract the verified contact block from the stored `{content, audit, contact}` wrapper. */
+function unwrapResumeContact(raw: unknown): ResumeContact | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const contact = (raw as Record<string, unknown>).contact;
+  return contact && typeof contact === 'object' ? (contact as ResumeContact) : undefined;
 }
 
 /**
