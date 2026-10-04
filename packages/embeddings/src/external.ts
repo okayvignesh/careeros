@@ -114,7 +114,10 @@ export class OpenAICompatibleEmbeddingProvider implements EmbeddingProvider {
 
   constructor(config: ExternalEmbeddingConfig) {
     validateExternalEmbeddingConfig(config);
-    this.endpoint = `${config.baseUrl.replace(/\/+$/, '')}/embeddings`;
+    // Strip trailing slashes without a `/\/+$/` regex (js/polynomial-redos).
+    let base = config.baseUrl;
+    while (base.endsWith('/')) base = base.slice(0, -1);
+    this.endpoint = `${base}/embeddings`;
     this.apiKey = config.apiKey;
     this.model = config.model;
     this.declaredDim = config.dimensions;

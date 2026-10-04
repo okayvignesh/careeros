@@ -113,4 +113,17 @@ describe('encodeRawMessage', () => {
     expect(encoded).not.toContain('=');
     expect(Buffer.from(encoded, 'base64').toString('utf8')).toBe('hello?/world');
   });
+
+  it('trims the trailing base64 padding for inputs that produce it', () => {
+    // 11 bytes -> base64 with a single '=' pad.
+    const encoded = encodeRawMessage('hello world');
+    expect(encoded).not.toContain('=');
+    expect(encoded).toBe(
+      Buffer.from('hello world', 'utf8')
+        .toString('base64')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, ''),
+    );
+  });
 });

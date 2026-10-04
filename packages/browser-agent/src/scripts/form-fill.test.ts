@@ -159,6 +159,22 @@ describe('isForbiddenSelector (EEO guard)', () => {
     expect(isForbiddenSelector('input[data-automation-id=veteranStatus]', forbidden)).toBe(true);
     expect(isForbiddenSelector('input[name=firstName]', forbidden)).toBe(false);
   });
+
+  it('extracts value tokens across every attribute operator and quoting style', () => {
+    // *=, ^=, $=, ~=, |= and quoted values all yield the bare value token.
+    for (const op of ['*=', '^=', '$=', '~=', '|=']) {
+      expect(isForbiddenSelector('input[data-x=gender_male]', [`[data-x${op}gender]`])).toBe(true);
+    }
+    expect(isForbiddenSelector('input[id=veteran]', ['[aria-label="veteran status"]'])).toBe(true);
+    expect(isForbiddenSelector('input[id=veteran]', ["[aria-label='veteran status']"])).toBe(true);
+  });
+
+  it('ignores value tokens shorter than three characters', () => {
+    // `ab` is not a token, so an unrelated selector that merely equals it is allowed.
+    expect(isForbiddenSelector('input[value=ab]', ['[title=ab]'])).toBe(false);
+    // `abc` is, so it blocks a selector that shares only the value.
+    expect(isForbiddenSelector('input[value=abc]', ['[title=abc]'])).toBe(true);
+  });
 });
 
 describe('runFormFill forbidden-selector enforcement', () => {

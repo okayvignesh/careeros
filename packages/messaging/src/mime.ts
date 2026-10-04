@@ -82,11 +82,14 @@ export function buildRfc822Message(email: OutboundEmail): string {
 
 /** Encode an RFC 5322 message for the Gmail API `raw` field (base64url). */
 export function encodeRawMessage(raw: string): string {
-  return Buffer.from(raw, 'utf8')
+  const b64 = Buffer.from(raw, 'utf8')
     .toString('base64')
     .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
+    .replace(/\//g, '_');
+  // Trim trailing base64 padding without a `/=+$/` regex (js/polynomial-redos).
+  let end = b64.length;
+  while (end > 0 && b64.charCodeAt(end - 1) === 0x3d /* '=' */) end--;
+  return b64.slice(0, end);
 }
 
 /** Normalize any newline style to CRLF (SMTP canonical form). */

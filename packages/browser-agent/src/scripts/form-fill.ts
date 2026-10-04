@@ -48,10 +48,25 @@ function normalizeSelector(s: string): string {
 /** Attribute *value* tokens from a CSS selector, e.g. `[type=password]` → "password". */
 function attributeValueTokens(selector: string): string[] {
   const tokens: string[] = [];
-  const re = /\[[^\]]*?[*^$|~]?=\s*["']?([a-z0-9_-]+)["']?[^\]]*\]/gi;
+  // Scan each `[...]` segment, then parse it with string ops. The previous
+  // single-regex form nested two unbounded character classes around the `=`,
+  // which is backtracking-prone (js/polynomial-redos); this is linear.
+  const brackets = /\[([^\]]*)\]/g;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(selector)) !== null) {
-    const token = m[1]?.toLowerCase();
+  while ((m = brackets.exec(selector)) !== null) {
+    const inner = m[1] ?? '';
+    const eq = inner.indexOf('=');
+    if (eq === -1) continue;
+    let value = inner.slice(eq + 1).trim();
+    // Strip a surrounding (or stray/unbalanced) quote, mirroring the old
+    // `["']?` around the capture.
+    const first = value[0];
+    if (first === '"' || first === "'") {
+      value = value.slice(1);
+      const last = value[value.length - 1];
+      if (last === '"' || last === "'") value = value.slice(0, -1);
+    }
+    const token = /^([a-z0-9_-]+)/i.exec(value)?.[1]?.toLowerCase();
     // Skip trivially short values (e.g. `[id=a]`) to avoid over-blocking.
     if (token && token.length >= 3) tokens.push(token);
   }

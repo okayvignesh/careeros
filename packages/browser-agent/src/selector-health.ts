@@ -112,16 +112,35 @@ function parseSelector(selector: string): ParsedSelector | null {
       out.classes.push(m[1]!);
       i += m[0].length;
     } else if (ch === '[') {
-      // Try quoted form first (allows [, ] inside the value); fall back to
-      // bare word. Supports attr-only (`[hidden]`), `=`, `*=`, `~=`, `|=`.
-      const quoted = /^\[([\w-]+)(\*?=|~=|\|=)?"([^"]*)"\]/.exec(s.slice(i));
-      const bare = /^\[([\w-]+)(\*?=|~=|\|=)?([^\]"]*)\]/.exec(s.slice(i));
-      const m = quoted ?? bare;
-      if (!m) return null;
-      const rawOp = m[2];
+      // Supports attr-only (`[hidden]`), `=`, `*=`, `~=`, `|=`. The attribute
+      // head is parsed with an anchored, unambiguous regex; the value is then
+      // read with `indexOf` so a quoted value may itself contain `]`. The old
+      // form used nested unbounded classes around `\]` and tripped
+      // js/polynomial-redos; this scan is linear.
+      const rest = s.slice(i);
+      const head = /^\[([\w-]+)(\*?=|~=|\|=)?/.exec(rest);
+      if (!head) return null;
+      const name = head[1]!.toLowerCase();
+      const rawOp = head[2];
       const op = rawOp === '*=' ? '*=' : rawOp === '=' ? '=' : null;
-      out.attrs.push({ name: m[1]!.toLowerCase(), op, value: op ? m[3]! : null });
-      i += m[0].length;
+      let value: string | null = null;
+      let end: number;
+      if (rest[head[0].length] === '"') {
+        const closeQuote = rest.indexOf('"', head[0].length + 1);
+        if (closeQuote === -1 || rest[closeQuote + 1] !== ']') return null;
+        value = rest.slice(head[0].length + 1, closeQuote);
+        end = closeQuote + 2;
+      } else {
+        const close = rest.indexOf(']', head[0].length);
+        if (close === -1) return null;
+        const bare = rest.slice(head[0].length, close);
+        // A bare value may not contain a quote (matches the prior `[^\]"]*`).
+        if (bare.includes('"')) return null;
+        value = bare;
+        end = close + 1;
+      }
+      out.attrs.push({ name, op, value: op ? value : null });
+      i += end;
     } else {
       return null;
     }

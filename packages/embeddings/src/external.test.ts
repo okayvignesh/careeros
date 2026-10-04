@@ -121,6 +121,16 @@ describe('OpenAICompatibleEmbeddingProvider', () => {
     });
   });
 
+  it('collapses trailing slashes on baseUrl before appending /embeddings', async () => {
+    const stub = await startStub((_req, res) =>
+      json(res, 200, { data: [{ embedding: [0.1, 0.2, 0.3] }] }),
+    );
+    open.push(stub);
+    const provider = createExternalEmbeddingProvider(makeConfig(`${stub.url}///`));
+    await provider.embed('hello');
+    expect(stub.requests[0]!.url).toBe('/v1/embeddings');
+  });
+
   it('infers the dimension from the first response when none is configured', async () => {
     const stub = await startStub((_req, res) => json(res, 200, { data: [{ embedding: [1, 2] }] }));
     open.push(stub);

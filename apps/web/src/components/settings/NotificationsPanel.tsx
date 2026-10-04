@@ -33,6 +33,24 @@ const TIMEZONES = [
 const CHANNELS = ['web', 'slack'] as const;
 
 /**
+ * A user who has never configured the brief has no `daily_brief_preferences`
+ * row, so GET /brief/preferences returns `null`. That is "unconfigured", not
+ * "still loading" — render the schedule with the DB defaults so the controls
+ * are usable (and the first save/toggle upserts the row).
+ */
+function defaultPreferences(): BriefPreferences {
+  return {
+    userId: '',
+    isEnabled: false,
+    timezone: 'UTC',
+    sendHourLocal: 8,
+    channels: ['web'],
+    snoozedUntil: null,
+    lastSentAt: null,
+  };
+}
+
+/**
  * E.3 notifications: the daily-brief schedule, delivery channels, snooze, and a
  * plain-text preview of exactly what would be delivered. Grounded in the real
  * `/brief/*` endpoints and the `/integrations` connection state.
@@ -46,7 +64,7 @@ export function NotificationsPanel() {
 
   useEffect(() => {
     getBriefPreferences()
-      .then(setPrefs)
+      .then((p) => setPrefs(p ?? defaultPreferences()))
       .catch((e) => setError((e as Error).message));
     listIntegrations()
       .then(setIntegrations)
