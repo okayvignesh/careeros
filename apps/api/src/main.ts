@@ -66,7 +66,7 @@ export function buildSecurityMiddleware(): RequestHandler[] {
         // right here so a reviewer sees the reason.
         'script-src': ["'self'", (_req, res) => `'nonce-${(res as Response).locals.cspNonce}'`],
         'style-src': ["'self'", (_req, res) => `'nonce-${(res as Response).locals.cspNonce}'`],
-        'img-src': ["'self'", 'data:'],
+        'img-src': ["'self'", 'data:', 'https://avatars.githubusercontent.com'],
         'connect-src': ["'self'"],
         'frame-ancestors': ["'none'"],
         'base-uri': ["'self'"],
