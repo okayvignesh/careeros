@@ -237,7 +237,7 @@ export function JobsList() {
       {data.jobs.length === 0 ? (
         <EmptyState onSync={sync} syncing={syncing} />
       ) : (
-        <div className="overflow-hidden rounded-[var(--radius)] border border-[hsl(var(--border))]">
+        <div className="overflow-x-auto rounded-[var(--radius)] border border-[hsl(var(--border))]">
           <table className="w-full text-[13px]">
             <thead className="bg-[hsl(var(--bg-elev-1))] text-[11px] uppercase tracking-[0.08em] text-fg-subtle">
               <tr>
@@ -247,14 +247,16 @@ export function JobsList() {
                 <th className="px-4 py-2.5 text-left font-medium">Location</th>
                 <th className="px-4 py-2.5 text-left font-medium">Source</th>
                 <th className="px-4 py-2.5 text-left font-medium">Posted</th>
-                <th className="px-4 py-2.5 text-right font-medium">Actions</th>
+                <th className="sticky right-0 z-10 border-l border-[hsl(var(--border))] bg-[hsl(var(--bg-elev-1))] px-4 py-2.5 text-right font-medium">
+                  Actions
+                </th>
               </tr>
             </thead>
             <tbody>
               {data.jobs.map((j) => (
                 <tr
                   key={j.id}
-                  className="border-t border-[hsl(var(--border))] hover:bg-[hsl(var(--bg-elev-1))]"
+                  className="group border-t border-[hsl(var(--border))] hover:bg-[hsl(var(--bg-elev-1))]"
                 >
                   <td className="whitespace-nowrap px-4 py-2.5">
                     <MatchCell match={j.match} />
@@ -305,7 +307,7 @@ export function JobsList() {
                       </span>
                     )}
                   </td>
-                  <td className="whitespace-nowrap px-4 py-2.5 text-right">
+                  <td className="sticky right-0 z-10 whitespace-nowrap border-l border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-2.5 text-right group-hover:bg-[hsl(var(--bg-elev-1))]">
                     <div className="inline-flex items-center gap-2">
                       <Link
                         href={`/jobs/${j.id}`}
