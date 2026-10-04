@@ -35,6 +35,53 @@ const BLOCKED_SCOPES = new Set([
   'ai_features',
 ]);
 
+// --- Contribution calendar (GitLab) -----------------------------------------
+// GitHub stores an activity calendar fetched from its GraphQL contributions
+// API. GitLab has no equivalent, so build the calendar from the dated GitLab
+// evidence the sync already writes (merge requests, pipelines, projects).
+export function levelFor(count: number): 0 | 1 | 2 | 3 | 4 {
+  if (count <= 0) return 0;
+  if (count === 1) return 1;
+  if (count <= 3) return 2;
+  if (count <= 6) return 3;
+  return 4;
+}
+
+export function buildWeeks(counts: Map<string, number>): Array<{
+  firstDay: string;
+  days: Array<{ date: string; count: number; level: 0 | 1 | 2 | 3 | 4; weekday: number }>;
+}> {
+  const now = new Date();
+  const todayUtc = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
+  // Start on the Sunday on/before ~52 weeks ago; each column is one week.
+  const start = new Date(todayUtc);
+  start.setUTCDate(start.getUTCDate() - 52 * 7);
+  start.setUTCDate(start.getUTCDate() - start.getUTCDay());
+  const weekCount =
+    Math.floor((todayUtc.getTime() - start.getTime()) / (7 * 86_400_000)) + 1;
+
+  const weeks: Array<{
+    firstDay: string;
+    days: Array<{ date: string; count: number; level: 0 | 1 | 2 | 3 | 4; weekday: number }>;
+  }> = [];
+  for (let w = 0; w < weekCount; w++) {
+    const days: Array<{ date: string; count: number; level: 0 | 1 | 2 | 3 | 4; weekday: number }> = [];
+    let firstDay = '';
+    for (let d = 0; d < 7; d++) {
+      const cur = new Date(start);
+      cur.setUTCDate(start.getUTCDate() + w * 7 + d);
+      const iso = cur.toISOString().slice(0, 10);
+      if (d === 0) firstDay = iso;
+      const count = counts.get(iso) ?? 0;
+      days.push({ date: iso, count, level: levelFor(count), weekday: d });
+    }
+    weeks.push({ firstDay, days });
+  }
+  return weeks;
+}
+
 export interface GitlabProfile {
   id: number;
   username: string;
@@ -78,6 +125,54 @@ export class GitlabService {
     private readonly prisma: PrismaService,
     private readonly queue: QueueService,
   ) {}
+
+  /**
+   * GitLab activity calendar for the dashboard, derived from dated GitLab
+   * evidence. Returns null when GitLab isn't connected or there's no activity
+   * yet (the UI shows its empty state). Shape mirrors the GitHub contributions
+   * response so the dashboard can render either source identically.
+   */
+  async getContributions(userId: string): Promise<{
+    totalContributions: number;
+    weeks: Array<{
+      firstDay: string;
+      days: Array<{ date: string; count: number; level: 0 | 1 | 2 | 3 | 4; weekday: number }>;
+    }>;
+    updatedAt: string | null;
+    login: string | null;
+  } | null> {
+    const row = await this.prisma.integration.findUnique({
+      where: { userId_kind: { userId, kind: 'gitlab' } },
+      select: { metadata: true, status: true },
+    });
+    if (!row || row.status !== 'connected') return null;
+    const meta = (row.metadata ?? {}) as Record<string, unknown>;
+
+    const rows = await this.prisma.$queryRaw<Array<{ d: string; c: bigint }>>`
+      SELECT to_char(date_trunc('day', "observedAt" AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS d,
+             count(*)::bigint AS c
+      FROM evidence
+      WHERE "userId" = ${userId}::uuid
+        AND "sourceRef"->>'kind' IN ('gitlab_mr', 'gitlab_pipeline', 'gitlab_project')
+        AND "observedAt" >= now() - interval '1 year'
+      GROUP BY 1
+    `;
+    const counts = new Map<string, number>();
+    let total = 0;
+    for (const r of rows) {
+      const n = Number(r.c);
+      counts.set(r.d, n);
+      total += n;
+    }
+    if (total === 0) return null;
+
+    return {
+      totalContributions: total,
+      weeks: buildWeeks(counts),
+      updatedAt: new Date().toISOString(),
+      login: typeof meta.username === 'string' ? meta.username : null,
+    };
+  }
 
   async saveToken(userId: string, input: SaveTokenInput): Promise<GitlabProfile> {
     const { baseUrl, host, fetchOpts } = await this.resolveBaseUrl(userId, input);

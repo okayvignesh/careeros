@@ -1,8 +1,9 @@
 'use client';
 
 import { useCallback, useState } from 'react';
-import { Github, RefreshCw } from 'lucide-react';
+import { Github, Gitlab, RefreshCw } from 'lucide-react';
 import { ThinkingOrb } from 'thinking-orbs';
+import { cn } from '@careeros/ui';
 import { apiGet, apiPost } from '@/lib/api-client';
 import { useApi } from '@/lib/use-api';
 
@@ -20,6 +21,20 @@ interface Calendar {
   login: string | null;
 }
 
+type Source = 'github' | 'gitlab';
+
+const SOURCES: Array<{ id: Source; label: string; icon: typeof Github }> = [
+  { id: 'github', label: 'GitHub', icon: Github },
+  { id: 'gitlab', label: 'GitLab', icon: Gitlab },
+];
+
+const EMPTY_TEXT: Record<Source, string> = {
+  github:
+    'Connect GitHub in setup and the calendar fills on the next sync. Click Resync above once the token is saved.',
+  gitlab:
+    'Connect GitLab in setup and the calendar fills after the first sync. Click Resync above once the token is saved.',
+};
+
 const CELL = 11;
 const GAP = 3;
 const DAY_LABELS = ['', 'Mon', '', 'Wed', '', 'Fri', ''];
@@ -35,12 +50,24 @@ const LEVEL_FILL = [
   'hsl(var(--accent))',
 ];
 
+/**
+ * Activity heatmap with a GitHub/GitLab toggle. The data body is remounted via
+ * `key` when the source changes, so `useApi` starts from a clean loading state
+ * and never flashes the previous provider's calendar.
+ */
 export function ContributionHeatmap() {
+  const [source, setSource] = useState<Source>('github');
+  return <ActivityHeatmap key={source} source={source} onSelect={setSource} />;
+}
+
+function ActivityHeatmap({ source, onSelect }: { source: Source; onSelect: (s: Source) => void }) {
   const [resyncing, setResyncing] = useState(false);
+  const meta = SOURCES.find((s) => s.id === source)!;
+  const Icon = meta.icon;
 
   const load = useCallback(
-    () => apiGet<Calendar | null>('/integrations/github/contributions'),
-    [],
+    () => apiGet<Calendar | null>(`/integrations/${source}/contributions`),
+    [source],
   );
   const { data: cal, error: err, loading, setError, refetch } = useApi(load);
 
@@ -57,7 +84,7 @@ export function ContributionHeatmap() {
   async function resync() {
     setResyncing(true);
     try {
-      await apiPost('/integrations/github/resync', {});
+      await apiPost(`/integrations/${source}/resync`, {});
       // The worker runs async; poll once after a delay so the freshest calendar shows up.
       setTimeout(() => void refetch(), 4000);
     } catch (e) {
@@ -71,9 +98,9 @@ export function ContributionHeatmap() {
     <section className="flex flex-col gap-4 rounded-[var(--radius)] border border-[hsl(var(--border))] bg-[hsl(var(--bg-elev-1))] px-5 py-4">
       <header className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2.5">
-          <Github className="h-4 w-4 text-fg-subtle" strokeWidth={1.7} />
+          <Icon className="h-4 w-4 text-fg-subtle" strokeWidth={1.7} />
           <div className="flex flex-col">
-            <span className="text-[13px] font-medium text-fg">GitHub activity</span>
+            <span className="text-[13px] font-medium text-fg">{meta.label} activity</span>
             <span className="text-[11.5px] text-fg-subtle">
               {state === 'ready' && cal
                 ? `${cal.totalContributions.toLocaleString()} contributions in the last year`
@@ -85,23 +112,49 @@ export function ContributionHeatmap() {
             </span>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={resync}
-          disabled={resyncing}
-          className="inline-flex items-center gap-1.5 text-[11.5px] text-fg-muted transition-colors hover:text-fg disabled:opacity-50"
-          aria-label="Resync GitHub"
-        >
-          {resyncing ? (
-            <>
-              <ThinkingOrb state="working" size={20} /> Resyncing
-            </>
-          ) : (
-            <>
-              <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.7} /> Resync
-            </>
-          )}
-        </button>
+        <div className="flex items-center gap-3">
+          <div
+            role="group"
+            aria-label="Activity source"
+            className="flex items-center rounded-[var(--radius)] border border-[hsl(var(--border))] p-0.5"
+          >
+            {SOURCES.map(({ id, label }) => (
+              <button
+                key={id}
+                type="button"
+                data-testid={`activity-source-${id}`}
+                aria-pressed={source === id}
+                onClick={() => onSelect(id)}
+                className={cn(
+                  'rounded-[calc(var(--radius)-2px)] px-2.5 py-1 text-[11.5px] transition-colors',
+                  source === id
+                    ? 'bg-[hsl(var(--bg-elev-2))] text-fg'
+                    : 'text-fg-muted hover:text-fg',
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={resync}
+            disabled={resyncing}
+            data-testid={`${source}-resync`}
+            className="inline-flex items-center gap-1.5 text-[11.5px] text-fg-muted transition-colors hover:text-fg disabled:opacity-50"
+            aria-label={`Resync ${meta.label}`}
+          >
+            {resyncing ? (
+              <>
+                <ThinkingOrb state="working" size={20} /> Resyncing
+              </>
+            ) : (
+              <>
+                <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.7} /> Resync
+              </>
+            )}
+          </button>
+        </div>
       </header>
 
       {state === 'loading' && (
@@ -111,11 +164,10 @@ export function ContributionHeatmap() {
       )}
       {state === 'empty' && (
         <div className="rounded-[var(--radius)] border border-dashed border-[hsl(var(--border-strong))] bg-[hsl(var(--bg-elev-1))] px-4 py-6 text-center text-[12.5px] text-fg-subtle">
-          Connect GitHub in setup and the calendar fills on the next sync. Click Resync above once
-          the token is saved.
+          {EMPTY_TEXT[source]}
         </div>
       )}
-      {state === 'ready' && cal && <Grid weeks={cal.weeks} />}
+      {state === 'ready' && cal && <Grid weeks={cal.weeks} label={`${meta.label} contribution calendar`} />}
       {cal?.updatedAt && state === 'ready' && (
         <div className="text-right text-[10.5px] text-fg-faint">
           Updated {new Date(cal.updatedAt).toLocaleString()}
@@ -125,20 +177,14 @@ export function ContributionHeatmap() {
   );
 }
 
-function Grid({ weeks }: { weeks: Calendar['weeks'] }) {
+function Grid({ weeks, label }: { weeks: Calendar['weeks']; label: string }) {
   const width = weeks.length * (CELL + GAP);
   const height = 7 * (CELL + GAP);
   const monthTicks = monthLabelTicks(weeks);
 
   return (
     <div className="overflow-x-auto">
-      <svg
-        role="img"
-        aria-label="GitHub contribution calendar"
-        width={width + 28}
-        height={height + 20}
-        className="text-fg-subtle"
-      >
+      <svg role="img" aria-label={label} width={width + 28} height={height + 20} className="text-fg-subtle">
         {/* month labels */}
         <g>
           {monthTicks.map((t) => (
@@ -155,8 +201,8 @@ function Grid({ weeks }: { weeks: Calendar['weeks'] }) {
         </g>
         {/* day labels */}
         <g>
-          {DAY_LABELS.map((label, idx) =>
-            label ? (
+          {DAY_LABELS.map((label2, idx) =>
+            label2 ? (
               <text
                 key={idx}
                 x={0}
@@ -164,7 +210,7 @@ function Grid({ weeks }: { weeks: Calendar['weeks'] }) {
                 fontSize="10"
                 fill="currentColor"
               >
-                {label}
+                {label2}
               </text>
             ) : null,
           )}
