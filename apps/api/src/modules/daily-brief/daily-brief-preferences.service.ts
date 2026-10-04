@@ -174,14 +174,17 @@ export function nextFiringAt(tz: string, hourLocal: number, after: Date = new Da
   }
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: tz,
-    hour12: false,
+    // h23 (00-23). The default en-US hour cycle can render midnight as "24",
+    // which made nowSecInDay > 86400 and left deltaSec negative after the
+    // single +24h correction (a past `next`). Normalise as belt-and-braces.
+    hourCycle: 'h23',
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
   }).formatToParts(after);
   const partMap: Record<string, string> = {};
   for (const p of parts) partMap[p.type] = p.value;
-  const nowH = Number(partMap.hour ?? '0');
+  const nowH = Number(partMap.hour ?? '0') % 24;
   const nowM = Number(partMap.minute ?? '0');
   const nowS = Number(partMap.second ?? '0');
   const nowSecInDay = nowH * 3600 + nowM * 60 + nowS;

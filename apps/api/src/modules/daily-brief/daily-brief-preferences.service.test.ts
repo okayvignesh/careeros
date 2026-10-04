@@ -220,6 +220,16 @@ describe('nextFiringAt', () => {
     expect(next.toISOString()).toBe('2026-11-01T12:00:00.000Z');
   });
 
+  it('returns tomorrow when the target hour is midnight and local time is just past midnight (h24 render)', () => {
+    // Regression: en-US hour12:false can render 00:xx as "24:xx", making
+    // nowSecInDay > 86400 and the computed delta negative after a single
+    // +24h correction -> a past time. 04:52:09Z is 00:52:09 in New York (EDT).
+    const now = new Date('2026-06-15T04:52:09Z');
+    const next = nextFiringAt('America/New_York', 0, now);
+    expect(next.toISOString()).toBe('2026-06-16T04:00:00.000Z');
+    expect(next.getTime()).toBeGreaterThan(now.getTime());
+  });
+
   it('always returns a strictly-future time', () => {
     const now = new Date();
     for (const tz of ['UTC', 'Asia/Kolkata', 'America/New_York', 'Europe/London']) {
