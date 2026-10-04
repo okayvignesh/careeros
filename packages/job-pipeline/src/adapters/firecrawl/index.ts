@@ -60,6 +60,10 @@ export interface FirecrawlJobClient {
 export interface FirecrawlAdapterOpts {
   /** Search queries. Defaults to $FIRECRAWL_JOB_QUERIES split on comma. */
   queries?: string[];
+  /** Market country (ISO-3166 alpha-2) sent as the Firecrawl `country`. */
+  country?: string;
+  /** Market city/region sent as the Firecrawl `location`. */
+  location?: string;
   /** Per-query result cap (Firecrawl max 100). Defaults 20. */
   searchLimit?: number;
   /** Scrape each discovered URL for the full description. Defaults true. */
@@ -100,7 +104,7 @@ export function createFirecrawlAdapter(opts: FirecrawlAdapterOpts = {}): JobSour
       let scrapes = 0;
 
       for (const query of queries) {
-        const request: FirecrawlSearchRequest = { query, limit: searchLimit };
+        const request: FirecrawlSearchRequest = marketRequest(query, searchLimit, opts);
         if (opts.scrapeOptions) request.scrapeOptions = opts.scrapeOptions;
         const res = await client.search(request);
 
@@ -127,7 +131,10 @@ export function createFirecrawlAdapter(opts: FirecrawlAdapterOpts = {}): JobSour
             }
           }
 
-          const raw = mapFirecrawl(result, detail);
+          const raw = mapFirecrawl(result, detail, {
+            ...(opts.country ? { country: opts.country } : {}),
+            ...(opts.location ? { location: opts.location } : {}),
+          });
           if (raw) out.push(raw);
         }
       }
@@ -142,6 +149,22 @@ export const firecrawlAdapter: JobSourceAdapter = createFirecrawlAdapter();
 function envQueries(): string[] {
   const raw = process.env.FIRECRAWL_JOB_QUERIES ?? '';
   return raw.split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+/**
+ * Build a Firecrawl search request. The market `country`/`location` are
+ * forwarded so discovery is scoped per target market rather than issued as a
+ * blind global query.
+ */
+export function marketRequest(
+  query: string,
+  limit: number,
+  market: Pick<FirecrawlAdapterOpts, 'country' | 'location'>,
+): FirecrawlSearchRequest {
+  const request: FirecrawlSearchRequest = { query, limit };
+  if (market.country) request.country = market.country;
+  if (market.location) request.location = market.location;
+  return request;
 }
 
 function resolveClient(opts: FirecrawlAdapterOpts): FirecrawlJobClient {
@@ -185,13 +208,25 @@ function canonicalUrlOf(result: FirecrawlSearchResult): string | null {
   return null;
 }
 
+/** Market context a discovery adapter scoped its search to. */
+export interface FirecrawlMarketScope {
+  country?: string;
+  location?: string;
+}
+
 /**
  * Map one Firecrawl hit (+ optional scrape detail) to a `RawJob`. Returns null
  * when there is no usable title/url. Exported for tests.
+ *
+ * `market` is the scope the search was issued under; it becomes the raw
+ * `location` fallback (the page itself rarely exposes a machine-readable
+ * location), and `parseLocation` refines or discards it downstream. Never
+ * fabricates a city beyond the market the query was scoped to.
  */
 export function mapFirecrawl(
   result: FirecrawlSearchResult,
   detail: FirecrawlScrapeData | null = null,
+  market: FirecrawlMarketScope = {},
 ): RawJob | null {
   const canonical = canonicalUrlOf(result);
   if (!canonical) return null;
@@ -213,14 +248,25 @@ export function mapFirecrawl(
     `${title} ${description}`,
   );
 
+  const marketLocation = (market.location ?? market.country ?? '').trim();
+  // A country-only scope reaches us as an ISO-3166 alpha-2 that the market-plan
+  // stage lowercases for Adzuna's path segment. Canonicalize the code to
+  // uppercase so `parseLocation`'s uppercase-code matcher recovers structured
+  // geo instead of dropping the country for every country-only target.
+  const location =
+    !market.location && /^[a-z]{2}$/i.test(marketLocation)
+      ? marketLocation.toUpperCase()
+      : marketLocation;
+
   return {
     sourceId: firecrawlSourceId(canonical),
     sourceName: FIRECRAWL_SOURCE_NAME,
     canonicalUrl: canonical,
     title: title.slice(0, 300),
     company: company.slice(0, 200),
-    location: null,
+    location: location ? location.slice(0, 200) : null,
     remote,
+    workplaceType: remote ? 'remote' : null,
     description,
     sourcePostedAt: null,
     fetchedAt: new Date(),

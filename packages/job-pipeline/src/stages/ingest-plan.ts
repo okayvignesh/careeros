@@ -33,6 +33,9 @@ export interface RejectedIngestRow {
   };
 }
 
+/** Pipeline state promoted from the verify verdict. `verified` gates apply. */
+export type PromotedState = 'verified' | 'discovered';
+
 export interface IngestPlan {
   /** Deduped, verify-surviving rows ready to upsert into `jobs_normalized`. */
   normalized: NormalizedJob[];
@@ -40,16 +43,23 @@ export interface IngestPlan {
   rejected: RejectedIngestRow[];
   /** Per-winner source tags (winner + folded losers) for `sourceIds`. */
   mergedSourceTagsByWinner: Map<NormalizedJob, string[]>;
+  /**
+   * Verify verdict promoted to `NormalizedJob.state` (lowercase): `trusted` →
+   * `verified`, `flagged` → `discovered`. Rejected rows are excluded entirely.
+   */
+  stateByWinner: Map<NormalizedJob, PromotedState>;
   /** Pairs folded away by cross-source dedupe (for stats/audit). */
   duplicates: DuplicatePair[];
 }
 
-export function planIngest(raws: RawJob[]): IngestPlan {
-  const normalizedAll = raws.map((r) => normalize(r));
+export function planIngest(raws: RawJob[], opts: { now?: Date } = {}): IngestPlan {
+  const geoNow = opts.now ?? new Date();
+  const normalizedAll = raws.map((r) => normalize({ raw: r, now: geoNow }));
   const dedupeResult = crossSourceDedupe(normalizedAll);
 
   const normalized: NormalizedJob[] = [];
   const rejected: RejectedIngestRow[] = [];
+  const stateByWinner = new Map<NormalizedJob, PromotedState>();
   for (const n of dedupeResult.unique) {
     const verdict = verify(n);
     if (verdict.verdict === 'rejected') {
@@ -69,12 +79,14 @@ export function planIngest(raws: RawJob[]): IngestPlan {
       continue;
     }
     normalized.push(n);
+    stateByWinner.set(n, verdict.verdict === 'trusted' ? 'verified' : 'discovered');
   }
 
   return {
     normalized,
     rejected,
     mergedSourceTagsByWinner: dedupeResult.mergedSourceTagsByWinner,
+    stateByWinner,
     duplicates: dedupeResult.duplicates,
   };
 }

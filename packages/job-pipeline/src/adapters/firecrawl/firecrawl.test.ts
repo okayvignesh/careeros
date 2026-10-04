@@ -143,6 +143,21 @@ describe('mapFirecrawl / helpers', () => {
     expect(mapFirecrawl({ url: 'https://acme.example/jobs/1' })).toBeNull();
   });
 
+  it('uppercases a country-only market scope, but keeps a city location verbatim', () => {
+    const countryOnly = mapFirecrawl(
+      { url: 'https://acme.example/jobs/1', title: 'Engineer' },
+      null,
+      { country: 'de' },
+    );
+    expect(countryOnly?.location).toBe('DE');
+    const withCity = mapFirecrawl(
+      { url: 'https://acme.example/jobs/2', title: 'Engineer' },
+      null,
+      { country: 'de', location: 'Austin' },
+    );
+    expect(withCity?.location).toBe('Austin');
+  });
+
   it('isBannedPlatformUrl covers subdomains and rejects unparseable URLs', () => {
     expect(isBannedPlatformUrl('https://www.linkedin.com/jobs/view/1')).toBe(true);
     expect(isBannedPlatformUrl('https://uk.indeed.com/viewjob')).toBe(true);

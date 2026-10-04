@@ -5,16 +5,25 @@ import { InjectionBlockedError, renderPrompt, wrapUntrusted, type AIProvider } f
 import {
   adapters as allAdapters,
   buildCandidateSearchQueries,
+  buildMarketSyncRequests,
+  createAdzunaAdapter,
   createFirecrawlAdapter,
   freshness,
   relevance,
   planIngest,
   computeMatchResult,
+  isEligibleToApply,
+  marketTargetsFromProfile,
   MissingCredentialError,
+  type EligibilityResult,
+  type IngestPlan,
   type JobSourceAdapter,
+  type MarketPlan,
+  type MarketSyncRequest,
   type NormalizedJob,
   type MatchResult,
   type RawJob,
+  type RelevanceSignal,
 } from '@careeros/job-pipeline';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UsageService } from '../usage/usage.service';
@@ -49,6 +58,17 @@ export interface JobListItem {
   skillIds: string[];
   match: MatchResult;
   aging: boolean;
+  /** P1 structured geography (null when not parsed). */
+  country: string | null;
+  region: string | null;
+  city: string | null;
+  workplaceType: string | null;
+  remoteScope: string | null;
+  sponsorshipSignal: string;
+  /** Soft discovery signals; empty when none apply. */
+  signals: RelevanceSignal[];
+  /** Two-track apply/recommended gate decision (necessary, not sufficient). */
+  eligibility: EligibilityResult;
 }
 
 export interface SkillExtractionStats {
@@ -77,6 +97,12 @@ export interface RejectStats {
  */
 const FRESHNESS_DAYS = 45;
 const AGING_DAYS = 14;
+
+/**
+ * Minimum geo fit for "Recommended for you". A null geoFit (no geo preference
+ * configured) passes — there's nothing to fit against.
+ */
+const MIN_GEO_FIT_FOR_RECOMMENDED = 0.5;
 
 @Injectable()
 export class JobsService {
@@ -122,11 +148,70 @@ export class JobsService {
    * thin persistence adapter. Do NOT enqueue a job that still calls this same
    * method from the API — that would be the half-migration.
    */
-  async sync(adapterId: string): Promise<JobsSyncStats> {
+  async sync(adapterId: string, plan?: MarketPlan): Promise<JobsSyncStats> {
     const adapter = this.adapters[adapterId];
     if (!adapter) throw new NotFoundException(`Unknown adapter: ${adapterId}`);
-    const raws = await adapter.fetch();
-    return this.ingest(raws, adapterId);
+
+    const requests = buildMarketSyncRequests(adapterId, plan ?? { targets: [] });
+    // Legacy path: no market scoping → exactly one request through the shared
+    // singleton, preserving byte-for-byte behavior for existing callers.
+    if (requests.length <= 1 && !requests[0]?.country) {
+      const raws = await adapter.fetch();
+      return this.ingest(raws, adapterId, plan);
+    }
+
+    const aggregate = emptySyncStats(adapterId);
+    for (const request of requests) {
+      const marketAdapter = this.buildMarketAdapter(adapterId, request, plan, adapter);
+      const raws = await marketAdapter.fetch();
+      const stats = await this.ingest(raws, adapterId, plan);
+      aggregate.fetched += stats.fetched;
+      aggregate.rawInserted += stats.rawInserted;
+      aggregate.normalizedInserted += stats.normalizedInserted;
+      aggregate.normalizedUpdated += stats.normalizedUpdated;
+      aggregate.rejected += stats.rejected;
+      aggregate.merged += stats.merged;
+    }
+    return aggregate;
+  }
+
+  /**
+   * Construct the adapter for one market request. Adzuna gets `country`/`where`;
+   * Firecrawl gets structured `country`/`location` + the plan's queries. Every
+   * other adapter has no per-market surface, so the singleton is reused.
+   */
+  private buildMarketAdapter(
+    adapterId: string,
+    request: MarketSyncRequest,
+    plan: MarketPlan | undefined,
+    fallback: JobSourceAdapter,
+  ): JobSourceAdapter {
+    if (adapterId === 'adzuna' && request.country) {
+      return createAdzunaAdapter({
+        country: request.country,
+        ...(request.location ? { where: request.location } : {}),
+      });
+    }
+    if (adapterId === 'firecrawl' && request.country && (plan?.queries?.length ?? 0) > 0) {
+      return createFirecrawlAdapter({
+        queries: plan!.queries!,
+        country: request.country,
+        ...(request.location ? { location: request.location } : {}),
+      });
+    }
+    return fallback;
+  }
+
+  /**
+   * Scoped sync entry point for `POST admin/jobs/sync/:adapter`. Builds the
+   * caller's market plan from their canonical `UserJobPreferences` (the same
+   * profile F7/F8 use) and passes it to `sync`, so a market-scoped adapter
+   * (Adzuna/Firecrawl) issues the per-market request set instead of one legacy
+   * global fetch. Non-scoped adapters fall through unchanged.
+   */
+  async syncForUser(adapterId: string, userId: string): Promise<JobsSyncStats> {
+    const { plan } = await this.buildCandidateSearch(userId);
+    return this.sync(adapterId, plan);
   }
 
   /**
@@ -149,15 +234,38 @@ export class JobsService {
       rejected: 0,
       merged: 0,
     };
-    const queries = await this.buildCandidateQueries(userId);
+    const { queries, plan } = await this.buildCandidateSearch(userId);
     if (queries.length === 0) {
       this.logger.warn(`candidate ${userId} has no target roles; firecrawl search skipped`);
       return stats;
     }
-    const adapter = adapterOverride ?? createFirecrawlAdapter({ queries });
-    let raws: RawJob[];
+    if (adapterOverride) {
+      let raws: RawJob[];
+      try {
+        raws = await adapterOverride.fetch();
+      } catch (err) {
+        if (err instanceof MissingCredentialError) {
+          this.logger.warn('firecrawl search skipped: FIRECRAWL_API_KEY not configured');
+          return stats;
+        }
+        throw err;
+      }
+      return this.ingest(raws, 'firecrawl-search', plan);
+    }
+
+    // One adapter per target market so the outbound search request carries the
+    // structured `country`/`location` (job-targeting §6).
+    const requests = buildMarketSyncRequests('firecrawl', plan);
+    const raws: RawJob[] = [];
     try {
-      raws = await adapter.fetch();
+      for (const request of requests) {
+        const adapter = createFirecrawlAdapter({
+          queries,
+          ...(request.country ? { country: request.country } : {}),
+          ...(request.location ? { location: request.location } : {}),
+        });
+        raws.push(...(await adapter.fetch()));
+      }
     } catch (err) {
       if (err instanceof MissingCredentialError) {
         this.logger.warn('firecrawl search skipped: FIRECRAWL_API_KEY not configured');
@@ -165,13 +273,18 @@ export class JobsService {
       }
       throw err;
     }
-    return this.ingest(raws, 'firecrawl-search');
+    return this.ingest(raws, 'firecrawl-search', plan);
   }
 
-  /** Resolve goal + prefs + skills into Firecrawl query strings. */
-  private async buildCandidateQueries(userId: string): Promise<string[]> {
-    const [goal, prefs, skillStates, catalogue] = await Promise.all([
-      this.prisma.careerGoal.findUnique({ where: { userId } }),
+  /**
+   * Resolve the canonical targeting profile + demonstrated skills into Firecrawl
+   * query strings and a market plan. Reads ONLY `UserJobPreferences` (post-P1
+   * unification) — never `CareerGoal.targetRoles/locations`.
+   */
+  private async buildCandidateSearch(
+    userId: string,
+  ): Promise<{ queries: string[]; plan: MarketPlan }> {
+    const [prefs, skillStates, catalogue] = await Promise.all([
       this.prefs.get(userId),
       this.prisma.candidateSkillState.findMany({
         where: { userId },
@@ -185,17 +298,20 @@ export class JobsService {
     const names = (ids: string[]): string[] =>
       ids.map((id) => nameById.get(id)).filter((n): n is string => Boolean(n));
 
-    return buildCandidateSearchQueries({
-      targetRoles: prefs.targetRoles.length > 0 ? prefs.targetRoles : (goal?.targetRoles ?? []),
-      locations: prefs.locations.length > 0 ? prefs.locations : (goal?.locations ?? []),
-      remoteOnly: (goal?.remoteOnly ?? false) || prefs.remoteOnly,
-      seniority: goal?.seniority ?? [],
+    const queries = buildCandidateSearchQueries({
+      targetRoles: prefs.targetRoles,
+      locations: prefs.locations,
+      remoteOnly: prefs.remoteOnly,
+      seniority: prefs.seniority,
       mustHaveSkills: names(prefs.mustHaveSkills),
       dealbreakerSkills: names(prefs.dealbreakerSkills),
       candidateSkills: skillStates
         .map((s) => nameById.get(s.skillId))
         .filter((n): n is string => Boolean(n)),
     });
+
+    const targets = marketTargetsFromProfile({ countries: prefs.countries, cities: prefs.cities });
+    return { queries, plan: { targets, queries } };
   }
 
   /**
@@ -203,16 +319,12 @@ export class JobsService {
    * verify → persist. Relevance/freshness/match stay read-time stages in
    * `list` so preference changes re-evaluate without a re-ingest.
    */
-  private async ingest(raws: RawJob[], adapterId: string): Promise<JobsSyncStats> {
-    const stats: JobsSyncStats = {
-      adapter: adapterId,
-      fetched: 0,
-      rawInserted: 0,
-      normalizedInserted: 0,
-      normalizedUpdated: 0,
-      rejected: 0,
-      merged: 0,
-    };
+  private async ingest(
+    raws: RawJob[],
+    adapterId: string,
+    _marketPlan?: MarketPlan,
+  ): Promise<JobsSyncStats> {
+    const stats = emptySyncStats(adapterId);
 
     stats.fetched = raws.length;
     if (raws.length === 0) {
@@ -257,7 +369,8 @@ export class JobsService {
     // diverge. Rejected rows never touch jobs_normalized; every rejected row
     // lands as one job_reject_log row for the reject-audit UI. Flagged +
     // trusted continue into the existing N+1-safe upsert flow.
-    const plan = planIngest(raws);
+    const now = new Date();
+    const plan = planIngest(raws, { now });
     stats.merged = plan.duplicates.length;
 
     const rejectRows: Prisma.JobRejectLogCreateManyInput[] = plan.rejected.map((r) => ({
@@ -285,12 +398,16 @@ export class JobsService {
     const canonicalUrls = survivors.map((n) => n.canonicalUrl);
     const existingRows = await this.prisma.normalizedJob.findMany({
       where: { canonicalUrl: { in: canonicalUrls } },
-      select: { canonicalUrl: true, sourceIds: true },
+      select: { canonicalUrl: true, sourceIds: true, state: true },
     });
     const existingByUrl = new Map(existingRows.map((row) => [row.canonicalUrl, row]));
 
     const toInsert: Prisma.NormalizedJobCreateManyInput[] = [];
-    const toUpdate: Array<{ n: NormalizedJob; existingSourceIds: string[] }> = [];
+    const toUpdate: Array<{
+      n: NormalizedJob;
+      existingSourceIds: string[];
+      existingState: string;
+    }> = [];
     for (const n of survivors) {
       // Accumulated in-batch sourceIds from cross-source-dedupe (includes the
       // winner's own tag + every merged loser's tag). Falls back to just the
@@ -299,7 +416,11 @@ export class JobsService {
       const batchTags = mergedTags.get(n) ?? [n.sourceTag];
       const existing = existingByUrl.get(n.canonicalUrl);
       if (existing) {
-        toUpdate.push({ n, existingSourceIds: existing.sourceIds });
+        toUpdate.push({
+          n,
+          existingSourceIds: existing.sourceIds,
+          existingState: existing.state,
+        });
       } else {
         toInsert.push({
           canonicalUrl: n.canonicalUrl,
@@ -307,6 +428,8 @@ export class JobsService {
           company: n.company,
           location: n.location,
           remote: n.remote,
+          ...geoPersistFields(n),
+          state: promotedStateFor(plan, n),
           description: n.description,
           sourcePostedAt: n.sourcePostedAt,
           primarySource: n.primarySource,
@@ -323,8 +446,7 @@ export class JobsService {
       stats.normalizedInserted = insertResult.count;
     }
 
-    const now = new Date();
-    for (const { n, existingSourceIds } of toUpdate) {
+    for (const { n, existingSourceIds, existingState } of toUpdate) {
       const batchTags = mergedTags.get(n) ?? [n.sourceTag];
       await this.prisma.normalizedJob.update({
         where: { canonicalUrl: n.canonicalUrl },
@@ -333,6 +455,10 @@ export class JobsService {
           company: n.company,
           location: n.location,
           remote: n.remote,
+          ...geoPersistFields(n),
+          // Never downgrade an already-VERIFIED row; otherwise promote from the
+          // fresh verify verdict (job-targeting §5).
+          state: existingState === 'verified' ? 'verified' : promotedStateFor(plan, n),
           description: n.description,
           sourcePostedAt: n.sourcePostedAt,
           lastVerifiedAt: now,
@@ -356,26 +482,54 @@ export class JobsService {
       ? { skillIds: { has: params.skill } }
       : {};
 
-    // Load candidate skill states (proficiency + recency) for match scoring.
-    // Same set and same canonical scorer as MatcherService.scoreJob, so the
-    // list score and the detail score cannot diverge for one job/candidate.
-    // One batched read per request — constant regardless of page size.
+    const ranked = await this.loadRankedJobs(params.userId, where, {
+      // Over-fetch so we can score-then-sort client-side; DB can't sort by a
+      // computed match without materializing per-user scores.
+      // ponytail: acceptable up to ~2k jobs and offset < ~1k; precompute +
+      // `user_job_match` lands when either ceiling is hit.
+      take: Math.max(limit, limit + offset) * 2,
+    });
+    return {
+      total: ranked.total,
+      rejected: ranked.rejected,
+      jobs: ranked.jobs.slice(offset, offset + limit),
+    };
+  }
+
+  /**
+   * P1 "Recommended for you": the two-track eligibility gate plus a geo-fit
+   * threshold over the same ranked pool as `list`. Eligibility stays necessary,
+   * not sufficient — the approval queue still gates every submission.
+   */
+  async recommended(params: { userId: string; limit: number }): Promise<JobListItem[]> {
+    const limit = Math.max(1, Math.min(params.limit, 200));
+    const ranked = await this.loadRankedJobs(params.userId, {}, { take: limit * 4 });
+    return ranked.jobs
+      .filter((j) => j.eligibility.eligible && (j.match.geoFit ?? 1) >= MIN_GEO_FIT_FOR_RECOMMENDED)
+      .slice(0, limit);
+  }
+
+  /**
+   * Shared list/recommended pipeline: freshness + relevance → match (with geo
+   * and comp fit) → eligibility. One batched read per call.
+   */
+  private async loadRankedJobs(
+    userId: string,
+    where: Prisma.NormalizedJobWhereInput,
+    opts: { take: number },
+  ): Promise<{ total: number; rejected: RejectStats; jobs: JobListItem[] }> {
     const [rows, total, skillStates, prefs] = await Promise.all([
       this.prisma.normalizedJob.findMany({
         where,
         orderBy: [{ sourcePostedAt: { sort: 'desc', nulls: 'last' } }, { firstSeenAt: 'desc' }],
-        // Over-fetch so we can score-then-sort client-side in this method; DB
-        // can't sort by a computed match without materializing per-user scores.
-        // ponytail: acceptable up to ~2k jobs and offset < ~1k; precompute +
-        // `user_job_match` lands when either ceiling is hit.
-        take: Math.max(limit, limit + offset) * 2,
+        take: opts.take,
       }),
       this.prisma.normalizedJob.count({ where }),
       this.prisma.candidateSkillState.findMany({
-        where: { userId: params.userId },
+        where: { userId },
         select: { skillId: true, proficiency: true, recencyDays: true },
       }),
-      this.prefs.get(params.userId),
+      this.prefs.get(userId),
     ]);
     const stateBySkill = new Map(
       skillStates.map((s) => [
@@ -383,6 +537,12 @@ export class JobsService {
         { proficiency: s.proficiency, recencyDays: s.recencyDays },
       ]),
     );
+    const eligibilityProfile = {
+      homeCountry: prefs.homeCountry ?? null,
+      citizenships: prefs.citizenships,
+      workAuthorizations: prefs.workAuthorizations,
+      sponsorshipCountries: prefs.sponsorshipCountries,
+    };
 
     const rejected: RejectStats = {
       remoteOnly: 0,
@@ -393,7 +553,16 @@ export class JobsService {
       scanned: rows.length,
     };
     const nowMs = Date.now();
-    const filtered = rows.filter((r) => {
+    // Narrow nullable optional to `T | null` so the DTO satisfies RelevancePrefs
+    // under exactOptionalPropertyTypes.
+    const relevancePrefs = {
+      ...prefs,
+      homeCountry: prefs.homeCountry ?? null,
+      compMin: prefs.compMin ?? null,
+      compMax: prefs.compMax ?? null,
+    };
+    const filtered: Array<{ row: (typeof rows)[number]; signals: RelevanceSignal[] }> = [];
+    for (const r of rows) {
       const result = relevance(
         {
           company: r.company,
@@ -401,78 +570,113 @@ export class JobsService {
           skillIds: r.skillIds,
           sourcePostedAt: r.sourcePostedAt,
           firstSeenAt: r.firstSeenAt,
+          country: r.country,
+          region: r.region,
+          workplaceType: r.workplaceType,
+          remoteScope: r.remoteScope,
+          sponsorshipSignal: r.sponsorshipSignal,
+          compCurrency: r.compCurrency,
         },
-        prefs,
+        relevancePrefs,
         { maxAgeDays: FRESHNESS_DAYS, now: nowMs },
       );
-      if (result.relevant) return true;
-      switch (result.reason) {
-        case 'stale':
-          rejected.stale++;
-          break;
-        case 'remote-only':
-          rejected.remoteOnly++;
-          break;
-        case 'company-blacklisted':
-          rejected.companyBlacklisted++;
-          break;
-        case 'has-dealbreaker':
-          rejected.hasDealbreaker++;
-          break;
-        case 'must-have-missing':
-          rejected.mustHaveMissing++;
-          break;
+      if (!result.relevant) {
+        switch (result.reason) {
+          case 'stale':
+            rejected.stale++;
+            break;
+          case 'remote-only':
+            rejected.remoteOnly++;
+            break;
+          case 'company-blacklisted':
+            rejected.companyBlacklisted++;
+            break;
+          case 'has-dealbreaker':
+            rejected.hasDealbreaker++;
+            break;
+          case 'must-have-missing':
+            rejected.mustHaveMissing++;
+            break;
+        }
+        continue;
       }
-      return false;
-    });
+      filtered.push({ row: r, signals: result.signals ?? [] });
+    }
 
-    const scored = filtered.map((r) => ({
-      row: r,
-      match: computeMatchResult({
+    const scored = filtered.map(({ row: r, signals }) => {
+      const match = computeMatchResult({
         jobId: r.id,
         required: r.skillIds.map((skillId) => ({ skillId, weight: 1 })),
         nameById: new Map(),
         stateBySkill,
         evidenceBySkill: new Map(),
-      }),
-    }));
-    // Sort by match score DESC (nulls last), then existing tiebreak.
+        geo: {
+          job: {
+            country: r.country,
+            region: r.region,
+            workplaceType: r.workplaceType,
+            remoteScope: r.remoteScope,
+          },
+          profile: {
+            countries: prefs.countries,
+            workplaceTypes: prefs.workplaceTypes,
+            remoteScopes: prefs.remoteScopes,
+          },
+        },
+        comp: {
+          job: { currency: r.compCurrency, min: r.compMin, max: r.compMax },
+          profile: {
+            currency: prefs.currency,
+            min: prefs.compMin ?? null,
+            max: prefs.compMax ?? null,
+          },
+        },
+      });
+      const f = freshness(
+        { sourcePostedAt: r.sourcePostedAt, firstSeenAt: r.firstSeenAt },
+        { maxAgeDays: FRESHNESS_DAYS, agingDays: AGING_DAYS, now: nowMs },
+      );
+      const item: JobListItem = {
+        id: r.id,
+        canonicalUrl: r.canonicalUrl,
+        title: r.title,
+        company: r.company,
+        location: r.location,
+        remote: r.remote,
+        primarySource: r.primarySource,
+        state: r.state,
+        sourcePostedAt: r.sourcePostedAt?.toISOString() ?? null,
+        firstSeenAt: r.firstSeenAt.toISOString(),
+        skillIds: r.skillIds,
+        match,
+        aging: f.reason === 'aging',
+        country: r.country,
+        region: r.region,
+        city: r.city,
+        workplaceType: r.workplaceType,
+        remoteScope: r.remoteScope,
+        sponsorshipSignal: r.sponsorshipSignal,
+        signals,
+        eligibility: isEligibleToApply(eligibilityProfile, {
+          state: r.state,
+          country: r.country,
+          sponsorshipSignal: r.sponsorshipSignal,
+        }),
+      };
+      return item;
+    });
+    // Sort by match score DESC (nulls last), then geo fit as a tiebreak.
     scored.sort((a, b) => {
       const as = a.match.score;
       const bs = b.match.score;
-      if (as === bs) return 0;
-      if (as === null) return 1;
-      if (bs === null) return -1;
-      return bs - as;
+      if (as !== bs) {
+        if (as === null) return 1;
+        if (bs === null) return -1;
+        return bs - as;
+      }
+      return (b.match.geoFit ?? -1) - (a.match.geoFit ?? -1);
     });
-    const paged = scored.slice(offset, offset + limit);
-
-    return {
-      total,
-      rejected,
-      jobs: paged.map(({ row: r, match }) => {
-        const f = freshness(
-          { sourcePostedAt: r.sourcePostedAt, firstSeenAt: r.firstSeenAt },
-          { maxAgeDays: FRESHNESS_DAYS, agingDays: AGING_DAYS, now: nowMs },
-        );
-        const aging = f.reason === 'aging';
-        return {
-          id: r.id,
-          canonicalUrl: r.canonicalUrl,
-          title: r.title,
-          company: r.company,
-          location: r.location,
-          remote: r.remote,
-          primarySource: r.primarySource,
-          state: r.state,
-          sourcePostedAt: r.sourcePostedAt?.toISOString() ?? null,
-          firstSeenAt: r.firstSeenAt.toISOString(),
-          skillIds: r.skillIds,
-          match,
-          aging,
-        };
-      }),
-    };
+    return { total, rejected, jobs: scored };
   }
 
   /**
@@ -637,4 +841,58 @@ export class JobsService {
 
 function uniq<T>(arr: T[]): T[] {
   return Array.from(new Set(arr));
+}
+
+/** Zeroed sync stats with the adapter id filled in. */
+function emptySyncStats(adapterId: string): JobsSyncStats {
+  return {
+    adapter: adapterId,
+    fetched: 0,
+    rawInserted: 0,
+    normalizedInserted: 0,
+    normalizedUpdated: 0,
+    rejected: 0,
+    merged: 0,
+  };
+}
+
+/** Pipeline state promoted from the verify verdict for one survivor. */
+function promotedStateFor(plan: IngestPlan, n: NormalizedJob): string {
+  return plan.stateByWinner.get(n) ?? 'discovered';
+}
+
+/**
+ * Structured-geo columns for one normalized job. `sponsorshipEvidence` is only
+ * included when the signal is not `unclear`, so Prisma's nullable-JSON default
+ * stays in place otherwise.
+ */
+function geoPersistFields(n: NormalizedJob): {
+  country: string | null;
+  region: string | null;
+  city: string | null;
+  workplaceType: string | null;
+  remoteScope: string | null;
+  sponsorshipSignal: NormalizedJob['sponsorshipSignal'];
+  geoParsedAt: Date;
+  compCurrency: string | null;
+  compMin: number | null;
+  compMax: number | null;
+  sponsorshipEvidence?: Prisma.InputJsonValue;
+} {
+  const fields: ReturnType<typeof geoPersistFields> = {
+    country: n.country,
+    region: n.region,
+    city: n.city,
+    workplaceType: n.workplaceType,
+    remoteScope: n.remoteScope,
+    sponsorshipSignal: n.sponsorshipSignal,
+    geoParsedAt: n.geoParsedAt,
+    compCurrency: n.compCurrency,
+    compMin: n.compBandOriginal?.min ?? null,
+    compMax: n.compBandOriginal?.max ?? null,
+  };
+  if (n.sponsorshipEvidence) {
+    fields.sponsorshipEvidence = n.sponsorshipEvidence as unknown as Prisma.InputJsonValue;
+  }
+  return fields;
 }

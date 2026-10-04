@@ -13,6 +13,7 @@
 import {
   isBannedPlatformUrl,
   mapFirecrawl,
+  marketRequest,
   type FirecrawlJobClient,
 } from '../adapters/firecrawl';
 import type { RawJob } from '../types';
@@ -21,6 +22,10 @@ import type { FirecrawlScrapeData } from '@careeros/firecrawl';
 export interface CandidateSearchRunOptions {
   client: FirecrawlJobClient;
   queries: string[];
+  /** Market country (ISO-3166 alpha-2) forwarded to each search request. */
+  country?: string;
+  /** Market city/region forwarded to each search request as `location`. */
+  location?: string;
   /** Per-query result cap (Firecrawl max 100). Default 20. */
   limit?: number;
   /** Scrape each discovered URL for the full description. Default false. */
@@ -75,10 +80,15 @@ export async function runCandidateSearch(
   const seen = new Set<string>();
   let scrapes = 0;
 
+  const market = {
+    ...(options.country ? { country: options.country } : {}),
+    ...(options.location ? { location: options.location } : {}),
+  };
+
   for (const query of options.queries) {
     if (shouldStop()) break;
     if (minIntervalMs > 0 && result.calls.search > 0) await sleep(minIntervalMs);
-    const res = await options.client.search({ query, limit });
+    const res = await options.client.search(marketRequest(query, limit, market));
     result.queriesRun++;
     result.calls.search++;
     onCall('search', CREDITS_PER_CALL);
@@ -108,7 +118,7 @@ export async function runCandidateSearch(
         }
       }
 
-      const raw = mapFirecrawl(hit, detail);
+      const raw = mapFirecrawl(hit, detail, market);
       if (!raw) continue;
       if (seen.has(raw.canonicalUrl)) {
         result.duplicatesDropped++;

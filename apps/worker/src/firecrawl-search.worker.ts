@@ -23,11 +23,13 @@ import type { PrismaClient } from '@prisma/client';
 import type { Logger } from 'pino';
 import {
   buildCandidateSearchQueries,
+  marketTargetsFromProfile,
   planIngest,
   runCandidateSearch,
   type CandidateSearchRunResult,
   type FirecrawlJobClient,
   type IngestPlan,
+  type MarketTarget,
   type NormalizedJob,
   type RawJob,
 } from '@careeros/job-pipeline';
@@ -60,20 +62,23 @@ export type WorkerLogger = Pick<Logger, 'info' | 'warn' | 'error'>;
 // Prisma surface (structural so tests stub with plain objects; main.ts casts)
 // ---------------------------------------------------------------------------
 
+/**
+ * Goals are only used to enumerate candidate user ids. Targeting fields are
+ * read from `UserJobPreferences` (P1 unification) — never from the goal.
+ */
 export interface CandidateGoalRow {
   userId: string;
-  targetRoles: string[];
-  locations: string[];
-  remoteOnly: boolean;
-  seniority: string[];
 }
 
 export interface CandidatePrefsRow {
   targetRoles: string[];
   locations: string[];
   remoteOnly: boolean;
+  seniority: string[];
   mustHaveSkills: string[];
   dealbreakerSkills: string[];
+  countries: string[];
+  cities: unknown;
 }
 
 export interface FirecrawlSearchRepo {
@@ -91,8 +96,8 @@ export interface FirecrawlSearchRepo {
   normalizedJob: {
     findMany(args: {
       where: { canonicalUrl: { in: string[] } };
-      select: { canonicalUrl: true; sourceIds: true };
-    }): Promise<Array<{ canonicalUrl: string; sourceIds: string[] }>>;
+      select: { canonicalUrl: true; sourceIds: true; state: true };
+    }): Promise<Array<{ canonicalUrl: string; sourceIds: string[]; state: string }>>;
     createMany(args: {
       data: Array<Record<string, unknown>>;
       skipDuplicates?: boolean;
@@ -110,6 +115,8 @@ export interface FirecrawlSearchRepo {
 export interface CandidateSearchPlan {
   userId: string;
   queries: string[];
+  /** Per-market scoping for the Firecrawl search requests. */
+  targets: MarketTarget[];
 }
 
 export async function loadCandidateSearchPlans(
@@ -132,17 +139,39 @@ export async function loadCandidateSearchPlans(
       take: MAX_CANDIDATE_SKILLS,
     });
     const queries = buildCandidateSearchQueries({
-      targetRoles: prefs?.targetRoles.length ? prefs.targetRoles : goal.targetRoles,
-      locations: prefs?.locations.length ? prefs.locations : goal.locations,
-      remoteOnly: goal.remoteOnly || (prefs?.remoteOnly ?? false),
-      seniority: goal.seniority,
+      targetRoles: prefs?.targetRoles ?? [],
+      locations: prefs?.locations ?? [],
+      remoteOnly: prefs?.remoteOnly ?? false,
+      seniority: prefs?.seniority ?? [],
       mustHaveSkills: names(prefs?.mustHaveSkills ?? []),
       dealbreakerSkills: names(prefs?.dealbreakerSkills ?? []),
       candidateSkills: skillStates.map((s) => nameById.get(s.skillId)).filter((n): n is string => Boolean(n)),
     });
-    if (queries.length > 0) plans.push({ userId: goal.userId, queries });
+    if (queries.length === 0) continue;
+    const targets = marketTargetsFromProfile({
+      countries: prefs?.countries ?? [],
+      cities: parseCities(prefs?.cities),
+    });
+    plans.push({ userId: goal.userId, queries, targets });
   }
   return plans;
+}
+
+/** Defensive parse of the `cities` JSON column into `{ country, city }[]`. */
+function parseCities(raw: unknown): Array<{ country: string; city: string }> {
+  if (!Array.isArray(raw)) return [];
+  const out: Array<{ country: string; city: string }> = [];
+  for (const entry of raw) {
+    if (
+      entry &&
+      typeof entry === 'object' &&
+      typeof (entry as { country?: unknown }).country === 'string' &&
+      typeof (entry as { city?: unknown }).city === 'string'
+    ) {
+      out.push({ country: (entry as { country: string }).country, city: (entry as { city: string }).city });
+    }
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -201,30 +230,55 @@ export async function persistPlan(
 
   const existingRows = await repo.normalizedJob.findMany({
     where: { canonicalUrl: { in: urls } },
-    select: { canonicalUrl: true, sourceIds: true },
+    select: { canonicalUrl: true, sourceIds: true, state: true },
   });
-  const existingByUrl = new Map(existingRows.map((r) => [r.canonicalUrl, r.sourceIds]));
+  const existingByUrl = new Map(existingRows.map((r) => [r.canonicalUrl, r]));
 
   const toInsert: Array<Record<string, unknown>> = [];
-  const toUpdate: Array<{ n: NormalizedJob; existingSourceIds: string[] }> = [];
+  const toUpdate: Array<{ n: NormalizedJob; existingSourceIds: string[]; existingState: string }> = [];
   for (const n of plan.normalized) {
     const existing = existingByUrl.get(n.canonicalUrl);
-    if (existing) toUpdate.push({ n, existingSourceIds: existing });
-    else toInsert.push(normalizedInsertData(n, plan));
+    if (existing) {
+      toUpdate.push({ n, existingSourceIds: existing.sourceIds, existingState: existing.state });
+    } else {
+      toInsert.push(normalizedInsertData(n, plan));
+    }
   }
 
   if (toInsert.length > 0) {
     const result = await repo.normalizedJob.createMany({ data: toInsert, skipDuplicates: true });
     stats.normalizedInserted = result.count;
   }
-  for (const { n, existingSourceIds } of toUpdate) {
+  for (const { n, existingSourceIds, existingState } of toUpdate) {
     await repo.normalizedJob.update({
       where: { canonicalUrl: n.canonicalUrl },
-      data: normalizedUpdateData(n, plan, existingSourceIds, now),
+      data: normalizedUpdateData(n, plan, existingSourceIds, existingState, now),
     });
     stats.normalizedUpdated++;
   }
   return stats;
+}
+
+/** Structured-geo + state columns shared by the insert and update paths. */
+function geoColumns(n: NormalizedJob): Record<string, unknown> {
+  const cols: Record<string, unknown> = {
+    country: n.country,
+    region: n.region,
+    city: n.city,
+    workplaceType: n.workplaceType,
+    remoteScope: n.remoteScope,
+    sponsorshipSignal: n.sponsorshipSignal,
+    geoParsedAt: n.geoParsedAt,
+    compCurrency: n.compCurrency,
+    compMin: n.compBandOriginal?.min ?? null,
+    compMax: n.compBandOriginal?.max ?? null,
+  };
+  if (n.sponsorshipEvidence) cols.sponsorshipEvidence = n.sponsorshipEvidence;
+  return cols;
+}
+
+function promotedState(plan: IngestPlan, n: NormalizedJob): string {
+  return plan.stateByWinner.get(n) ?? 'discovered';
 }
 
 function normalizedInsertData(n: NormalizedJob, plan: IngestPlan): Record<string, unknown> {
@@ -234,6 +288,8 @@ function normalizedInsertData(n: NormalizedJob, plan: IngestPlan): Record<string
     company: n.company,
     location: n.location,
     remote: n.remote,
+    ...geoColumns(n),
+    state: promotedState(plan, n),
     description: n.description,
     sourcePostedAt: n.sourcePostedAt,
     primarySource: n.primarySource,
@@ -245,6 +301,7 @@ function normalizedUpdateData(
   n: NormalizedJob,
   plan: IngestPlan,
   existingSourceIds: string[],
+  existingState: string,
   now: Date,
 ): Record<string, unknown> {
   return {
@@ -252,6 +309,10 @@ function normalizedUpdateData(
     company: n.company,
     location: n.location,
     remote: n.remote,
+    ...geoColumns(n),
+    // Never downgrade an already-VERIFIED row; otherwise promote from the
+    // fresh verify verdict.
+    state: existingState === 'verified' ? 'verified' : promotedState(plan, n),
     description: n.description,
     sourcePostedAt: n.sourcePostedAt,
     lastVerifiedAt: now,
@@ -331,23 +392,30 @@ export async function runFirecrawlSearchCycle(
   };
 
   for (const plan of plans) {
-    if (isFirecrawlKilled(env) || !budget.allow(1)) {
-      summary.killed = summary.killed || isFirecrawlKilled(env);
-      break;
+    // One search run per market target so every request carries its structured
+    // country/location; a target-less profile keeps the legacy global query.
+    const targets: Array<MarketTarget | null> = plan.targets.length > 0 ? plan.targets : [null];
+    for (const target of targets) {
+      if (isFirecrawlKilled(env) || !budget.allow(1)) {
+        summary.killed = summary.killed || isFirecrawlKilled(env);
+        break;
+      }
+      const run = await runCandidateSearch({
+        client: options.client,
+        queries: plan.queries,
+        ...(target ? { country: target.country } : {}),
+        ...(target?.location ? { location: target.location } : {}),
+        scrapeDetails: readScrapeDetails(env),
+        maxScrapes: readPositiveInt(env.FIRECRAWL_MAX_SCRAPES_PER_RUN, 10),
+        minIntervalMs: readMinIntervalMs(env),
+        shouldStop: () => isFirecrawlKilled(env) || !budget.allow(1),
+        onCall: (_kind, credits) => {
+          budget.spend(credits);
+        },
+      });
+      applySearchStats(summary, run);
+      await persistFetched(options.repo, run.raw, now(), summary);
     }
-    const run = await runCandidateSearch({
-      client: options.client,
-      queries: plan.queries,
-      scrapeDetails: readScrapeDetails(env),
-      maxScrapes: readPositiveInt(env.FIRECRAWL_MAX_SCRAPES_PER_RUN, 10),
-      minIntervalMs: readMinIntervalMs(env),
-      shouldStop: () => isFirecrawlKilled(env) || !budget.allow(1),
-      onCall: (_kind, credits) => {
-        budget.spend(credits);
-      },
-    });
-    applySearchStats(summary, run);
-    await persistFetched(options.repo, run.raw, now(), summary);
   }
 
   // Optional crawl phase for configured public career-site boards.

@@ -1,7 +1,7 @@
 import { retry, RATE_LIMITS } from '@careeros/shared';
 import { safeFetch, type AssertPublicUrlOptions } from '@careeros/shared/net';
 import { z } from 'zod';
-import type { JobSourceAdapter, RawJob } from '../../types';
+import { normalizeWorkplaceType, type JobSourceAdapter, type RawJob } from '../../types';
 import { MalformedResponseError } from '../errors';
 
 /**
@@ -276,6 +276,7 @@ export function mapWorkday(
     company: company.slice(0, 200),
     location: location ? location.slice(0, 200) : null,
     remote: inferWorkdayRemote(info?.remoteType ?? posting.remoteType, `${title} ${location} ${description}`),
+    workplaceType: normalizeWorkplaceType(info?.remoteType ?? posting.remoteType) ?? null,
     description,
     sourcePostedAt: parseWorkdayPosted(info?.startDate, posting.postedOn, ctx.now ?? new Date()),
     fetchedAt: new Date(),

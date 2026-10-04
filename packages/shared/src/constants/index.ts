@@ -1,3 +1,5 @@
+export * from './geo';
+
 export const APP_NAME = 'Career OS';
 export const SETUP_ROUTE = '/setup';
 export const DASHBOARD_ROUTE = '/dashboard';

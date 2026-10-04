@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { JobSourceAdapter, RawJob } from '@careeros/job-pipeline';
+import { createFirecrawlAdapter } from '@careeros/job-pipeline';
 import { JobsService } from './jobs.service';
 
 function raw(): RawJob {
@@ -110,5 +111,43 @@ describe('JobsService.syncCandidateSearch (F7)', () => {
     expect(fetch).not.toHaveBeenCalled();
     expect(stats.fetched).toBe(0);
     expect(stats.normalizedInserted).toBe(0);
+  });
+
+  // Regression (job-targeting §6): a country-only market target is lowercased
+  // by `buildMarketSyncRequests` for Adzuna's path segment and reaches the
+  // Firecrawl adapter as `country:'de'`. The resulting raw `location` must stay
+  // parseable so the ingest path persists a non-null structured `country`.
+  it('country-only market target yields non-null structured country after ingest', async () => {
+    const prisma = makePrisma();
+    const svc = makeService(prisma, { countries: ['DE'], cities: [] });
+    const adapter = createFirecrawlAdapter({
+      queries: ['backend engineer'],
+      country: 'de', // what buildMarketSyncRequests emits for a DE target
+      scrapeDetails: false,
+      client: {
+        search: async () => ({
+          success: true as const,
+          data: [
+            {
+              url: 'https://jobs.lever.co/acme/backend-1',
+              title: 'Senior Backend Engineer',
+              description:
+                'Build distributed systems with TypeScript, Postgres and Kubernetes for our Berlin platform team.',
+            },
+          ],
+        }),
+        scrape: async () => ({ success: true as const, data: {} }),
+      },
+    });
+
+    const stats = await svc.syncCandidateSearch('u1', adapter);
+
+    expect(stats.normalizedInserted).toBe(1);
+    const inserted = (
+      prisma.normalizedJob.createMany.mock.calls[0]![0] as {
+        data: Array<{ country: string | null }>;
+      }
+    ).data;
+    expect(inserted[0]!.country).toBe('DE');
   });
 });

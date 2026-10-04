@@ -941,7 +941,7 @@ model MarketSnapshot {
 model UserJobPreferences {
   userId             String   @id @db.Uuid
   targetRoles        String[] @default([]) /// free-text, matched when role classifier ships
-  locations          String[] @default([]) /// free-text city/country
+  locations          String[] @default([]) /// legacy free-text city/country (market-brief + query build)
   remoteOnly         Boolean  @default(false)
   compMin            Int?     /// annualized in currency below
   compMax            Int?
@@ -950,6 +950,19 @@ model UserJobPreferences {
   mustHaveSkills     String[] @default([]) /// skill IDs from catalogue; job must have all
   dealbreakerSkills  String[] @default([]) /// skill IDs; job with any of these gets excluded
   companyBlacklist   String[] @default([]) /// case-insensitive company names
+  /// --- P1 targeting profile (job-targeting-design.md §4) ---
+  workplaceTypes     String[] @default([]) /// remote | hybrid | onsite
+  remoteScopes       String[] @default([]) /// remote_local | remote_regional | remote_global
+  countries          String[] @default([]) /// ISO-3166 alpha-2 target countries
+  cities             Json     @default("[]") /// [{ country, city }]
+  homeCountry        String?  @db.Char(2) /// ISO-3166 alpha-2
+  citizenships       String[] @default([]) /// ISO-3166 alpha-2
+  workAuthorizations String[] @default([]) /// ISO-3166 alpha-2 already workable
+  sponsorshipCountries String[] @default([]) /// countries where sponsorship is acceptable
+  relocationWilling  Boolean  @default(false)
+  relocationCountries String[] @default([]) /// ISO-3166 alpha-2
+  timezoneOverlapHours Int?    /// reserved for P2; accepted, not scored in P1
+  language           String?  @default("en")
   updatedAt          DateTime @updatedAt @db.Timestamptz(6)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -1067,6 +1080,15 @@ model CoverLetter {
   @@map("cover_letters")
 }
 
+/// P1 job-targeting: sponsorship verdict read from the listing text. `unclear`
+/// is the honest default — a `likely` verdict requires an explicit positive
+/// phrase and negations force `none` (see job-pipeline `sponsorshipSignal`).
+enum SponsorshipSignal {
+  likely
+  unclear
+  none
+}
+
 model NormalizedJob {
   id              String   @id @default(uuid()) @db.Uuid
   canonicalUrl    String   @unique
@@ -1074,6 +1096,22 @@ model NormalizedJob {
   company         String
   location        String?
   remote          Boolean  @default(false)
+  /// --- P1 structured geography (job-targeting-design.md §5). All nullable:
+  /// an unparsed row is honest, never guessed. ---
+  country         String?  @db.Char(2) /// ISO-3166 alpha-2
+  region          String?
+  city            String?
+  workplaceType   String?  /// remote | hybrid | onsite
+  remoteScope     String?  /// remote_local | remote_regional | remote_global
+  sponsorshipSignal SponsorshipSignal @default(unclear)
+  sponsorshipEvidence Json? /// { value, matched[], source, confidence, parsedAt }
+  geoParsedAt     DateTime? @db.Timestamptz(6) /// set by ingest or geo-backfill
+  /// Parsed comp band in its original currency; needed so `compFit` can compare
+  /// like-for-like and emit `comp_uncomparable` instead of guessing across
+  /// currencies (job-targeting §7). Null when no parseable salary.
+  compCurrency    String?  @db.Char(3)
+  compMin         Int?
+  compMax         Int?
   description     String   @db.Text
   sourcePostedAt  DateTime? @db.Timestamptz(6)
   primarySource   String   /// adapter id currently owning this row
@@ -1090,6 +1128,7 @@ model NormalizedJob {
   @@index([primarySource])
   @@index([sourcePostedAt(sort: Desc)])
   @@index([skillIds], type: Gin)
+  @@index([country, region, workplaceType])
   @@map("jobs_normalized")
 }
 

@@ -10,10 +10,10 @@ export default function JobPreferencesPage() {
           Job preferences
         </h1>
         <p className="max-w-2xl text-[14px] leading-relaxed text-fg-muted">
-          Drives the relevance filter on the Jobs page. Live filters today: remote-only,
-          must-have skills, dealbreaker skills, company blacklist, and freshness window.
-          Target roles, locations, comp band, and seniority are collected here for when their
-          respective classifiers ship in later slices.
+          This is the single targeting profile. It scopes which jobs are discovered, ranks
+          them by fit, and gates Apply and Recommended to roles you&apos;re authorized for or
+          that likely sponsor. Eligibility is a floor, not a shortcut — every application
+          still goes through your approval queue.
         </p>
       </header>
       <JobPreferencesPanel />

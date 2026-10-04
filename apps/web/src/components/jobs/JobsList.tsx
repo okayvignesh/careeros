@@ -26,8 +26,23 @@ interface JobListItem {
     matched: number;
     total: number;
     missing: string[];
+    geoFit?: number | null;
+    compFit?: number | null;
   };
   aging: boolean;
+  country: string | null;
+  region: string | null;
+  city: string | null;
+  workplaceType: string | null;
+  remoteScope: string | null;
+  sponsorshipSignal: 'likely' | 'unclear' | 'none';
+  signals: Array<{ type: string; detail: string }>;
+  eligibility: {
+    eligible: boolean;
+    reason: string;
+    authorization: 'ok' | 'required';
+    sponsorship: 'likely' | 'unclear' | 'none';
+  };
 }
 
 interface SkillExtractionStats {
@@ -245,6 +260,7 @@ export function JobsList() {
                 <th className="px-4 py-2.5 text-left font-medium">Title</th>
                 <th className="px-4 py-2.5 text-left font-medium">Company</th>
                 <th className="px-4 py-2.5 text-left font-medium">Location</th>
+                <th className="px-4 py-2.5 text-left font-medium">Fit</th>
                 <th className="px-4 py-2.5 text-left font-medium">Source</th>
                 <th className="px-4 py-2.5 text-left font-medium">Posted</th>
                 <th className="px-4 py-2.5 text-right font-medium">Actions</th>
@@ -290,6 +306,9 @@ export function JobsList() {
                     {j.remote && <RemoteBadge />}
                     {j.location && <span className="ml-1.5">{j.location}</span>}
                     {!j.remote && !j.location && <span className="text-fg-faint">-</span>}
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <FitCell job={j} />
                   </td>
                   <td className="px-4 py-2.5">
                     <span className="font-mono text-[11.5px] text-fg-subtle">{j.primarySource}</span>
@@ -457,6 +476,77 @@ function MatchCell({ match }: { match: JobListItem['match'] }) {
     >
       {pct}%
     </span>
+  );
+}
+
+const ELIGIBILITY_REASON: Record<string, string> = {
+  eligible: 'Verified and either authorized or likely to sponsor.',
+  not_verified: 'Not verified yet — only VERIFIED roles can be recommended or applied to.',
+  authorization_required: 'Work authorization is required and the employer will not sponsor.',
+  sponsorship_unclear: 'Work authorization is required and sponsorship is not stated as likely.',
+};
+
+/**
+ * P1 fit badges. Sponsorship and authorization are the two-track inputs;
+ * eligibility is the gate result. The explainer title states *why* a role is
+ * not eligible so a blocked apply is never a mystery.
+ */
+function FitCell({ job }: { job: JobListItem }) {
+  const eligible = job.eligibility.eligible;
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      <span
+        data-testid={`job-sponsorship-${job.id}`}
+        title={`Sponsorship signal: ${job.sponsorshipSignal}`}
+        className={
+          'rounded border px-1.5 py-[1px] text-[10.5px] ' +
+          (job.sponsorshipSignal === 'likely'
+            ? 'border-accent/30 bg-accent/10 text-accent'
+            : job.sponsorshipSignal === 'none'
+              ? 'border-danger/30 bg-danger/10 text-danger'
+              : 'border-[hsl(var(--border))] text-fg-faint')
+        }
+      >
+        {job.sponsorshipSignal === 'likely'
+          ? 'Sponsors'
+          : job.sponsorshipSignal === 'none'
+            ? 'No sponsor'
+            : 'Sponsor?'}
+      </span>
+      <span
+        data-testid={`job-authorization-${job.id}`}
+        title={`Work authorization: ${job.eligibility.authorization}`}
+        className={
+          'rounded border px-1.5 py-[1px] text-[10.5px] ' +
+          (job.eligibility.authorization === 'ok'
+            ? 'border-[hsl(var(--border))] text-fg-subtle'
+            : 'border-warning/30 bg-warning/10 text-warning')
+        }
+      >
+        {job.eligibility.authorization === 'ok' ? 'Authorized' : 'Needs auth'}
+      </span>
+      <span
+        data-testid={`job-eligibility-${job.id}`}
+        title={ELIGIBILITY_REASON[job.eligibility.reason] ?? job.eligibility.reason}
+        className={
+          'rounded border px-1.5 py-[1px] text-[10.5px] font-medium ' +
+          (eligible
+            ? 'border-accent/40 bg-accent/10 text-accent'
+            : 'border-[hsl(var(--border))] text-fg-faint')
+        }
+      >
+        {eligible ? 'Eligible' : 'Not eligible'}
+      </span>
+      {job.signals.length > 0 && (
+        <span
+          data-testid={`job-signals-${job.id}`}
+          title={job.signals.map((s) => s.detail).join('\n')}
+          className="rounded border border-[hsl(var(--border))] px-1.5 py-[1px] text-[10.5px] text-fg-faint"
+        >
+          {job.signals.length} signal{job.signals.length === 1 ? '' : 's'}
+        </span>
+      )}
+    </div>
   );
 }
 

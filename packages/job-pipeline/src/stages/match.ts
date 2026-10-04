@@ -65,6 +65,39 @@ export interface MatchResult {
   total: number;
   /** Required skills below the weak bar — sorted for stable UI. */
   missing: string[];
+  /**
+   * Optional geo fit in [0,1] (workplace + country + remote scope). Omitted
+   * unless the caller supplies a `geo` input, so legacy callers are unchanged.
+   */
+  geoFit?: number | null;
+  /**
+   * Optional comp fit in [0,1] — emitted only when the job currency equals the
+   * profile currency, otherwise null. Never compares across currencies.
+   */
+  compFit?: number | null;
+}
+
+export interface GeoFitJob {
+  country?: string | null;
+  region?: string | null;
+  workplaceType?: string | null;
+  remoteScope?: string | null;
+}
+
+export interface GeoFitProfile {
+  countries?: readonly string[];
+  workplaceTypes?: readonly string[];
+  remoteScopes?: readonly string[];
+}
+
+export interface GeoFitInput {
+  job: GeoFitJob;
+  profile: GeoFitProfile;
+}
+
+export interface CompFitInput {
+  job: { currency?: string | null; min?: number | null; max?: number | null };
+  profile: { currency: string; min?: number | null; max?: number | null };
 }
 
 export interface GapItem {
@@ -97,6 +130,10 @@ export interface MatchScore {
   gap: GapItem[];
   explanations: Explanation[];
   computedAt: Date;
+  /** See {@link MatchResult.geoFit}; omitted unless a `geo` input is given. */
+  geoFit?: number | null;
+  /** See {@link MatchResult.compFit}; omitted unless a `comp` input is given. */
+  compFit?: number | null;
 }
 
 /** Per-skill weight; today always 1.0. Kept as a type so a future
@@ -119,14 +156,21 @@ export interface ComputeInput {
     Array<{ id: string; kind: string; signal: string; observedAt: Date }>
   >;
   now?: Date;
+  /** Optional geo fit inputs; omit to keep the legacy output shape. */
+  geo?: GeoFitInput;
+  /** Optional comp fit inputs; omit to keep the legacy output shape. */
+  comp?: CompFitInput;
 }
 
 export function computeMatch(input: ComputeInput): MatchScore {
   const { jobId, required, nameById, stateBySkill, evidenceBySkill } = input;
   const now = input.now ?? new Date();
+  const extras: Pick<MatchScore, 'geoFit' | 'compFit'> = {};
+  if (input.geo) extras.geoFit = computeGeoFit(input.geo);
+  if (input.comp) extras.compFit = computeCompFit(input.comp);
 
   if (required.length === 0) {
-    return { jobId, score: 0, readiness: 0, gap: [], explanations: [], computedAt: now };
+    return { jobId, score: 0, readiness: 0, gap: [], explanations: [], computedAt: now, ...extras };
   }
 
   let sumCoverage = 0;
@@ -212,7 +256,58 @@ export function computeMatch(input: ComputeInput): MatchScore {
     gap,
     explanations,
     computedAt: now,
+    ...extras,
   };
+}
+
+/**
+ * Geo fit: the mean of the axes the profile actually constrains. An absent
+ * profile axis contributes nothing (so it can't punish an unset preference);
+ * a job value that's unknown scores 0.5 (neither match nor mismatch). Returns
+ * null when no axis can be scored.
+ */
+export function computeGeoFit(input: GeoFitInput): number | null {
+  const { job, profile } = input;
+  const parts: number[] = [];
+
+  if (profile.countries && profile.countries.length > 0) {
+    parts.push(matchScore(job.country ?? null, profile.countries));
+  }
+  if (profile.workplaceTypes && profile.workplaceTypes.length > 0) {
+    parts.push(matchScore(job.workplaceType ?? null, profile.workplaceTypes));
+  }
+  if (profile.remoteScopes && profile.remoteScopes.length > 0) {
+    parts.push(matchScore(job.remoteScope ?? null, profile.remoteScopes));
+  }
+
+  if (parts.length === 0) return null;
+  return clampUnit(parts.reduce((a, b) => a + b, 0) / parts.length);
+}
+
+/**
+ * Comp fit: overlap of the job band with the target band, only when the
+ * currencies match. Different (or unknown) currencies → null; the relevance
+ * layer surfaces `comp_uncomparable` so the caller can explain why.
+ */
+export function computeCompFit(input: CompFitInput): number | null {
+  const { job, profile } = input;
+  if (!job.currency || job.currency.toUpperCase() !== profile.currency.toUpperCase()) {
+    return null;
+  }
+  if (job.min == null || job.max == null || profile.min == null || profile.max == null) {
+    return null;
+  }
+  const lo = Math.max(job.min, profile.min);
+  const hi = Math.min(job.max, profile.max);
+  if (hi <= lo) return 0;
+  const overlap = hi - lo;
+  const span = Math.max(job.max, profile.max) - Math.min(job.min, profile.min);
+  return span > 0 ? clampUnit(overlap / span) : 1;
+}
+
+function matchScore(value: string | null, targets: readonly string[]): number {
+  if (!value) return 0.5;
+  return targets.includes(value) ? 1 : 0;
 }
 
 /**
@@ -224,16 +319,24 @@ export function computeMatch(input: ComputeInput): MatchScore {
  */
 export function computeMatchResult(input: ComputeInput): MatchResult {
   if (input.required.length === 0) {
-    return { score: null, matched: 0, total: 0, missing: [] };
+    const empty: MatchResult = { score: null, matched: 0, total: 0, missing: [] };
+    if (input.geo) empty.geoFit = computeGeoFit(input.geo);
+    if (input.comp) empty.compFit = computeCompFit(input.comp);
+    return empty;
   }
   const score = computeMatch(input);
   const missing = score.gap.map((g) => g.skillId).sort();
-  return {
+  const result: MatchResult = {
     score: score.score,
     matched: input.required.length - missing.length,
     total: input.required.length,
     missing,
   };
+  // Only surface geo/comp fit when the caller supplied the inputs, so legacy
+  // callers keep byte-identical output.
+  if (score.geoFit !== undefined) result.geoFit = score.geoFit;
+  if (score.compFit !== undefined) result.compFit = score.compFit;
+  return result;
 }
 
 function recencyFactor(recencyDays: number): number {

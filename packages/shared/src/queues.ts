@@ -53,3 +53,23 @@ export interface FirecrawlSearchPayload {
   /** Omit for the scheduled all-candidates sweep. */
   userId?: string;
 }
+
+// P1 job-targeting: backfill structured geo (`country/region/city/workplace/
+// remoteScope/sponsorshipSignal`) onto legacy `jobs_normalized` rows. One job
+// per row with a stable id so a re-enqueue is idempotent and `geoParsedAt`
+// marks completion.
+export const QUEUE_JOBS_GEO_BACKFILL = 'jobs.geo-backfill';
+
+export const JOB_JOBS_GEO_BACKFILL = 'backfill';
+
+export type JobsGeoBackfillJobName = typeof JOB_JOBS_GEO_BACKFILL;
+
+export interface JobsGeoBackfillPayload {
+  /** NormalizedJob.id to (re)parse. */
+  jobId: string;
+}
+
+/** Stable BullMQ job id — enqueueing the same row twice collapses to one job. */
+export function jobsGeoBackfillJobId(jobId: string): string {
+  return `geo-backfill:${jobId}`;
+}

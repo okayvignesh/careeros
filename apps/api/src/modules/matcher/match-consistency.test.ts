@@ -52,6 +52,7 @@ function makePrisma() {
       ]),
     },
     evidence: { findMany: vi.fn(async () => []) },
+    userJobPreferences: { findUnique: vi.fn(async () => null) },
   };
 }
 

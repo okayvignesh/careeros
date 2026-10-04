@@ -1,6 +1,6 @@
 import { retry } from '@careeros/shared';
 import { safeFetch, type AssertPublicUrlOptions } from '@careeros/shared/net';
-import type { JobSourceAdapter, RawJob } from '../types';
+import { normalizeWorkplaceType, type JobSourceAdapter, type RawJob } from '../types';
 import { MalformedResponseError } from './errors';
 
 /**
@@ -26,6 +26,7 @@ export interface AshbyJob {
   title: string;
   location: string;
   isRemote?: boolean;
+  workplaceType?: string;
   descriptionHtml?: string;
   descriptionPlain?: string;
   publishedAt?: string;
@@ -133,6 +134,7 @@ export function mapAshby(j: AshbyJob, orgId: string): RawJob | null {
     company: orgId,
     location: j.location || null,
     remote: Boolean(j.isRemote),
+    workplaceType: normalizeWorkplaceType(j.workplaceType) ?? (j.isRemote ? 'remote' : null),
     description,
     sourcePostedAt: posted && !Number.isNaN(posted.getTime()) ? posted : null,
     fetchedAt: new Date(),

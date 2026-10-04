@@ -88,8 +88,13 @@ export function hashFilter(f: SnapshotFilter): string {
   return createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
 }
 
-/** Project a JobPreferencesDto onto the SnapshotFilter subset. */
-export function prefsToFilter(prefs: JobPreferencesDto): SnapshotFilter {
+/** Project the relevant JobPreferencesDto fields onto the SnapshotFilter subset. */
+export function prefsToFilter(
+  prefs: Pick<
+    JobPreferencesDto,
+    'remoteOnly' | 'mustHaveSkills' | 'dealbreakerSkills' | 'companyBlacklist'
+  >,
+): SnapshotFilter {
   return {
     remoteOnly: prefs.remoteOnly,
     mustHaveSkills: prefs.mustHaveSkills,
