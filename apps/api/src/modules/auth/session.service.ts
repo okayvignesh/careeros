@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { seal, unseal, type Session } from '@careeros/auth';
@@ -9,6 +9,18 @@ import { PrismaService } from '../../prisma/prisma.service';
  * revoke a leaked cookie without waiting for TTL. */
 export interface SealedSession extends Session {
   sessionId: string;
+}
+
+/** Row shape returned to the owner of an account by `GET /auth/sessions`.
+ * Never carries the sealed cookie or the raw IP — only a masked form. */
+export interface ActiveSessionSummary {
+  id: string;
+  label: string;
+  ipMasked: string | null;
+  createdAt: Date;
+  lastSeenAt: Date;
+  expiresAt: Date;
+  current: boolean;
 }
 
 const TTL_HOURS = Number(process.env.SESSION_TTL_HOURS ?? 168);
@@ -124,6 +136,46 @@ export class SessionService {
     return res.count;
   }
 
+  /** List the caller's own active sessions. Scoped by `userId` at the query
+   * level so a stolen session id from another account can never be enumerated.
+   * `currentSessionId` only marks the row used by this request; it does not
+   * widen the query. */
+  async listForUser(userId: string, currentSessionId: string | null): Promise<ActiveSessionSummary[]> {
+    const rows = await this.prisma.activeSession.findMany({
+      where: { userId },
+      orderBy: { issuedAt: 'desc' },
+    });
+    return rows.map((row) => ({
+      id: row.id,
+      label: describeUserAgent(row.userAgent),
+      ipMasked: maskIp(row.ip),
+      createdAt: row.issuedAt,
+      // ponytail: no dedicated last-activity column. `issuedAt` doubles as the
+      // only honest timestamp we have: touching it on every request would let a
+      // live cookie escape password-change revocation, which deletes rows with
+      // `issuedAt < resetAt` (see AuthService.changePassword).
+      lastSeenAt: row.issuedAt,
+      expiresAt: row.expiresAt,
+      current: row.id === currentSessionId,
+    }));
+  }
+
+  /** Revoke one session the caller owns. The `userId` in the where clause is
+   * the authorization boundary: zero rows deleted means either unknown or
+   * someone else's session, and both surface as 404 (no enumeration oracle). */
+  async revokeForUser(userId: string, sessionId: string): Promise<void> {
+    const res = await this.prisma.activeSession.deleteMany({ where: { id: sessionId, userId } });
+    if (res.count === 0) throw new NotFoundException('Session not found');
+  }
+
+  /** Revoke every session for the user except the one making the request. */
+  async revokeOthersForUser(userId: string, currentSessionId: string | null): Promise<number> {
+    const res = await this.prisma.activeSession.deleteMany({
+      where: { userId, ...(currentSessionId ? { id: { not: currentSessionId } } : {}) },
+    });
+    return res.count;
+  }
+
   /** A-H1 support: derive the expected CSRF token for a given sessionId so
    * middleware / tests can verify without hitting the DB. */
   expectedCsrf(sessionId: string): string {
@@ -169,4 +221,48 @@ export function csrfTokensMatch(a: string, b: string): boolean {
   const bb = Buffer.from(b);
   if (ab.length !== bb.length || ab.length === 0) return false;
   return timingSafeEqual(ab, bb);
+}
+
+/** Best-effort device label from a User-Agent. Order matters: Edge/Opera UAs
+ * also contain `Chrome`, and every Chromium UA contains `Safari`. No dep, no
+ * pretense of exact detection — falls back to the UA head, then a placeholder. */
+export function describeUserAgent(ua: string | null): string {
+  if (!ua) return 'Unknown device';
+  const browser = /Edg\//.test(ua)
+    ? 'Edge'
+    : /OPR\//.test(ua)
+      ? 'Opera'
+      : /Firefox\//.test(ua)
+        ? 'Firefox'
+        : /Chrome\//.test(ua)
+          ? 'Chrome'
+          : /Safari\//.test(ua)
+            ? 'Safari'
+            : null;
+  const os = /Windows/.test(ua)
+    ? 'Windows'
+    : /Mac OS X|Macintosh/.test(ua)
+      ? 'macOS'
+      : /Android/.test(ua)
+        ? 'Android'
+        : /iPhone|iPad|iPod/.test(ua)
+          ? 'iOS'
+          : /Linux/.test(ua)
+            ? 'Linux'
+            : null;
+  if (browser && os) return `${browser} on ${os}`;
+  return browser ?? os ?? 'Unknown device';
+}
+
+/** Keep the network private: mask the host portion of an IP before it leaves
+ * the API. `203.0.113.7` -> `203.0.113.x`; IPv6 keeps two hextets. */
+export function maskIp(ip: string | null): string | null {
+  if (!ip) return null;
+  if (ip.includes(':')) {
+    const [a = '', b = ''] = ip.split(':');
+    return `${a}:${b}:****`;
+  }
+  const octets = ip.split('.');
+  if (octets.length === 4) return `${octets[0]}.${octets[1]}.${octets[2]}.x`;
+  return ip;
 }

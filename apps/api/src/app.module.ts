@@ -19,6 +19,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { ProvidersModule } from './modules/providers/providers.module';
 import { EmbeddingsModule } from './modules/embeddings/embeddings.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
+import { RepositoryAnalysisModule } from './modules/repository-analysis/repository-analysis.module';
 import { GitlabModule } from './modules/integrations/gitlab/gitlab.module';
 import { ResumeModule } from './modules/resume/resume.module';
 import { GoalsModule } from './modules/goals/goals.module';
@@ -95,6 +96,7 @@ const loggerParams: Params = {
     EmbeddingsModule,
     IntegrationsModule,
     GitlabModule,
+    RepositoryAnalysisModule,
     ResumeModule,
     GoalsModule,
     RecoveryModule,

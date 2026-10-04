@@ -11,6 +11,7 @@ import { PasskeyService } from './passkey.service';
 import { PasskeyController } from './passkey.controller';
 import { RecoveryCodesService } from './recovery.service';
 import { RecoveryCodesController } from './recovery.controller';
+import { SessionController } from './session.controller';
 
 @Global()
 @Module({
@@ -39,7 +40,7 @@ import { RecoveryCodesController } from './recovery.controller';
       }),
     }),
   ],
-  controllers: [AuthController, PasskeyController, RecoveryCodesController],
+  controllers: [AuthController, PasskeyController, RecoveryCodesController, SessionController],
   providers: [
     AuthService,
     SessionService,
