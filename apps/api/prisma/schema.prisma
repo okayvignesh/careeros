@@ -57,6 +57,7 @@ model User {
   interviewPreps   InterviewPrep[]
   outreachMessages OutreachMessage[]
   atsSubmissions   AtsSubmission[]
+  verbalSessions   VerbalSession[]
 
   @@map("users")
 }
@@ -811,7 +812,8 @@ model Question {
   embeddingId        String?
   createdAt          DateTime @default(now()) @db.Timestamptz(6)
 
-  attempts Attempt[]
+  attempts       Attempt[]
+  verbalSessions VerbalSession[]
 
   @@index([kind, difficulty])
   @@index([sourceKind])
@@ -869,6 +871,44 @@ model Streak {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("streaks")
+}
+
+/// P2 verbal-defense session. One row per spoken answer. The question text is
+/// snapshotted on `prompt` (so an ad-hoc prompt needs no question_bank row) and
+/// `questionId` links the bank row when one exists. Audio lives in MinIO at
+/// `audioKey`; `transcript` is the whisper.cpp output; `attemptId` links the
+/// graded `Attempt` once scored. Status: created -> transcribed -> graded, or
+/// failed/unavailable when whisper is not configured.
+model VerbalSession {
+  id             String    @id @default(uuid()) @db.Uuid
+  userId         String    @db.Uuid
+  questionId     String?   @db.Uuid
+  prompt         String
+  skillIds       String[]  @default([])
+  difficulty     String    @default("medium")
+  status         String    @default("created")
+  audioKey       String?
+  audioMime      String?
+  language       String?
+  transcript     String?
+  transcriptJson Json?
+  score          Decimal?  @db.Decimal(4, 3)
+  reasoning      String?
+  gradingJson    Json?
+  attemptId      String?   @db.Uuid
+  durationMs     Int?
+  error          String?
+  createdAt      DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt      DateTime  @updatedAt @db.Timestamptz(6)
+  transcribedAt  DateTime? @db.Timestamptz(6)
+  gradedAt       DateTime? @db.Timestamptz(6)
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  question Question? @relation(fields: [questionId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([status])
+  @@map("verbal_sessions")
 }
 
 /// One open task per (user, skill) when the aggregator detects repeated failure.

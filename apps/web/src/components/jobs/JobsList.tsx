@@ -307,6 +307,13 @@ export function JobsList() {
                   </td>
                   <td className="whitespace-nowrap px-4 py-2.5 text-right">
                     <div className="inline-flex items-center gap-2">
+                      <Link
+                        href={`/jobs/${j.id}`}
+                        data-testid="job-match-report"
+                        className="inline-flex items-center gap-1 rounded border border-[hsl(var(--border))] px-1.5 py-[1px] text-[11.5px] text-fg-muted hover:border-accent/40 hover:text-accent"
+                      >
+                        Match report
+                      </Link>
                       <TrackButton jobId={j.id} />
                       <DraftResumeButton jobId={j.id} />
                       <DraftCoverButton jobId={j.id} />

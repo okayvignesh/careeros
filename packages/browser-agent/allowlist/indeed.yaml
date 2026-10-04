@@ -12,11 +12,27 @@ forbidden_selectors:
 required_headers:
   - user-agent
   - accept-language
-# F.3 form-fill: Indeed Easy Apply (iae-indeed) uses a hosted modal with
-# randomized element ids. The script indeed-easy-apply ships as a stub.
-# ponytail: stub, selectors not yet captured; wire when a user hits this ATS,
-# upgrade path is capture fixtures via LIVE=1 probe then fill field_selectors.
-submit_selector: "button[data-testid=indeedApplyButton]"
+# F.3 form-fill: Indeed Apply wizard. Same-frame steps only; tenants that host
+# the wizard in a cross-origin iframe surface as selector-broken and the user
+# finishes in their browser (documented limitation in indeed-easy-apply.ts).
+field_selectors:
+  name: "input[id*=name]"
+  email: "input[id*=email]"
+  phone: "input[id*=phone]"
+  resume_upload: "input[type=file]"
+apply_flow:
+  entry: "button#indeedApplyButton"
+  steps:
+    - name: contact
+      advance:
+        - "button[type=submit]"
+    - name: resume
+      advance:
+        - "button[type=submit]"
+    - name: review
+      submit: "button[type=submit]"
+  success: "div[data-testid=post-apply-screen]"
+submit_selector: "button[type=submit]"
 success_signal: "div[data-testid=post-apply-screen]"
 pacing_overrides:
   per_min: 3

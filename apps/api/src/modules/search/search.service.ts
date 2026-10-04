@@ -8,12 +8,14 @@ import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import {
   QdrantStore,
-  createEmbeddingProvider,
-  resolveEmbeddingMode,
+  createProviderFromResolved,
+  loadResolvedEmbeddingConfig,
+  EMBEDDING_API_KEY_PURPOSE,
   type EmbeddingLogger,
   type EmbeddingProvider,
   type PayloadFilter,
 } from '@careeros/embeddings';
+import { decryptField, loadMasterKey } from '@careeros/secrets';
 import { ALL_COLLECTIONS, COLLECTION_CAREER_FACTS, SENSITIVITY_LEVELS } from '@careeros/shared';
 import { rankOf, type Sensitivity } from '@careeros/ai';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -31,23 +33,47 @@ export interface SearchHitDto {
 @Injectable()
 export class SearchService {
   private readonly qdrant: QdrantStore;
-  /** Process-wide (Nest singleton) provider; created once per process. */
-  private readonly embeddings: EmbeddingProvider;
+  /** Lazily resolved from `app_config` (falls back to EMBEDDING_MODE). Cached per process. */
+  private embeddingsPromise: Promise<EmbeddingProvider> | undefined;
 
   constructor(
     private readonly prisma: PrismaService,
     @InjectPinoLogger(SearchService.name) private readonly logger: PinoLogger,
   ) {
     this.qdrant = new QdrantStore(process.env.QDRANT_URL ?? 'http://qdrant:6333');
-    const cacheDir = process.env.EMBEDDING_MODEL_CACHE_DIR;
-    const embedLogger: EmbeddingLogger = {
-      warn: (obj, msg) => this.logger.warn({ ...obj }, msg),
-    };
-    this.embeddings = createEmbeddingProvider({
-      mode: resolveEmbeddingMode(process.env.EMBEDDING_MODE),
-      ...(cacheDir ? { cacheDir } : {}),
-      logger: embedLogger,
-    });
+  }
+
+  /**
+   * Resolve the query embedder from the saved config so query vectors match how
+   * the worker embedded the stored points (external 1536-d config included).
+   * Created once per process; `external` without a saved config throws rather
+   * than silently using deterministic vectors against a different-dimension collection.
+   */
+  private getEmbeddings(): Promise<EmbeddingProvider> {
+    if (!this.embeddingsPromise) {
+      const embedLogger: EmbeddingLogger = {
+        warn: (obj, msg) => this.logger.warn({ ...obj }, msg),
+      };
+      const cacheDir = process.env.EMBEDDING_MODEL_CACHE_DIR;
+      this.embeddingsPromise = (async () => {
+        const resolved = await loadResolvedEmbeddingConfig(this.prisma, {
+          envMode: process.env.EMBEDDING_MODE,
+          decryptApiKey: (stored) =>
+            decryptField(stored, loadMasterKey(), EMBEDDING_API_KEY_PURPOSE),
+          logger: embedLogger,
+        });
+        return createProviderFromResolved(resolved, {
+          logger: embedLogger,
+          ...(cacheDir ? { cacheDir } : {}),
+        });
+      })();
+      // A transient resolve failure (e.g. DB blip) must not cache a rejected
+      // promise forever; next query retries.
+      this.embeddingsPromise.catch(() => {
+        this.embeddingsPromise = undefined;
+      });
+    }
+    return this.embeddingsPromise;
   }
 
   async search(
@@ -72,7 +98,7 @@ export class SearchService {
     const maxSensitivity: Sensitivity = options.maxSensitivity ?? 'personal';
     const maxRank = rankOf(maxSensitivity);
 
-    const vector = await this.embeddings.embed(trimmed);
+    const vector = await (await this.getEmbeddings()).embed(trimmed);
     // Server-side filter: user isolation is Qdrant's responsibility, not the api's.
     // `sensitivity: {any: allowedLabels}` avoids surfacing labels above the ceiling.
     const allowedLabels = SENSITIVITY_LEVELS.filter((l) => rankOf(l) <= maxRank);

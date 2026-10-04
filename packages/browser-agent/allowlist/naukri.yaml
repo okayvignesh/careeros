@@ -12,11 +12,21 @@ forbidden_selectors:
 required_headers:
   - user-agent
   - accept-language
-# F.3 form-fill: Naukri apply flow is a jQuery-era server-rendered form,
-# selectors drift frequently. The script naukri-apply ships as a stub.
-# ponytail: stub, selectors not yet captured; wire when a user hits this ATS,
-# upgrade path is capture fixtures via LIVE=1 probe then fill field_selectors.
-submit_selector: "button#applyButton, button.apply-button"
-success_signal: ".apply-status-success, #applyStatusMessage"
+# F.3 form-fill: Naukri's classic apply form is a single server-rendered page.
+# The newer "chat" apply assistant asks free-text questions this flow cannot
+# answer; those runs return selector-broken and the user finishes manually.
+field_selectors:
+  name: "input[name*=name]"
+  email: "input[name*=email]"
+  phone: "input[name*=mobile]"
+  resume_upload: "input[type=file]"
+apply_flow:
+  entry: "button#apply-button"
+  steps:
+    - name: form
+  submit: "button#applyButton"
+  success: ".apply-status-success"
+submit_selector: "button#applyButton"
+success_signal: ".apply-status-success"
 pacing_overrides:
   per_min: 3

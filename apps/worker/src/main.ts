@@ -7,9 +7,9 @@ import Redis from 'ioredis';
 import { type ConnectionOptions } from 'bullmq';
 import { PrismaClient } from '@prisma/client';
 import pino from 'pino';
-import { QdrantStore } from '@careeros/embeddings';
+import { QdrantStore, loadResolvedEmbeddingConfig } from '@careeros/embeddings';
 import {
-  ALL_COLLECTIONS,
+  collectionsForDim,
   QUEUE_EMBEDDING,
   QUEUE_GITHUB,
   RATE_LIMITS,
@@ -19,7 +19,7 @@ import {
 import { seedSkills } from './skills-seed.js';
 import { handleGithubSync } from './github-sync.js';
 import { handleGitlabSync, type GitlabSyncPayload } from './gitlab-sync.js';
-import { handleEmbeddingGenerate } from './embedding-job.js';
+import { handleEmbeddingGenerate, decryptEmbeddingApiKey } from './embedding-job.js';
 
 // C-P1.6: gitlab queue name pinned in-app until packages/shared adopts a
 // CodeHost split (parallel-session refactor per COMPLETION_PLAN §6).
@@ -78,6 +78,12 @@ import {
   QUEUE_FIRECRAWL_SEARCH,
   type FirecrawlSearchPayload,
 } from './firecrawl-search.worker.js';
+import {
+  handleOutreachSend,
+  JOB_OUTREACH_SEND,
+  QUEUE_OUTREACH_SEND,
+  type OutreachSendPayload,
+} from './outreach-send.worker.js';
 
 // Error tracking first: no-op when neither SENTRY_DSN nor GLITCHTIP_DSN is set.
 initSentry();
@@ -111,10 +117,20 @@ heartbeat.on('error', (err) => logger.error({ err: err.message }, 'redis error')
 const connection: ConnectionOptions = { url: redisUrl };
 const qdrant = new QdrantStore(qdrantUrl);
 
-async function ensureCollections() {
-  for (const c of ALL_COLLECTIONS) {
-    await qdrant.ensureCollection(c.name, c.dim);
-    logger.info({ name: c.name, dim: c.dim, distance: c.distance }, 'qdrant collection ready');
+async function ensureCollections(dim: number) {
+  for (const c of collectionsForDim(dim)) {
+    const outcome = await qdrant.ensureCollection(c.name, c.dim, {
+      recreateOnMismatch: true,
+      logger: { warn: (obj, msg) => logger.warn(obj, msg) },
+    });
+    if (outcome === 'recreated') {
+      logger.warn(
+        { name: c.name, dim: c.dim },
+        'qdrant collection recreated at a new embedding dimension; previously stored vectors were dropped — re-enqueue embedding.generate for all sources (Settings → Re-embed)',
+      );
+    } else {
+      logger.info({ name: c.name, dim: c.dim, outcome }, 'qdrant collection ready');
+    }
   }
 }
 
@@ -125,7 +141,19 @@ async function bootstrap() {
   const seed = await seedSkills(prisma);
   logger.info(seed, 'skills seed ready');
 
-  await ensureCollections();
+  // Resolve the effective embedding config (app_config beats EMBEDDING_MODE) so
+  // collections are created at the provider's real dimension. `external` without
+  // a saved config throws here — worker startup fails loud rather than embedding
+  // at the wrong size.
+  const resolved = await loadResolvedEmbeddingConfig(prisma, {
+    envMode: process.env.EMBEDDING_MODE,
+    decryptApiKey: decryptEmbeddingApiKey,
+  });
+  logger.info(
+    { mode: resolved.mode, model: resolved.model, dim: resolved.dim, source: resolved.source },
+    'effective embedding config resolved',
+  );
+  await ensureCollections(resolved.dim);
 
   await registerWorker(
     {
@@ -161,7 +189,8 @@ async function bootstrap() {
       jobName: 'generate',
       connection,
       concurrency: 4,
-      handler: (data: EmbeddingGeneratePayload) => handleEmbeddingGenerate(qdrant, logger, data),
+      handler: (data: EmbeddingGeneratePayload) =>
+        handleEmbeddingGenerate(qdrant, prisma, logger, data),
       unknownJobNameMessage: 'unknown embedding job name',
       failedMessage: 'embedding job failed',
       completed: { message: 'embedding job completed', include: 'result' },
@@ -324,8 +353,28 @@ async function bootstrap() {
     logger,
   );
 
+  // F.5: due outreach sends. One-off jobs (not a cron): the API adds a
+  // delayed job per approved outreach message with `jobId = outreach-send:<id>`
+  // when the composer picked a business-hour slot. concurrency 2 + a 5/sec
+  // limiter keeps us far under Gmail's 250 quota-units/sec/user (drafts.send
+  // costs ~10 units) while still draining a burst.
+  await registerWorker(
+    {
+      queue: QUEUE_OUTREACH_SEND,
+      jobName: JOB_OUTREACH_SEND,
+      connection,
+      concurrency: 2,
+      limiter: { max: 5, duration: 1_000 },
+      handler: (data: OutreachSendPayload) => handleOutreachSend(prisma, logger, data),
+      unknownJobNameMessage: 'unknown outreach-send job name',
+      failedMessage: 'outreach-send job failed',
+      completed: { message: 'outreach-send job completed', include: 'result' },
+    },
+    logger,
+  );
+
   logger.info(
-    `worker up, listening on queues '${QUEUE_GITHUB}', '${QUEUE_GITLAB}', '${QUEUE_EMBEDDING}', '${QUEUE_RETENTION}', '${QUEUE_CORPUS_REFRESH}', '${QUEUE_MARKET_SNAPSHOT}', '${QUEUE_AUDIT_LOG_RETENTION}', '${QUEUE_GMAIL_WATCH_RENEWAL}', '${QUEUE_SELECTOR_HEALTH}', '${QUEUE_FIRECRAWL_SEARCH}'`,
+    `worker up, listening on queues '${QUEUE_GITHUB}', '${QUEUE_GITLAB}', '${QUEUE_EMBEDDING}', '${QUEUE_RETENTION}', '${QUEUE_CORPUS_REFRESH}', '${QUEUE_MARKET_SNAPSHOT}', '${QUEUE_AUDIT_LOG_RETENTION}', '${QUEUE_GMAIL_WATCH_RENEWAL}', '${QUEUE_SELECTOR_HEALTH}', '${QUEUE_FIRECRAWL_SEARCH}', '${QUEUE_OUTREACH_SEND}'`,
   );
 }
 

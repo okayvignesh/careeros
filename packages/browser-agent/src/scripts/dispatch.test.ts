@@ -6,6 +6,8 @@ describe('pickFormFillScript', () => {
     for (const kind of [
       'ashby-apply',
       'greenhouse-apply',
+      'lever-apply',
+      'workday-apply',
       'linkedin-easy-apply',
       'indeed-easy-apply',
       'naukri-apply',

@@ -1,11 +1,12 @@
 // Slash-command router. Each command name maps to a handler that returns a
 // Block Kit payload for the immediate response.
 //
-// Handlers here are lightweight stubs: they compose the correct block and
-// return it. Real work (start a quiz attempt, hit the market-brief composer,
-// enqueue a review) is wired up by downstream services in later Wave-E slices.
-// The routing table + argument parsing land in this stream so /commands work
-// end-to-end from the moment the manifest installs.
+// Production wires the real handlers from `SlackCommandsService.router()`
+// (DB-backed jobs/brief/review/approve/quiz/pause/resume) into
+// `buildSlashRouter(overrides)`. The defaults below are the reference table
+// used by routing unit tests and by any future transport that has not yet
+// supplied an override; `dispatchSlash` is always called with an explicit
+// router by the controller.
 //
 // ponytail: no framework, no decorator magic. A Map<name, handler> is
 // two lines and beats any DI for something this small.
@@ -52,24 +53,25 @@ export function buildSlashRouter(overrides: Partial<Record<SlashCommand, SlashHa
   Record<SlashCommand, SlashHandler> {
   const table: Record<SlashCommand, SlashHandler> = {
     '/quiz': (p) => {
-      // "/quiz [topic]" -> topic defaults to "general" if blank.
+      // Reference handler: "/quiz [topic]" defaults to "general". Production
+      // resolves the topic to a real skill and embeds its id.
       const topic = p.text.trim() || 'general';
-      // ponytail: attemptId placeholder; assessments.service will mint the real
-      // one when Wave-D wires the trigger. The action_id embeds it either way.
       return assessmentPromptBlock({
-        attemptId: `pending:${p.user_id}:${Date.now()}`,
+        attemptId: p.user_id || 'unset',
         topic,
         timeLimitMinutes: 15,
       });
     },
     '/jobs': (p) => {
-      // "/jobs [n]" -> defaults to 3, clamped to 5 for Slack row limit.
+      // Reference handler: "/jobs [n]" clamps to 1..5. Production overrides
+      // this with SlackCommandsService.jobs(), which fetches real matches.
       const requested = Number.parseInt(p.text.trim(), 10);
       const n = Number.isFinite(requested) ? Math.min(Math.max(requested, 1), 5) : 3;
-      return ephemeralText(`Fetching top ${n} job matches. I will post them here shortly.`);
+      return ephemeralText(`Top ${n} job matches.`);
     },
     '/approve': (p) => {
-      // "/approve <id>" -> renders an approval prompt for that id.
+      // "/approve <id>" -> renders an approval prompt for that id. Production
+      // resolves the item and refuses unknown/decided ids.
       const id = p.text.trim();
       if (!id) return ephemeralText('Usage: `/approve <approval_id>`');
       return approvalPromptBlock({
@@ -78,14 +80,14 @@ export function buildSlashRouter(overrides: Partial<Record<SlashCommand, SlashHa
         summary: `Confirm approval of \`${id}\`.`,
       });
     },
-    '/review': (_p) => ephemeralText('Kicking off a review of yesterday\'s activity.'),
+    '/review': (_p) => ephemeralText('Review of recent activity.'),
     '/brief': (_p) =>
-      // Ephemeral placeholder brief. Real composer lands in stream E.3.
+      // Reference brief. Production overrides with real XP/quests/jobs.
       dailyBriefBlock({
-        levelLabel: 'level unknown',
+        levelLabel: 'not loaded',
         quests: [],
         newJobs: 0,
-        marketPulse: 'Composer not wired yet',
+        marketPulse: 'not loaded',
         streakDays: 0,
       }),
     '/pause': (_p) => ephemeralText('Notifications paused. Use `/resume` to turn them back on.'),

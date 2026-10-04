@@ -8,6 +8,7 @@ import { registerCodeReviewGraderAgent } from './agents/code-review-grader.agent
 import { registerDebuggingGraderAgent } from './agents/debugging-grader.agent';
 import { registerMockInterviewGraderAgent } from './agents/mock-interview-grader.agent';
 import { registerSystemDesignGraderAgent } from './agents/system-design-grader.agent';
+import { registerVerbalDefenseGraderAgent } from './agents/verbal-defense-grader.agent';
 
 // UsageModule, UsageCache, and SensitivityGateModule are @Global(), so no
 // import is needed here for those providers.
@@ -29,5 +30,6 @@ export class AssessmentsModule implements OnModuleInit {
     registerDebuggingGraderAgent(agentRegistry);
     registerMockInterviewGraderAgent(agentRegistry);
     registerSystemDesignGraderAgent(agentRegistry);
+    registerVerbalDefenseGraderAgent(agentRegistry);
   }
 }

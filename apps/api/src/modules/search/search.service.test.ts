@@ -26,25 +26,35 @@ const refs = vi.hoisted(() => {
 vi.mock('@careeros/embeddings', () => {
   const EMBED_DIM = 384;
 
-  function createEmbeddingProvider(opts: Record<string, unknown>) {
-    refs.ctrl.createCalls.push(opts);
+  function loadResolvedEmbeddingConfig() {
     return {
-      mode: 'deterministic' as const,
+      mode: (process.env.EMBEDDING_MODE ?? 'local') as string,
       model: 'test-embedder',
       dim: EMBED_DIM,
+      hasApiKey: false,
+      external: undefined,
+      source: 'env',
+    };
+  }
+
+  function createProviderFromResolved(
+    resolved: { mode: string; dim: number },
+    opts: Record<string, unknown> = {},
+  ) {
+    refs.ctrl.createCalls.push({ ...resolved, ...opts });
+    return {
+      mode: resolved.mode,
+      model: 'test-embedder',
+      dim: resolved.dim,
       async embed(text: string): Promise<number[]> {
         refs.ctrl.embedCalls.push(text);
-        const vec = new Array<number>(EMBED_DIM).fill(0);
+        const vec = new Array<number>(resolved.dim).fill(0);
         for (let i = 0; i < text.length; i++) {
-          vec[i % EMBED_DIM] = (vec[i % EMBED_DIM] ?? 0) + text.charCodeAt(i) / 1000;
+          vec[i % resolved.dim] = (vec[i % resolved.dim] ?? 0) + text.charCodeAt(i) / 1000;
         }
         return vec;
       },
     };
-  }
-
-  function resolveEmbeddingMode(raw: string | undefined): string {
-    return raw ?? 'local';
   }
 
   class QdrantStore {
@@ -64,7 +74,13 @@ vi.mock('@careeros/embeddings', () => {
     async deleteCollection() {}
   }
 
-  return { QdrantStore, createEmbeddingProvider, resolveEmbeddingMode, EMBED_DIM };
+  return {
+    QdrantStore,
+    loadResolvedEmbeddingConfig,
+    createProviderFromResolved,
+    EMBEDDING_API_KEY_PURPOSE: 'embedding.externalApiKey',
+    EMBED_DIM,
+  };
 });
 
 import { SearchService } from './search.service';

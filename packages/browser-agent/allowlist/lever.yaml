@@ -1,0 +1,25 @@
+domain: lever.co
+allowed_paths:
+  - /
+  - /apply
+forbidden_selectors:
+  - "input[type=password]"
+  - "input[name*=ssn]"
+  - "input[name*=social_security]"
+required_headers:
+  - user-agent
+# F.3 lever-apply: single-page public application form.
+# jobs.lever.co/{org}/{postingId}/apply
+field_selectors:
+  name: "input[name=name]"
+  email: "input[name=email]"
+  phone: "input[name=phone]"
+  portfolio_url: "input[name=org]"
+  linkedin_url: "input[name*=LinkedIn]"
+  github_url: "input[name*=GitHub]"
+  cover_letter: "textarea[name=comments]"
+  resume_upload: "input[type=file][name=resume]"
+submit_selector: "button[type=submit]"
+success_signal: ".application-confirmation"
+pacing_overrides:
+  per_min: 4

@@ -44,6 +44,8 @@ export const EmbeddingConfigSchema = z.object({
   model: z.string().min(1).max(120).default('Xenova/bge-small-en-v1.5'),
   externalBaseUrl: PublicUrlSchema.optional(),
   externalApiKey: z.string().min(1).max(500).optional(),
+  /** Expected vector dimension for external mode. Required by the API when mode=external. */
+  dimensions: z.number().int().positive().max(8192).optional(),
 });
 export type EmbeddingConfigInput = z.infer<typeof EmbeddingConfigSchema>;
 

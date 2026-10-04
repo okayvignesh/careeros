@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AllowlistEntry } from '../allowlist/loader';
-import { runFormFill, type FormFillPage, type FormFillPayload } from './form-fill';
+import { isForbiddenSelector, runFormFill, type FormFillPage, type FormFillPayload } from './form-fill';
 
 /**
  * Fixture Page: pretends to be a Playwright Page. Each selector is matched
@@ -144,5 +144,63 @@ describe('runFormFill', () => {
     expect(r.status).toBe('selector-broken');
     if (r.status !== 'selector-broken') return;
     expect(r.missing).toEqual(['field_selectors']);
+  });
+});
+
+describe('isForbiddenSelector (EEO guard)', () => {
+  it('matches verbatim and by shared attribute value', () => {
+    const forbidden = [
+      'input[type=password]',
+      'input[data-automation-id*=gender]',
+      'input[data-automation-id*=veteran]',
+    ];
+    expect(isForbiddenSelector('input[type=password]', forbidden)).toBe(true);
+    expect(isForbiddenSelector('input[data-automation-id=gender_male]', forbidden)).toBe(true);
+    expect(isForbiddenSelector('input[data-automation-id=veteranStatus]', forbidden)).toBe(true);
+    expect(isForbiddenSelector('input[name=firstName]', forbidden)).toBe(false);
+  });
+});
+
+describe('runFormFill forbidden-selector enforcement', () => {
+  const eeoEntry: AllowlistEntry = {
+    domain: 'eeo.com',
+    allowed_paths: ['/'],
+    forbidden_selectors: ['input[type=password]', 'input[name*=gender]', 'button[type=submit]'],
+    required_headers: [],
+    field_selectors: {
+      name: 'input[type=password]', // mis-mapped onto an EEO/credential control
+      email: 'input[name=email]',
+    },
+    submit_selector: 'button[type=submit]',
+  };
+
+  it('never fills a selector listed as forbidden and refuses the run', async () => {
+    const { page, calls } = makePage(
+      new Set(['input[type=password]', 'input[name=email]', 'button[type=submit]']),
+    );
+    const r = await runFormFill(page, eeoEntry, payload, 'live');
+    expect(r.status).toBe('selector-broken');
+    if (r.status !== 'selector-broken') return;
+    expect(r.missing.some((m) => m.includes('forbidden selector'))).toBe(true);
+    // The forbidden field was skipped; nothing was clicked.
+    expect(calls.some((c) => c.op === 'fill' && c.selector === 'input[type=password]')).toBe(false);
+    expect(calls.some((c) => c.op === 'click')).toBe(false);
+  });
+
+  it('refuses to click a forbidden submit selector', async () => {
+    const entry: AllowlistEntry = {
+      domain: 'eeo2.com',
+      allowed_paths: ['/'],
+      forbidden_selectors: ['button[type=submit]'],
+      required_headers: [],
+      field_selectors: { email: 'input[name=email]' },
+      submit_selector: 'button[type=submit]',
+    };
+    const { page, calls } = makePage(new Set(['input[name=email]', 'button[type=submit]']));
+    const r = await runFormFill(page, entry, payload, 'live');
+    expect(r.status).toBe('selector-broken');
+    if (r.status !== 'selector-broken') return;
+    expect(r.missing.some((m) => m.includes('submit_selector') && m.includes('forbidden'))).toBe(true);
+    expect(calls.some((c) => c.op === 'click')).toBe(false);
   });
 });

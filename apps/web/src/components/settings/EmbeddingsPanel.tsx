@@ -1,7 +1,17 @@
 'use client';
 
 import { useCallback, useState, type FormEvent } from 'react';
-import { CheckCircle2, Cpu, Cloud, KeyRound, RefreshCw, Server, XCircle, type LucideIcon } from 'lucide-react';
+import {
+  CheckCircle2,
+  Cpu,
+  Cloud,
+  Hash,
+  KeyRound,
+  RefreshCw,
+  Server,
+  XCircle,
+  type LucideIcon,
+} from 'lucide-react';
 import { ThinkingOrb } from 'thinking-orbs';
 import { Button, Input, cn } from '@careeros/ui';
 import { apiGet, apiPost } from '@/lib/api-client';
@@ -9,11 +19,48 @@ import { useApi } from '@/lib/use-api';
 
 type Mode = 'local' | 'external';
 
-interface Config {
+/**
+ * Client-safe view returned by `GET /embeddings` (`EffectiveEmbeddingConfig`).
+ * The API never returns the plaintext key — only whether one is stored
+ * (`hasApiKey`), so the panel must never render or round-trip a stored secret.
+ */
+export interface EffectiveEmbeddingConfig {
+  mode: Mode;
+  model: string;
+  externalBaseUrl?: string;
+  dimensions?: number;
+  hasApiKey: boolean;
+}
+
+/**
+ * Write shape for `POST /embeddings` (`EmbeddingConfigInput`).
+ * `externalApiKey` is present only when the user typed a new key; omitting it
+ * tells the API to reuse the stored one. `dimensions` is required by the API for
+ * `external` mode.
+ */
+export interface EmbeddingSavePayload {
   mode: Mode;
   model: string;
   externalBaseUrl?: string;
   externalApiKey?: string;
+  dimensions?: number;
+}
+
+/**
+ * Build the save payload from the loaded config plus the transient key input.
+ * Only a newly typed key is sent — an empty input means "keep the stored key",
+ * and the stored key is never part of `cfg` to begin with.
+ */
+export function buildEmbeddingPayload(
+  cfg: EffectiveEmbeddingConfig,
+  newApiKey: string,
+): EmbeddingSavePayload {
+  const payload: EmbeddingSavePayload = { mode: cfg.mode, model: cfg.model };
+  if (cfg.mode !== 'external') return payload;
+  if (cfg.externalBaseUrl) payload.externalBaseUrl = cfg.externalBaseUrl;
+  if (newApiKey) payload.externalApiKey = newApiKey;
+  if (cfg.dimensions !== undefined) payload.dimensions = cfg.dimensions;
+  return payload;
 }
 
 interface TestResult {
@@ -28,19 +75,20 @@ interface TestResult {
 export function EmbeddingsPanel() {
   const [savedNote, setSavedNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [newApiKey, setNewApiKey] = useState('');
   const [testResult, setTestResult] = useState<TestResult | null>(null);
   const [testing, setTesting] = useState(false);
   const [reembedNote, setReembedNote] = useState<string | null>(null);
   const [reembedding, setReembedding] = useState(false);
 
-  const refresh = useCallback(() => apiGet<Config>('/embeddings'), []);
+  const refresh = useCallback(() => apiGet<EffectiveEmbeddingConfig>('/embeddings'), []);
   const {
     data: cfg,
     error,
     setData: setCfg,
     setError,
     refetch,
-  } = useApi<Config>(refresh);
+  } = useApi<EffectiveEmbeddingConfig>(refresh);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -49,15 +97,8 @@ export function EmbeddingsPanel() {
     setError(null);
     setSavedNote(null);
     try {
-      const payload: Config = {
-        mode: cfg.mode,
-        model: cfg.model,
-      };
-      if (cfg.mode === 'external') {
-        if (cfg.externalBaseUrl) payload.externalBaseUrl = cfg.externalBaseUrl;
-        if (cfg.externalApiKey) payload.externalApiKey = cfg.externalApiKey;
-      }
-      await apiPost('/embeddings', payload);
+      await apiPost('/embeddings', buildEmbeddingPayload(cfg, newApiKey));
+      setNewApiKey('');
       setSavedNote('Saved. Run a re-embed to rebuild the vector store with the new mode.');
       await refetch();
     } catch (e) {
@@ -114,75 +155,15 @@ export function EmbeddingsPanel() {
         </div>
       )}
 
-      <form onSubmit={onSubmit} className="flex flex-col gap-6">
-        <section className="flex flex-col gap-3">
-          <h2 className="text-[13px] font-medium uppercase tracking-[0.08em] text-fg-subtle">Mode</h2>
-          <div className="grid gap-3 md:grid-cols-2">
-            <ModeCard
-              id="local"
-              current={cfg.mode}
-              icon={Cpu}
-              title="Local (bge-small-en)"
-              body="Runs in-process, no data leaves the box. Recommended default."
-              onSelect={() => setCfg({ ...cfg, mode: 'local', model: cfg.model || 'bge-small-en' })}
-            />
-            <ModeCard
-              id="external"
-              current={cfg.mode}
-              icon={Cloud}
-              title="External endpoint"
-              body="OpenAI-compatible embeddings API. Slower start, better quality on some corpora."
-              onSelect={() => setCfg({ ...cfg, mode: 'external' })}
-            />
-          </div>
-        </section>
-
-        <FormField icon={Cpu} label="Model">
-          <Input
-            value={cfg.model}
-            onChange={(e) => setCfg({ ...cfg, model: e.target.value })}
-            required
-          />
-        </FormField>
-
-        {cfg.mode === 'external' && (
-          <>
-            <FormField icon={Server} label="Base URL" optional>
-              <Input
-                value={cfg.externalBaseUrl ?? ''}
-                onChange={(e) => setCfg({ ...cfg, externalBaseUrl: e.target.value })}
-                placeholder="https://api.openai.com/v1"
-              />
-            </FormField>
-            <FormField icon={KeyRound} label="API key" hint="Encrypted at rest.">
-              <Input
-                type="password"
-                value={cfg.externalApiKey ?? ''}
-                onChange={(e) => setCfg({ ...cfg, externalApiKey: e.target.value })}
-                placeholder="sk-…"
-              />
-            </FormField>
-          </>
-        )}
-
-        {savedNote && (
-          <div className="rounded-[var(--radius)] border border-success/30 bg-success/10 px-3.5 py-2.5 text-[13px] text-success">
-            {savedNote}
-          </div>
-        )}
-
-        <div>
-          <Button type="submit" disabled={busy}>
-            {busy ? (
-              <>
-                <ThinkingOrb state="working" size={20} /> Saving
-              </>
-            ) : (
-              'Save embedding config'
-            )}
-          </Button>
-        </div>
-      </form>
+      <EmbeddingConfigForm
+        cfg={cfg}
+        newApiKey={newApiKey}
+        savedNote={savedNote}
+        busy={busy}
+        onCfgChange={setCfg}
+        onNewApiKeyChange={setNewApiKey}
+        onSubmit={onSubmit}
+      />
 
       <section className="flex flex-col gap-3">
         <h2 className="text-[13px] font-medium uppercase tracking-[0.08em] text-fg-subtle">
@@ -233,6 +214,156 @@ export function EmbeddingsPanel() {
         )}
       </section>
     </div>
+  );
+}
+
+export interface EmbeddingConfigFormProps {
+  cfg: EffectiveEmbeddingConfig;
+  /** Transient input for a *new* key only. Never seeded from the stored secret. */
+  newApiKey: string;
+  savedNote: string | null;
+  busy: boolean;
+  onCfgChange: (next: EffectiveEmbeddingConfig) => void;
+  onNewApiKeyChange: (value: string) => void;
+  onSubmit: (e: FormEvent) => void;
+}
+
+/**
+ * Presentational form. Split out from `EmbeddingsPanel` so the contract
+ * (`hasApiKey`, key reuse, `dimensions`) is assertable without jsdom.
+ */
+export function EmbeddingConfigForm({
+  cfg,
+  newApiKey,
+  savedNote,
+  busy,
+  onCfgChange,
+  onNewApiKeyChange,
+  onSubmit,
+}: EmbeddingConfigFormProps) {
+  function onDimensionsChange(raw: string) {
+    if (raw === '') {
+      const next: EffectiveEmbeddingConfig = { ...cfg };
+      delete next.dimensions;
+      onCfgChange(next);
+      return;
+    }
+    const parsed = Number.parseInt(raw, 10);
+    if (Number.isFinite(parsed)) onCfgChange({ ...cfg, dimensions: parsed });
+  }
+
+  return (
+    <form onSubmit={onSubmit} className="flex flex-col gap-6">
+      <section className="flex flex-col gap-3">
+        <h2 className="text-[13px] font-medium uppercase tracking-[0.08em] text-fg-subtle">Mode</h2>
+        <div className="grid gap-3 md:grid-cols-2">
+          <ModeCard
+            id="local"
+            current={cfg.mode}
+            icon={Cpu}
+            title="Local (bge-small-en)"
+            body="Runs in-process, no data leaves the box. Recommended default."
+            onSelect={() => onCfgChange({ ...cfg, mode: 'local', model: cfg.model || 'bge-small-en' })}
+          />
+          <ModeCard
+            id="external"
+            current={cfg.mode}
+            icon={Cloud}
+            title="External endpoint"
+            body="OpenAI-compatible embeddings API. Slower start, better quality on some corpora."
+            onSelect={() => onCfgChange({ ...cfg, mode: 'external' })}
+          />
+        </div>
+      </section>
+
+      <FormField icon={Cpu} label="Model">
+        <Input
+          data-testid="embeddings-model"
+          value={cfg.model}
+          onChange={(e) => onCfgChange({ ...cfg, model: e.target.value })}
+          required
+        />
+      </FormField>
+
+      {cfg.mode === 'external' && (
+        <>
+          <FormField icon={Server} label="Base URL" optional>
+            <Input
+              data-testid="embeddings-base-url"
+              value={cfg.externalBaseUrl ?? ''}
+              onChange={(e) => onCfgChange({ ...cfg, externalBaseUrl: e.target.value })}
+              placeholder="https://api.openai.com/v1"
+            />
+          </FormField>
+
+          <FormField
+            icon={KeyRound}
+            label="API key"
+            hint={
+              cfg.hasApiKey
+                ? 'A key is stored. Leave blank to keep it, or type a new value to replace it.'
+                : 'Encrypted at rest.'
+            }
+          >
+            <Input
+              data-testid="embeddings-api-key"
+              type="password"
+              value={newApiKey}
+              onChange={(e) => onNewApiKeyChange(e.target.value)}
+              placeholder={cfg.hasApiKey ? 'Leave blank to keep the stored key' : 'sk-…'}
+              autoComplete="new-password"
+            />
+            {cfg.hasApiKey ? (
+              <span
+                data-testid="embeddings-key-stored"
+                className="flex items-center gap-1.5 text-[11.5px] text-success"
+              >
+                <CheckCircle2 className="h-3.5 w-3.5" /> Key stored
+              </span>
+            ) : (
+              <span data-testid="embeddings-key-missing" className="text-[11.5px] text-fg-faint">
+                No key stored yet
+              </span>
+            )}
+          </FormField>
+
+          <FormField
+            icon={Hash}
+            label="Dimensions"
+            hint="Vector size the model returns (e.g. 1536 for text-embedding-3-small). Required so collections match."
+          >
+            <Input
+              data-testid="embeddings-dimensions"
+              type="number"
+              min={1}
+              max={8192}
+              value={cfg.dimensions ?? ''}
+              onChange={(e) => onDimensionsChange(e.target.value)}
+              placeholder="1536"
+              required
+            />
+          </FormField>
+        </>
+      )}
+
+      {savedNote && (
+        <div className="rounded-[var(--radius)] border border-success/30 bg-success/10 px-3.5 py-2.5 text-[13px] text-success">
+          {savedNote}
+        </div>
+      )}
+
+      <div>
+        <Button type="submit" disabled={busy}>
+          {busy ? (
+            <>
+              <ThinkingOrb state="working" size={20} /> Saving
+            </>
+          ) : (
+            'Save embedding config'
+          )}
+        </Button>
+      </div>
+    </form>
   );
 }
 

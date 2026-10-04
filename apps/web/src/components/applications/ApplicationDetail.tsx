@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, ArrowUpRight, FileText, Mail } from 'lucide-react';
+import { ArrowLeft, ArrowUpRight, FileText, Mail, MessageSquareQuote } from 'lucide-react';
 import { Button } from '@careeros/ui';
 import { STATE_LABEL, type ApplicationState } from '@careeros/shared';
 import { apiGet, apiPatch } from '@/lib/api-client';
@@ -121,6 +121,13 @@ export function ApplicationDetail({ id }: { id: string }) {
               <Mail className="h-3.5 w-3.5" strokeWidth={1.7} /> Cover letter
             </Link>
           )}
+          <Link
+            href={`/interview-prep/${app.id}`}
+            data-testid="application-interview-prep-link"
+            className="inline-flex items-center gap-1 text-fg-muted hover:text-fg"
+          >
+            <MessageSquareQuote className="h-3.5 w-3.5" strokeWidth={1.7} /> Interview prep
+          </Link>
           <span className="ml-auto">Updated {formatDateTime(app.updatedAt)}</span>
         </div>
 

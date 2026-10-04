@@ -40,6 +40,17 @@ export const ALL_COLLECTIONS: readonly CollectionDef[] = [
   COLLECTION_PROJECT_DOCS,
 ] as const;
 
+/**
+ * Every collection pinned to one effective dimension. The registry above keeps
+ * `dim: 384` as the local/default value for docs + tests; at runtime the
+ * embedding provider's dimension (`external` can be any size) is the source of
+ * truth, so callers that create Qdrant collections must pass the resolved dim
+ * through here instead of reading `ALL_COLLECTIONS[i].dim`.
+ */
+export function collectionsForDim(dim: number): CollectionDef[] {
+  return ALL_COLLECTIONS.map((c) => ({ ...c, dim }));
+}
+
 /** Payload keys every point in every collection must carry. */
 export interface BasePointPayload {
   user_id: string;

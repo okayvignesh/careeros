@@ -25,7 +25,10 @@ export const FieldSelectors = z
     github_url: z.string().min(1).optional(),
     portfolio_url: z.string().min(1).optional(),
   })
-  .partial();
+  .partial()
+  // `.strict()` so a typo'd selector key fails at load instead of being
+  // silently stripped by Zod (which produced `flow.submit: undefined`).
+  .strict();
 export type FieldSelectors = z.infer<typeof FieldSelectors>;
 
 export const PacingOverrides = z
@@ -33,19 +36,59 @@ export const PacingOverrides = z
     per_min: z.number().int().positive().optional(),
     min_gap_ms: z.number().int().nonnegative().optional(),
   })
-  .partial();
+  .partial()
+  .strict();
 export type PacingOverrides = z.infer<typeof PacingOverrides>;
 
-export const AllowlistEntry = z.object({
-  domain: z.string().min(1),
-  allowed_paths: z.array(z.string().min(1)),
-  forbidden_selectors: z.array(z.string().min(1)),
-  required_headers: z.array(z.string().min(1)),
-  field_selectors: FieldSelectors.optional(),
-  submit_selector: z.string().min(1).optional(),
-  success_signal: z.string().min(1).optional(),
-  pacing_overrides: PacingOverrides.optional(),
-});
+/**
+ * F.3 multi-step apply flow. ATS boards (LinkedIn Easy Apply, Indeed,
+ * Naukri, Workday) render a modal funnel: an entry action opens it, then a
+ * sequence of steps each advance to the next until a terminal submit.
+ * Each step may override/extend `field_selectors` (a step-specific phone
+ * country code, an EEO-free custom question) and lists candidate selectors
+ * for its "next" control. The engine tries each advance candidate in order.
+ *
+ * `submit` lives on the step because the terminal submit control is often
+ * step-specific (Workday's review step, Indeed's review step). It is also
+ * accepted at `ApplyFlow` level for single-step flows.
+ */
+export const ApplyStep = z
+  .object({
+    name: z.string().min(1),
+    fields: FieldSelectors.optional(),
+    advance: z.array(z.string().min(1).max(500)).max(8).optional(),
+    /** Terminal submit control for this step; falls back to flow/entry submit. */
+    submit: z.string().min(1).max(500).optional(),
+  })
+  .strict();
+export type ApplyStep = z.infer<typeof ApplyStep>;
+
+export const ApplyFlow = z
+  .object({
+    /** Optional control on the job page that opens the apply form/modal. */
+    entry: z.string().min(1).max(500).optional(),
+    steps: z.array(ApplyStep).min(1).max(12),
+    /** Terminal submit control; falls back to `submit_selector`. */
+    submit: z.string().min(1).max(500).optional(),
+    /** Success marker; falls back to `success_signal`. */
+    success: z.string().min(1).max(500).optional(),
+  })
+  .strict();
+export type ApplyFlow = z.infer<typeof ApplyFlow>;
+
+export const AllowlistEntry = z
+  .object({
+    domain: z.string().min(1),
+    allowed_paths: z.array(z.string().min(1)),
+    forbidden_selectors: z.array(z.string().min(1)),
+    required_headers: z.array(z.string().min(1)),
+    field_selectors: FieldSelectors.optional(),
+    submit_selector: z.string().min(1).optional(),
+    success_signal: z.string().min(1).optional(),
+    pacing_overrides: PacingOverrides.optional(),
+    apply_flow: ApplyFlow.optional(),
+  })
+  .strict();
 export type AllowlistEntry = z.infer<typeof AllowlistEntry>;
 
 export function loadAllowlistFile(path: string): AllowlistEntry {
@@ -58,6 +101,9 @@ export function loadAllowlistFile(path: string): AllowlistEntry {
 export function loadAllowlistDir(dir: string): Map<string, AllowlistEntry> {
   const out = new Map<string, AllowlistEntry>();
   for (const name of readdirSync(dir)) {
+    // Skip dotfiles: macOS AppleDouble sidecars (`._foo.yaml`) and `.DS_Store`
+    // are not allowlist entries and would fail schema parsing.
+    if (name.startsWith('.')) continue;
     if (!name.endsWith('.yaml') && !name.endsWith('.yml')) continue;
     const entry = loadAllowlistFile(join(dir, name));
     out.set(entry.domain, entry);

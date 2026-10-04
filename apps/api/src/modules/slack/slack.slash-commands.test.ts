@@ -50,9 +50,9 @@ describe('slash-command routing', () => {
     const high = await dispatchSlash(payload({ command: '/jobs', text: '99' }));
     const low = await dispatchSlash(payload({ command: '/jobs', text: '0' }));
     const mid = await dispatchSlash(payload({ command: '/jobs', text: '3' }));
-    expect(high.text).toContain('top 5');
-    expect(low.text).toContain('top 1');
-    expect(mid.text).toContain('top 3');
+    expect(high.text).toContain('Top 5');
+    expect(low.text).toContain('Top 1');
+    expect(mid.text).toContain('Top 3');
   });
 
   it('/approve without id returns usage', async () => {

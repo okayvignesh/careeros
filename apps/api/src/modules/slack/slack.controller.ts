@@ -24,10 +24,14 @@ import {
   Req,
   Res,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import { SessionService } from '../auth/session.service';
 import { SlackService } from './slack.service';
 import { SlackOAuthService, type SlackOAuthResult } from './slack.oauth';
+import { SlackCommandsService } from './slack.commands.service';
+import { SlackEventsService, type SlackEventEnvelope } from './slack.events.service';
+import { SlackInteractiveService, type SlackInteractivePayload } from './slack.interactive.service';
 import {
   dispatchSlash,
   type SlackSlashPayload,
@@ -38,6 +42,10 @@ import { ephemeralText, type SlackMessage } from './slack.block-kit';
 const SIG_HEADER = 'x-slack-signature';
 const TS_HEADER = 'x-slack-request-timestamp';
 
+// Slack's Events API retries; these caps shed a misbehaving caller before the
+// HMAC verify runs while staying far above real traffic for a single install.
+const WEBHOOK_LIMIT = { default: { limit: 120, ttl: 60_000 } };
+
 @Controller('webhooks/slack')
 export class SlackController {
   private readonly logger = new Logger(SlackController.name);
@@ -46,6 +54,9 @@ export class SlackController {
     private readonly slack: SlackService,
     private readonly oauth: SlackOAuthService,
     private readonly session: SessionService,
+    private readonly commandsService: SlackCommandsService,
+    private readonly eventsService: SlackEventsService,
+    private readonly interactiveService: SlackInteractiveService,
   ) {}
 
   /**
@@ -57,6 +68,7 @@ export class SlackController {
    */
   @Post('events')
   @HttpCode(200)
+  @Throttle(WEBHOOK_LIMIT)
   async events(@Req() req: Request): Promise<Record<string, unknown>> {
     this.verifyOrReject(req);
     const body = safeJson(this.rawString(req));
@@ -75,29 +87,26 @@ export class SlackController {
         return { ok: true, dedup: true };
       }
     }
-    // ponytail: real event dispatch lands in stream E.5 (email classifier /
-    // brief scheduler). Signature + dedupe are the load-bearing parts here.
-    return { ok: true };
+    const outcome = await this.eventsService.handle((body ?? {}) as unknown as SlackEventEnvelope);
+    return { ok: true, ...outcome };
   }
 
   /**
    * Interactive Block Kit callbacks. Slack sends `payload=<url-encoded JSON>`
-   * inside an `application/x-www-form-urlencoded` body.
+   * inside an `application/x-www-form-urlencoded` body. Action ids route to
+   * real handlers (assessment / job / approval / brief prefixes).
    */
   @Post('interactive')
   @HttpCode(200)
+  @Throttle(WEBHOOK_LIMIT)
   async interactive(@Req() req: Request): Promise<SlackMessage | Record<string, unknown>> {
     this.verifyOrReject(req);
     const form = new URLSearchParams(this.rawString(req));
     const raw = form.get('payload');
     if (!raw) return { ok: true };
-    const parsed = safeJson(raw) as { actions?: Array<{ action_id?: string }> } | null;
-    const actionId = parsed?.actions?.[0]?.action_id ?? '';
-    this.logger.debug(`interactive action: ${actionId}`);
-    // Ack with an ephemeral so the user sees a receipt; downstream services
-    // wire real handlers keyed on action_id prefixes (assessment: / job: /
-    // approval: / brief:).
-    return ephemeralText(`Received: ${actionId || 'unknown_action'}`);
+    const parsed = safeJson(raw) as unknown as SlackInteractivePayload | null;
+    if (!parsed) return ephemeralText('Could not parse that interaction.');
+    return this.interactiveService.handle(parsed);
   }
 
   /**
@@ -106,6 +115,7 @@ export class SlackController {
    */
   @Post('commands')
   @HttpCode(200)
+  @Throttle(WEBHOOK_LIMIT)
   async commands(@Req() req: Request): Promise<SlackMessage> {
     this.verifyOrReject(req);
     const form = new URLSearchParams(this.rawString(req));
@@ -120,7 +130,7 @@ export class SlackController {
       ...(triggerId === null ? {} : { trigger_id: triggerId }),
       ...(responseUrl === null ? {} : { response_url: responseUrl }),
     };
-    return dispatchSlash(payload);
+    return dispatchSlash(payload, this.commandsService.router());
   }
 
   /**
@@ -213,7 +223,7 @@ export class SlackController {
     if (!redirectUri) throw new BadRequestException('missing redirect_uri');
     const valid = await this.slack.consumeOAuthState(state, session.userId);
     if (!valid) throw new BadRequestException('oauth state mismatch');
-    return this.oauth.completeInstall(code, redirectUri);
+    return this.oauth.completeInstall(code, redirectUri, session.userId);
   }
 
   // Relative when WEB_URL is unset (api + web share an origin behind nginx in

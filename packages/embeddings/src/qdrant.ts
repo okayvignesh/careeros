@@ -32,6 +32,24 @@ const DEFAULT_INDEXED_KEYS: Array<{ key: string; schema: 'keyword' | 'integer' }
   { key: 'source_kind', schema: 'keyword' },
 ];
 
+/** What `ensureCollection` did, so callers can warn on a destructive recreate. */
+export type EnsureCollectionOutcome = 'created' | 'exists' | 'recreated';
+
+/** Logger surface used for destructive-recreate warnings. */
+export interface EnsureCollectionLogger {
+  warn(obj: Record<string, unknown>, msg: string): void;
+}
+
+export interface EnsureCollectionOptions {
+  /**
+   * When the collection exists at a different vector size, drop + recreate it
+   * at the requested size. This discards every stored vector, so the caller
+   * must log a re-embed notice (return value `recreated`).
+   */
+  recreateOnMismatch?: boolean;
+  logger?: EnsureCollectionLogger;
+}
+
 export class QdrantStore {
   private client: QdrantClient;
 
@@ -48,14 +66,64 @@ export class QdrantStore {
     }
   }
 
-  async ensureCollection(name: string, dim: number): Promise<void> {
+  async ensureCollection(
+    name: string,
+    dim: number,
+    opts: EnsureCollectionOptions = {},
+  ): Promise<EnsureCollectionOutcome> {
     const existing = await this.client.getCollections();
-    if (!existing.collections.some((c) => c.name === name)) {
-      await this.client.createCollection(name, {
-        vectors: { size: dim, distance: 'Cosine' },
-        hnsw_config: { m: 16, ef_construct: 100 },
-      });
+    const present = existing.collections.some((c) => c.name === name);
+
+    if (present) {
+      if (opts.recreateOnMismatch) {
+        const size = await this.collectionVectorSize(name);
+        if (size !== undefined && size !== dim) {
+          opts.logger?.warn(
+            { collection: name, existingDim: size, requestedDim: dim },
+            'qdrant collection vector dimension changed; dropping and recreating — stored vectors will be re-embedded',
+          );
+          await this.client.deleteCollection(name);
+          await this.create(name, dim);
+          return 'recreated';
+        }
+      }
+      await this.createPayloadIndices(name);
+      return 'exists';
     }
+
+    await this.create(name, dim);
+    return 'created';
+  }
+
+  private async create(name: string, dim: number): Promise<void> {
+    await this.client.createCollection(name, {
+      vectors: { size: dim, distance: 'Cosine' },
+      hnsw_config: { m: 16, ef_construct: 100 },
+    });
+    await this.createPayloadIndices(name);
+  }
+
+  /** Vector size of a single (unnamed) vector config, or the first named one. */
+  private async collectionVectorSize(name: string): Promise<number | undefined> {
+    try {
+      const info = await this.client.getCollection(name);
+      const vectors = info.config?.params?.vectors as
+        | { size?: unknown }
+        | Record<string, { size?: unknown }>
+        | undefined;
+      if (!vectors) return undefined;
+      const direct = (vectors as { size?: unknown }).size;
+      if (typeof direct === 'number') return direct;
+      for (const value of Object.values(vectors as Record<string, { size?: unknown }>)) {
+        if (value && typeof value.size === 'number') return value.size;
+      }
+      return undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async createPayloadIndices(name: string): Promise<void> {
     // ponytail: ef_search set per-query when we need to trade recall for latency.
     // Server default (128) is fine for today's tiny corpus.
     // Payload indices are idempotent: create-on-existing is a no-op at the server.

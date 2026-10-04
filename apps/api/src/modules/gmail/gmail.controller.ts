@@ -32,11 +32,13 @@ import { Throttle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import { SessionService } from '../auth/session.service';
 import { GmailService, type PubSubEnvelope } from './gmail.service';
+import { GmailOutboundService } from './gmail.outbound.service';
 
 @Controller()
 export class GmailController {
   constructor(
     private readonly gmail: GmailService,
+    private readonly outbound: GmailOutboundService,
     private readonly session: SessionService,
   ) {}
 
@@ -109,6 +111,105 @@ export class GmailController {
     const userId = this.session.requireUserId(req);
     await this.gmail.disconnect(userId);
   }
+
+  /**
+   * F.5: create a MIME draft. Body:
+   *   { to, subject, body, threadId?, inReplyTo?, references?, idempotencyKey? }
+   * Returns { draftId, messageId, threadId }. The outreach approval worker
+   * calls the service directly; this route is for the web composer + replies.
+   */
+  @Post('integrations/gmail/drafts')
+  @HttpCode(201)
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  async createDraft(
+    @Req() req: Request,
+    @Body() body: CreateDraftBody,
+  ) {
+    const userId = this.session.requireUserId(req);
+    const input = parseDraftBody(body);
+    return this.outbound.createDraft(userId, input);
+  }
+
+  /**
+   * F.5: send. Body is either `{ draftId }` (send a staged draft) or a full
+   * message `{ to, subject, body, threadId? }` (direct send after approval).
+   */
+  @Post('integrations/gmail/send')
+  @HttpCode(200)
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  async send(@Req() req: Request, @Body() body: SendBody) {
+    const userId = this.session.requireUserId(req);
+    if (typeof body?.draftId === 'string' && body.draftId.length > 0) {
+      // `to` is optional on a draft send (the draft id is authoritative); when
+      // supplied it names the recipient in the `gmail.sent` audit event.
+      const recipient = typeof body.to === 'string' && body.to.length > 0 ? body.to : undefined;
+      return this.outbound.sendDraft(userId, body.draftId, recipient ? { recipient } : {});
+    }
+    const input = parseDraftBody(body as CreateDraftBody);
+    return this.outbound.sendMessage(userId, input);
+  }
+}
+
+interface CreateDraftBody {
+  to?: unknown;
+  subject?: unknown;
+  body?: unknown;
+  threadId?: unknown;
+  inReplyTo?: unknown;
+  references?: unknown;
+  idempotencyKey?: unknown;
+}
+
+interface SendBody extends CreateDraftBody {
+  draftId?: unknown;
+}
+
+/**
+ * Validate + narrow the draft/send request body at the HTTP boundary. Zod
+ * would be the house default, but this is four fields inside the module that
+ * already owns the shape; a typed guard avoids pulling zod into the controller
+ * while still refusing anything malformed before the Gmail call.
+ */
+function parseDraftBody(body: CreateDraftBody): {
+  to: string;
+  subject: string;
+  body: string;
+  threadId?: string;
+  inReplyTo?: string;
+  references?: string[];
+  idempotencyKey?: string;
+} {
+  const to = str(body?.to, 'to');
+  const subject = str(body?.subject, 'subject');
+  const text = str(body?.body, 'body');
+  const out: {
+    to: string;
+    subject: string;
+    body: string;
+    threadId?: string;
+    inReplyTo?: string;
+    references?: string[];
+    idempotencyKey?: string;
+  } = { to, subject, body: text };
+  if (body.threadId !== undefined) out.threadId = str(body.threadId, 'threadId');
+  if (body.inReplyTo !== undefined) out.inReplyTo = str(body.inReplyTo, 'inReplyTo');
+  if (body.idempotencyKey !== undefined) {
+    out.idempotencyKey = str(body.idempotencyKey, 'idempotencyKey');
+  }
+  if (body.references !== undefined) {
+    if (!Array.isArray(body.references) || body.references.some((r) => typeof r !== 'string')) {
+      throw new BadRequestException('references must be a string[]');
+    }
+    out.references = body.references as string[];
+  }
+  return out;
+}
+
+function str(v: unknown, field: string): string {
+  if (typeof v !== 'string' || v.trim().length === 0) {
+    throw new BadRequestException(`${field} is required and must be a non-empty string`);
+  }
+  return v;
 }
 
 function escapeHtml(s: string): string {
