@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { ArrowRight, FileText, Sparkles, Upload, X } from 'lucide-react';
 import { ThinkingOrb } from 'thinking-orbs';
 import { Button } from '@careeros/ui';
+import { readCsrfTokenFromCookie } from '@/lib/api-client';
 import { ErrorBanner } from './AccountForm';
 
 const MAX_BYTES = 10 * 1024 * 1024;
@@ -51,11 +52,18 @@ export function ResumeParse() {
     try {
       const form = new FormData();
       form.append('file', file);
+      // A multipart POST is a mutation: the API's double-submit CSRF check
+      // requires the cookie value echoed in `x-csrf-token`. A raw fetch does
+      // not go through api-client, so set it here.
+      const headers: Record<string, string> = {};
+      const csrf = readCsrfTokenFromCookie(document.cookie ?? '');
+      if (csrf) headers['x-csrf-token'] = csrf;
       const res = await fetch(`${apiBase()}/resume/parse`, {
         method: 'POST',
         body: form,
         credentials: 'include',
         cache: 'no-store',
+        headers,
       });
       const text = await res.text();
       const data = text ? (JSON.parse(text) as unknown) : null;
