@@ -222,12 +222,18 @@ export class EmbeddingsService {
       // Embed first: an external provider without a declared dimension only
       // knows its size after the first response, and Qdrant must be created
       // with the real size.
-      const vec = await provider.embed(sampleText);
+      // Embed a unique string per run. The embedder is deterministic for a
+      // given text, so reusing `sampleText` makes every prior test point an
+      // exact tie (score 1.0) and the top-1 hit can be an old point rather than
+      // the one inserted here. A per-run id keeps the round-trip unambiguous.
+      const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      const uniqueText = `${sampleText} [${runId}]`;
+      const vec = await provider.embed(uniqueText);
       const dim = provider.dim || vec.length;
       await this.store.ensureCollection(TEST_COLLECTION, dim);
       const id = Date.now();
       await this.store.upsert(TEST_COLLECTION, [
-        { id, vector: vec, payload: { text: sampleText } },
+        { id, vector: vec, payload: { text: uniqueText, runId } },
       ]);
       const hits = await this.store.search(TEST_COLLECTION, vec, 1);
       const top = hits[0];

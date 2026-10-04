@@ -185,12 +185,12 @@ describe('EmbeddingsService constructor (B-8)', () => {
 });
 
 describe('EmbeddingsService.test encode step (B-8)', () => {
-  it('calls the embedder with the exact sample text (single-input shape)', async () => {
+  it('calls the embedder once with a per-run unique sample text (single-input shape)', async () => {
     const svc = new EmbeddingsService(makePrisma() as never);
     await svc.test('hello embeddings');
-    expect(refs.ctrl.embedCalls).toEqual(['hello embeddings']);
-    // mutation smoke: if the service embedded the wrong string (e.g. collection name),
-    // the array would not equal ['hello embeddings'].
+    expect(refs.ctrl.embedCalls).toHaveLength(1);
+    // Unique per run so identical prior points cannot tie at score 1.0.
+    expect(refs.ctrl.embedCalls[0]).toMatch(/^hello embeddings \[.+\]$/);
   });
 
   it('defaults the sample text when none is provided', async () => {
@@ -215,8 +215,9 @@ describe('EmbeddingsService.test upsert step (B-8)', () => {
     expect(typeof point.id).toBe('number');
     expect(Array.isArray(point.vector)).toBe(true);
     expect(point.vector.length).toBe(384);
-    expect(point.payload).toEqual({ text: sample });
-    // mutation smoke: swapping payload.text for payload.body would fail toEqual.
+    expect((point.payload as { text: string }).text).toMatch(/^upsert-shape-check \[.+\]$/);
+    expect((point.payload as { runId?: string }).runId).toBeTruthy();
+    // mutation smoke: dropping the unique run id would let old identical points tie.
   });
 
   it('ensures the collection with EMBED_DIM before upserting', async () => {
