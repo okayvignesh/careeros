@@ -11,6 +11,8 @@ import {
   Blocks,
   Briefcase,
   ChevronDown,
+  ChevronsDownUp,
+  ChevronsUpDown,
   Cpu,
   DatabaseBackup,
   FileCheck,
@@ -120,7 +122,29 @@ export function AppNav() {
   }
 
   return (
-    <nav className="flex flex-1 flex-col gap-5 text-[13px]">
+    <nav className="flex flex-1 flex-col gap-4 text-[13px]">
+      <div className="flex items-center justify-end gap-1 px-1">
+        <button
+          type="button"
+          onClick={() => setCollapsed(new Set(groups.map((g) => g.label)))}
+          aria-label="Collapse all sections"
+          title="Collapse all"
+          data-testid="nav-collapse-all"
+          className="rounded-md p-1 text-fg-faint transition-colors hover:bg-[hsl(var(--bg-elev-2))] hover:text-fg"
+        >
+          <ChevronsDownUp className="h-3.5 w-3.5" strokeWidth={1.8} />
+        </button>
+        <button
+          type="button"
+          onClick={() => setCollapsed(new Set())}
+          aria-label="Expand all sections"
+          title="Expand all"
+          data-testid="nav-expand-all"
+          className="rounded-md p-1 text-fg-faint transition-colors hover:bg-[hsl(var(--bg-elev-2))] hover:text-fg"
+        >
+          <ChevronsUpDown className="h-3.5 w-3.5" strokeWidth={1.8} />
+        </button>
+      </div>
       {groups.map((g) => {
         const isCollapsed = collapsed.has(g.label);
         return (
