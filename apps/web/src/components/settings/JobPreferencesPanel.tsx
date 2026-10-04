@@ -487,19 +487,26 @@ function CsvInput({
   onChange: (v: string[]) => void;
   placeholder?: string;
 }) {
+  // Keep the raw text locally so spaces and commas survive while typing; the
+  // parent only needs the parsed array. Previously the input rendered
+  // `value.join(', ')` and re-parsed every keystroke, which trimmed the
+  // trailing space and dropped the comma — multi-word entries were impossible.
+  const [text, setText] = useState(() => value.join(', '));
   return (
     <input
       data-testid={testId}
       type="text"
-      value={value.join(', ')}
-      onChange={(e) =>
+      value={text}
+      onChange={(e) => {
+        const raw = e.target.value;
+        setText(raw);
         onChange(
-          e.target.value
+          raw
             .split(',')
             .map((s) => s.trim())
             .filter((s) => s.length > 0),
-        )
-      }
+        );
+      }}
       placeholder={placeholder}
       className="w-full rounded-[var(--radius)] border border-[hsl(var(--border-strong))] bg-[hsl(var(--bg-elev-1))] px-3 py-1.5 text-[13px] text-fg focus:border-accent focus:outline-none"
     />
