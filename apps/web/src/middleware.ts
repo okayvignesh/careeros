@@ -41,6 +41,25 @@ function isFrameworkPath(pathname: string): boolean {
   );
 }
 
+/** Extensions of root-served static assets under `public/`. */
+const STATIC_ASSET_EXTENSIONS = new Set([
+  '.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.avif', '.ico',
+  '.css', '.js', '.map', '.txt', '.xml', '.json',
+  '.woff', '.woff2', '.ttf', '.otf', '.eot',
+]);
+
+/**
+ * `public/*` files (e.g. /wordmark.png, /icon.png) must never go through the
+ * setup/session gate - otherwise the setup wizard redirects the brand images
+ * to a wizard step and they render broken. Match by extension, not a regex
+ * (an unanchored pattern here is js/polynomial-redos bait).
+ */
+function isStaticAsset(pathname: string): boolean {
+  const dot = pathname.lastIndexOf('.');
+  if (dot <= pathname.lastIndexOf('/')) return false;
+  return STATIC_ASSET_EXTENSIONS.has(pathname.slice(dot).toLowerCase());
+}
+
 function newNonce(): string {
   return btoa(crypto.randomUUID());
 }
@@ -74,6 +93,7 @@ export async function middleware(req: NextRequest) {
   // and manage their own response, so skip the setup-state round-trip.
   if (
     isFrameworkPath(pathname) ||
+    isStaticAsset(pathname) ||
     pathname === '/api' ||
     pathname.startsWith('/api/')
   ) {
