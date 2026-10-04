@@ -213,7 +213,7 @@ function isRead(op: string): boolean {
   );
 }
 
-function encryptRow(
+export function encryptRow(
   row: Record<string, unknown>,
   specs: FieldSpec[],
 ): Record<string, unknown> {
@@ -221,6 +221,10 @@ function encryptRow(
   for (const spec of specs) {
     const raw = out[spec.column];
     if (raw == null) continue;
+    // Already sealed (e.g. a caller encrypted before the extension ran): for a
+    // `json` column `JSON.stringify` would wrap the marker in quotes and defeat
+    // the `isEncryptedField` check below, causing double encryption.
+    if (typeof raw === 'string' && isEncryptedField(raw)) continue;
     const asString = spec.kind === 'json' ? JSON.stringify(raw) : String(raw);
     if (isEncryptedField(asString)) continue; // already marked
     out = { ...out, [spec.column]: encryptField(asString, KEY, spec.column) };
@@ -228,7 +232,7 @@ function encryptRow(
   return out;
 }
 
-function decryptRow(
+export function decryptRow(
   row: Record<string, unknown>,
   specs: FieldSpec[],
 ): Record<string, unknown> {
@@ -238,7 +242,20 @@ function decryptRow(
     if (raw == null) continue;
     if (typeof raw !== 'string') continue; // JSON column with unencrypted legacy value
     if (!isEncryptedField(raw)) continue; // Pre-encryption legacy row.
-    const plain = decryptField(raw, KEY, spec.column);
+    let plain = decryptField(raw, KEY, spec.column);
+    // Legacy rows were double-encrypted (manual encrypt + extension). For a
+    // `json` column the first decrypt yields a JSON string whose value is
+    // itself an `enc:v1:` marker; unwrap one extra layer.
+    if (spec.kind === 'json') {
+      try {
+        const inner = JSON.parse(plain);
+        if (typeof inner === 'string' && isEncryptedField(inner)) {
+          plain = decryptField(inner, KEY, spec.column);
+        }
+      } catch {
+        // Not JSON — leave `plain` as-is; JSON.parse below will surface the issue.
+      }
+    }
     const value = spec.kind === 'json' ? JSON.parse(plain) : plain;
     out = { ...out, [spec.column]: value };
   }
