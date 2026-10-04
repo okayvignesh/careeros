@@ -138,7 +138,7 @@ describe('loadCandidateSearchPlans (F7 query builder from profile)', () => {
   });
 
   it('returns no plan when there is no target role', async () => {
-    const repo = fakeRepo([{ ...GOAL, targetRoles: [] }]);
+    const repo = fakeRepo([GOAL]);
     repo.userJobPreferences.findUnique = async () => ({
       targetRoles: [],
       locations: [],
