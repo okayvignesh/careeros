@@ -5,6 +5,7 @@ import { StorageModule } from './common/storage.module';
 import { QueueModule } from './common/queue.module';
 import { SensitivityGateModule } from './common/sensitivity-gate.module';
 import { ProviderLoaderModule } from './common/provider-loader.module';
+import { ProviderConfigModule } from './common/provider-config.module';
 import { InjectionAuditModule } from './common/injection-audit.module';
 import { MetricsModule } from './common/metrics/metrics.module';
 import { HttpMetricsMiddleware } from './common/metrics/http-metrics.middleware';
@@ -89,6 +90,7 @@ const loggerParams: Params = {
     QueueModule,
     SensitivityGateModule,
     ProviderLoaderModule,
+    ProviderConfigModule,
     InjectionAuditModule,
     MetricsModule,
     AuthModule,

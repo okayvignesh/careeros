@@ -1,12 +1,15 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { apiGet } from '@/lib/api-client';
+import { Button } from '@careeros/ui';
 import { Loader } from '@/components/Loader';
 import { UnavailableNotice } from '@/components/UnavailableNotice';
 import { useApi } from '@/lib/use-api';
 import { quotaShare, quotaTone } from './quota-tone';
 import { providersView, workloadsView } from './providers-data';
+import { ProviderConfigDialog } from './ProviderConfigDialog';
+import type { SearchProvider } from '@careeros/shared';
 
 /**
  * Screen 56: configured search providers.
@@ -46,9 +49,18 @@ export function SearchProvidersPanel() {
     ]);
     return { providers: providersView(p), workloads: workloadsView(w) };
   }, []);
-  const { data, error } = useApi(load);
+  const { data, error, setData } = useApi(load);
   const providers = data?.providers ?? null;
   const workloads = data?.workloads ?? [];
+  const [editing, setEditing] = useState<SearchProvider | null>(null);
+
+  function onSaved(updated: SearchProvider) {
+    setData((prev) =>
+      prev
+        ? { ...prev, providers: prev.providers.map((p) => (p.id === updated.id ? updated : p)) }
+        : prev,
+    );
+  }
 
   if (error) {
     return <UnavailableNotice feature="Search providers" />;
@@ -87,15 +99,36 @@ export function SearchProvidersPanel() {
                       {p.status}
                     </span>
                   </div>
-                  <span className="text-fg-faint font-mono text-[11.5px] tabular-nums">
-                    {p.host}
-                  </span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-fg-faint font-mono text-[11.5px] tabular-nums">
+                      {p.host}
+                    </span>
+                    {p.fields.length > 0 && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        data-testid={`provider-configure-${p.id}`}
+                        onClick={() => setEditing(p)}
+                      >
+                        Configure
+                      </Button>
+                    )}
+                  </div>
                 </div>
                 <p className="text-fg-muted mt-1 text-[12.5px]">{p.usage}</p>
                 <p className="text-fg-faint mt-0.5 text-[11.5px]">
                   {p.authNote}
                   {p.addedAt ? ` · first seen ${p.addedAt}` : ''}
                 </p>
+                {p.missing.length > 0 && (
+                  <p
+                    data-testid={`provider-missing-${p.id}`}
+                    className="text-warn mt-0.5 text-[11.5px]"
+                  >
+                    Missing: {p.missing.join(', ')}
+                  </p>
+                )}
                 <div className="mt-3 flex items-center gap-3">
                   {quota !== null && used !== null ? (
                     <>
@@ -119,6 +152,15 @@ export function SearchProvidersPanel() {
             );
           })}
         </ul>
+      )}
+
+      {editing && (
+        <ProviderConfigDialog
+          provider={editing}
+          open
+          onClose={() => setEditing(null)}
+          onSaved={onSaved}
+        />
       )}
 
       <section className="flex flex-col gap-3">

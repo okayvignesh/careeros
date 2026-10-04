@@ -75,6 +75,8 @@ export {
   AdapterError,
   MalformedResponseError,
   MissingCredentialError,
+  createConfiguredAdapter,
+  type ProviderCredentials,
   type AshbyAdapterOpts,
   type GreenhouseAdapterOpts,
   type LeverAdapterOpts,

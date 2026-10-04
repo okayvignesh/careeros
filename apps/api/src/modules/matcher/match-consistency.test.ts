@@ -74,6 +74,7 @@ describe('match score consistency — jobs list vs job detail', () => {
       {} as never,
       prefsStub as never,
       {} as never,
+      { resolve: async () => ({ values: {}, secrets: {} }) } as never,
     );
     const matcher = new MatcherService(prisma as never);
 

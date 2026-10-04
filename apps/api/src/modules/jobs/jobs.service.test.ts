@@ -97,6 +97,7 @@ function makeService(prismaMock: unknown, adapter: unknown) {
     {} as never,
     {} as never,
     {} as never,
+    { resolve: async () => ({ values: {}, secrets: {} }) } as never,
   );
   // Replace the adapter registry with a single-adapter under our control.
   (svc as unknown as { adapters: Record<string, unknown> }).adapters = {
@@ -254,6 +255,7 @@ function makeListService(prismaMock: unknown, prefsMock: unknown) {
     {} as never,
     prefsMock as never,
     {} as never,
+    { resolve: async () => ({ values: {}, secrets: {} }) } as never,
   );
 }
 
@@ -371,7 +373,15 @@ class TestJobsService extends JobsService {
   constructor(prisma: unknown) {
     // Override runWithUserLimit passthrough via usage stub.
     const usage = { runWithUserLimit: async <T>(_u: string, fn: () => Promise<T>) => fn() };
-    super(prisma as never, usage as never, {} as never, {} as never, {} as never, {} as never);
+    super(
+      prisma as never,
+      usage as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      { resolve: async () => ({ values: {}, secrets: {} }) } as never,
+    );
     // tryLoadProvider is private — cast in a stub provider whose chatStructured
     // increments a counter so we can assert it was NEVER called for blocked JDs.
     const self = this;

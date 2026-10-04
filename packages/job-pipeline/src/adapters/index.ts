@@ -169,3 +169,4 @@ export {
   MalformedResponseError,
   MissingCredentialError,
 } from './errors';
+export { createConfiguredAdapter, type ProviderCredentials } from './configured';

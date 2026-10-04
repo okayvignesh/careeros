@@ -4,6 +4,7 @@
  * can show the explicit unavailable state instead of a half-rendered list.
  */
 import {
+  SearchProviderSchema,
   SearchProviderWorkloadsResponseSchema,
   SearchProvidersResponseSchema,
   type SearchProvider,
@@ -12,6 +13,11 @@ import {
 
 export function providersView(value: unknown): SearchProvider[] {
   return SearchProvidersResponseSchema.parse(value).providers;
+}
+
+/** Parse a single-provider response (`PUT /me/search-providers/:id`). */
+export function providerView(value: unknown): SearchProvider {
+  return SearchProviderSchema.parse(value);
 }
 
 export function workloadsView(value: unknown): SearchProviderWorkload[] {

@@ -5,6 +5,7 @@ import { InjectionBlockedError, renderPrompt, wrapUntrusted, type AIProvider } f
 import {
   adapters as allAdapters,
   buildCandidateSearchQueries,
+  createConfiguredAdapter,
   createFirecrawlAdapter,
   freshness,
   relevance,
@@ -21,6 +22,7 @@ import { UsageService } from '../usage/usage.service';
 import { UsageCache } from '../usage/usage.cache';
 import { SensitivityGateService } from '../../common/sensitivity-gate.service';
 import { ProviderLoaderService } from '../../common/provider-loader.service';
+import { ProviderConfigService } from '../../common/provider-config.service';
 import { JobPreferencesService } from '../job-prefs/job-prefs.service';
 
 export interface JobsSyncStats {
@@ -92,7 +94,38 @@ export class JobsService {
     private readonly sensitivity: SensitivityGateService,
     private readonly prefs: JobPreferencesService,
     private readonly providerLoader: ProviderLoaderService,
+    private readonly providerConfig: ProviderConfigService,
   ) {}
+
+  /**
+   * Resolve the adapter to run: the DB-configured instance when credentials are
+   * stored, else the env-reading default from the registry. Config errors fall
+   * back to the default rather than failing the sync.
+   */
+  private async configuredAdapter(
+    adapterId: string,
+    fallback: JobSourceAdapter,
+  ): Promise<JobSourceAdapter> {
+    try {
+      const creds = await this.providerConfig.resolve(adapterId);
+      return createConfiguredAdapter(adapterId, creds) ?? fallback;
+    } catch (err) {
+      this.logger.warn(
+        `jobs: provider config for ${adapterId} unavailable, using default: ${(err as Error).message}`,
+      );
+      return fallback;
+    }
+  }
+
+  /** Firecrawl API key from the DB config, else env. undefined when neither is set. */
+  private async firecrawlApiKey(): Promise<string | undefined> {
+    try {
+      const creds = await this.providerConfig.resolve('firecrawl');
+      return creds.secrets['apiKey']?.trim() || undefined;
+    } catch {
+      return undefined;
+    }
+  }
 
   listAdapters() {
     return Object.values(this.adapters).map((a) => ({
@@ -123,8 +156,9 @@ export class JobsService {
    * method from the API — that would be the half-migration.
    */
   async sync(adapterId: string): Promise<JobsSyncStats> {
-    const adapter = this.adapters[adapterId];
-    if (!adapter) throw new NotFoundException(`Unknown adapter: ${adapterId}`);
+    const base = this.adapters[adapterId];
+    if (!base) throw new NotFoundException(`Unknown adapter: ${adapterId}`);
+    const adapter = await this.configuredAdapter(adapterId, base);
     const raws = await adapter.fetch();
     return this.ingest(raws, adapterId);
   }
@@ -154,7 +188,9 @@ export class JobsService {
       this.logger.warn(`candidate ${userId} has no target roles; firecrawl search skipped`);
       return stats;
     }
-    const adapter = adapterOverride ?? createFirecrawlAdapter({ queries });
+    const apiKey = await this.firecrawlApiKey();
+    const adapter =
+      adapterOverride ?? createFirecrawlAdapter({ queries, ...(apiKey ? { apiKey } : {}) });
     let raws: RawJob[];
     try {
       raws = await adapter.fetch();
