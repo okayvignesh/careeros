@@ -124,11 +124,14 @@ maybe('Outreach approval lifecycle (opt-in: TESTCONTAINERS_E2E=1)', () => {
         const row = await prisma.outreachMessage.findUnique({ where: { id: outreachId } });
         expect(row?.status).toBe('approved');
         expect(row?.gmailDraftId).toBe('draft-1');
+        // The worker stages the draft (row update above) before markSent, so
+        // wait for the approval's terminal state rather than reading it after
+        // the intermediate row update.
+        const approvalRow = await prisma.approvalItem.findUnique({ where: { id: item.id } });
+        expect(approvalRow?.state).toBe('sent');
       },
       { timeout: 10_000 },
     );
-    const approvalRow = await prisma.approvalItem.findUnique({ where: { id: item.id } });
-    expect(approvalRow?.state).toBe('sent');
     expect(drafts).toHaveLength(1);
 
     const sent = await outreach.send(userId, outreachId);

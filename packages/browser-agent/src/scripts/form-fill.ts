@@ -48,13 +48,17 @@ function normalizeSelector(s: string): string {
 /** Attribute *value* tokens from a CSS selector, e.g. `[type=password]` → "password". */
 function attributeValueTokens(selector: string): string[] {
   const tokens: string[] = [];
-  // Scan each `[...]` segment, then parse it with string ops. The previous
-  // single-regex form nested two unbounded character classes around the `=`,
-  // which is backtracking-prone (js/polynomial-redos); this is linear.
-  const brackets = /\[([^\]]*)\]/g;
-  let m: RegExpExecArray | null;
-  while ((m = brackets.exec(selector)) !== null) {
-    const inner = m[1] ?? '';
+  // Scan `[...]` segments with indexOf and parse each with string ops. A
+  // global regex here is O(n^2) on inputs like `[[[[…` (each start position
+  // rescans to the end), which is js/polynomial-redos; indexOf is linear.
+  let i = 0;
+  for (;;) {
+    const open = selector.indexOf('[', i);
+    if (open === -1) break;
+    const close = selector.indexOf(']', open + 1);
+    if (close === -1) break;
+    const inner = selector.slice(open + 1, close);
+    i = close + 1;
     const eq = inner.indexOf('=');
     if (eq === -1) continue;
     let value = inner.slice(eq + 1).trim();
