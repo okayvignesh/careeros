@@ -57,6 +57,12 @@ export class GitlabController {
     return { queued: true };
   }
 
+  @Get('contributions')
+  async contributions(@Req() req: Request) {
+    const userId = this.session.requireUserId(req);
+    return this.gitlab.getContributions(userId);
+  }
+
   @Get('probe')
   async probe(@Req() req: Request) {
     const userId = this.session.requireUserId(req);
