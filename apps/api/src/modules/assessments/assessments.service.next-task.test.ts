@@ -236,6 +236,29 @@ describe('nextKnowledgeQuestion picker', () => {
   });
 });
 
+describe('nextDebuggingTask picker', () => {
+  it('seeds a hand-written debugging bank when the pool is empty and returns a task', async () => {
+    // Regression: debugging had no seed, so an empty question_bank made the
+    // Arena debugging page show "No debugging tasks available". ensureDebuggingSeed
+    // must populate the pool and the picker must serve a well-formed task.
+    const { svc, prisma } = build({ questions: [] });
+    const t = await svc.nextDebuggingTask('u1');
+    expect(t.brokenCode.length).toBeGreaterThan(0);
+    expect(t.description.length).toBeGreaterThan(0);
+    expect(t.language).not.toBe('unknown');
+    expect(t.skillIds.length).toBeGreaterThan(0);
+    expect(prisma._questions.filter((q) => q.kind === 'debugging').length).toBeGreaterThan(0);
+    // MUTATION-SMOKE: drop `await this.ensureDebuggingSeed();` from
+    // nextDebuggingTask → the pool is empty and this throws NotFoundException.
+  });
+
+  it('filters the seeded bank to the requested skill', async () => {
+    const { svc } = build({ questions: [] });
+    const t = await svc.nextDebuggingTask('u1', 'python');
+    expect(t.skillIds).toContain('python');
+  });
+});
+
 // -----------------------------------------------------------------------------
 // Thumbs-down / flagged regen path: a flagged question is excluded from the
 // pool. Once flagged, the next call MUST produce a different task.

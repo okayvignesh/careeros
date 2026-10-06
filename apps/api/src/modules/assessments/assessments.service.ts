@@ -1073,6 +1073,7 @@ export class AssessmentsService {
    * in `keyPoints[0]`, `{language, description, hint}` JSON in `answerHint`.
    */
   async nextDebuggingTask(userId: string, skillId?: string): Promise<DebuggingTask> {
+    await this.ensureDebuggingSeed();
     const cooldownStart = new Date(Date.now() - 14 * 86_400_000);
     const recent = await this.prisma.attempt.findMany({
       where: { userId, kind: 'debugging', createdAt: { gte: cooldownStart } },
@@ -1200,6 +1201,33 @@ export class AssessmentsService {
         `debugging-task-generator failed for skill=${skillId}: ${(err as Error).message}`,
       );
       return null;
+    }
+  }
+
+  /** Hand-seeded debugging tasks so `nextDebuggingTask` works before any LLM provider is wired. */
+  private async ensureDebuggingSeed(): Promise<void> {
+    for (const seed of DEBUGGING_SEED) {
+      const promptHash = hashPrompt(seed.brokenCode);
+      await this.prisma.question.upsert({
+        where: { promptHash },
+        create: {
+          kind: 'debugging',
+          skillIds: seed.skillIds,
+          difficulty: seed.difficulty,
+          prompt: seed.brokenCode,
+          keyPoints: [seed.rootCause],
+          answerHint: JSON.stringify({
+            language: seed.language,
+            description: seed.description,
+            hint: seed.hint,
+          }),
+          // Explicit (column default is false): keeps the seeded row visible to
+          // the `flagged: false` pool query in the next-task test's Prisma fake.
+          flagged: false,
+          promptHash,
+        },
+        update: {},
+      });
     }
   }
 
@@ -3009,6 +3037,121 @@ const KNOWLEDGE_SEED: Array<{
       'Why prefer a distroless base image over ubuntu for a production Node service? Name at least two concrete benefits.',
     keyPoints: ['smaller', 'attack surface', 'no shell'],
     answerHint: 'Think image size and CVE exposure.',
+  },
+];
+
+// ponytail: 6 hand-seeded debugging tasks (mirrors KNOWLEDGE_SEED) so the
+// debugging runner is usable before any LLM provider is wired. `brokenCode` is
+// the prompt, `rootCause` the grader's match target (keyPoints[0]), and the
+// `{language, description, hint}` JSON goes in answerHint — same row shape as
+// `generateDebuggingTask` writes.
+const DEBUGGING_SEED: Array<{
+  skillIds: string[];
+  difficulty: string;
+  language: string;
+  description: string;
+  hint: string;
+  rootCause: string;
+  brokenCode: string;
+}> = [
+  {
+    skillIds: ['typescript'],
+    difficulty: 'easy',
+    language: 'typescript',
+    description:
+      'chunk(items, size) should split an array into consecutive sub-arrays of at most `size` items and never include a trailing empty chunk. It currently returns an extra empty array when the length is an exact multiple of size.',
+    hint: 'Look at the loop stop condition.',
+    rootCause:
+      'The loop condition is `i <= items.length`, so it runs one extra iteration and appends an empty slice whenever the length is an exact multiple of size. It should be `i < items.length`.',
+    brokenCode: `export function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i <= items.length; i += size) {
+    out.push(items.slice(i, i + size));
+  }
+  return out;
+}`,
+  },
+  {
+    skillIds: ['javascript'],
+    difficulty: 'medium',
+    language: 'javascript',
+    description:
+      'saveAll(records) should save every record and resolve only after all saves finish, returning the number saved. It currently returns 0 because the saves run after it resolves.',
+    hint: 'forEach does not wait for the promise your async callback returns.',
+    rootCause:
+      'Array.prototype.forEach ignores the promise returned by an async callback, so the function returns before any save completes and the counter is still 0. Use for...of with await, or await Promise.all(records.map(...)).',
+    brokenCode: `async function saveAll(records) {
+  let saved = 0;
+  records.forEach(async (record) => {
+    await db.save(record);
+    saved += 1;
+  });
+  return saved;
+}`,
+  },
+  {
+    skillIds: ['node-js'],
+    difficulty: 'easy',
+    language: 'javascript',
+    description:
+      'The POST /items handler should read the JSON array the client sent and respond with its length. It currently throws a parse error for every valid JSON body.',
+    hint: 'What type is req.body after express.json() has run?',
+    rootCause:
+      'The express.json() middleware already parsed the body into an array/object, so calling JSON.parse(req.body) throws. Read req.body directly.',
+    brokenCode: `app.post('/items', (req, res) => {
+  const items = JSON.parse(req.body);
+  res.json({ count: items.length });
+});`,
+  },
+  {
+    skillIds: ['python'],
+    difficulty: 'medium',
+    language: 'python',
+    description:
+      'add_tag(tag) should return a list containing only the tag, and add_tag(tag, tags) should append to the list passed in. Repeated add_tag("x") calls currently keep growing the same shared list.',
+    hint: 'When is the default value [] evaluated?',
+    rootCause:
+      'The default list is created once when the function is defined and shared across calls, so tags accumulate between unrelated calls. Default to None and create a new list inside the function.',
+    brokenCode: `def add_tag(tag, tags=[]):
+    tags.append(tag)
+    return tags`,
+  },
+  {
+    skillIds: ['postgres'],
+    difficulty: 'medium',
+    language: 'sql',
+    description:
+      'The query should return each customer with the number of orders they placed. It currently over-counts whenever a single order has more than one line item.',
+    hint: 'One order has many order_items; what does that do to the row count?',
+    rootCause:
+      'Joining order_items fans each order out into one row per line item, so COUNT(o.id) counts line items, not orders. Use COUNT(DISTINCT o.id) or aggregate order_items separately.',
+    brokenCode: `SELECT c.id,
+       c.name,
+       COUNT(o.id) AS order_count
+FROM customers c
+JOIN orders o      ON o.customer_id = c.id
+JOIN order_items i ON i.order_id = o.id
+GROUP BY c.id, c.name;`,
+  },
+  {
+    skillIds: ['react'],
+    difficulty: 'medium',
+    language: 'tsx',
+    description:
+      'Ticker should show a number that increases by one every second. It currently jumps from 0 to 1 and then stops increasing.',
+    hint: 'The effect runs once, so which count does the interval callback close over?',
+    rootCause:
+      'The effect has an empty dependency array, so the interval callback closes over the initial count (0) and always sets 1. Use the functional update setCount((c) => c + 1).',
+    brokenCode: `function Ticker() {
+  const [count, setCount] = useState(0);
+
+  useEffect(() => {
+    const id = setInterval(() => setCount(count + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  return <span>{count}</span>;
+}`,
   },
 ];
 
