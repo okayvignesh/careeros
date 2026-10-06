@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ArrowUpRight, FileText, Mail, RefreshCw, Search, Sliders, Sparkles, Target, X } from 'lucide-react';
+import { ArrowUpRight, FileText, Mail, MoreHorizontal, RefreshCw, Search, Sliders, Sparkles, Target, X } from 'lucide-react';
 import { ThinkingOrb } from 'thinking-orbs';
 import { Button } from '@careeros/ui';
 import { apiGet, apiPost } from '@/lib/api-client';
@@ -45,6 +45,7 @@ interface ListResponse {
     mustHaveMissing: number;
     hasDealbreaker: number;
     companyBlacklisted: number;
+    roleMismatch: number;
     stale: number;
     scanned: number;
   };
@@ -120,7 +121,7 @@ export function JobsList() {
     setExtracting(true);
     setError(null);
     try {
-      const stats = await apiPost<SkillExtractionStats>('/admin/jobs/extract-skills?limit=20');
+      const stats = await apiPost<SkillExtractionStats>('/admin/jobs/extract-skills?limit=100');
       setLastExtract(stats);
       await refetch();
     } catch (e) {
@@ -237,7 +238,7 @@ export function JobsList() {
             </>
           ) : (
             <>
-              <Sparkles className="h-3.5 w-3.5" /> Extract skills (20)
+              <Sparkles className="h-3.5 w-3.5" /> Score jobs
             </>
           )}
         </Button>
@@ -269,10 +270,16 @@ export function JobsList() {
       {(() => {
         const r = data.rejected;
         const totalRejected =
-          r.remoteOnly + r.mustHaveMissing + r.hasDealbreaker + r.companyBlacklisted + (r.stale ?? 0);
+          r.remoteOnly +
+          r.mustHaveMissing +
+          r.hasDealbreaker +
+          r.companyBlacklisted +
+          (r.roleMismatch ?? 0) +
+          (r.stale ?? 0);
         if (totalRejected === 0) return null;
         const parts = [
           r.remoteOnly && `${r.remoteOnly} not remote`,
+          (r.roleMismatch ?? 0) && `${r.roleMismatch} off-target role`,
           r.mustHaveMissing && `${r.mustHaveMissing} missing a must-have`,
           r.hasDealbreaker && `${r.hasDealbreaker} hit a dealbreaker`,
           r.companyBlacklisted && `${r.companyBlacklisted} blacklisted company`,
@@ -393,21 +400,11 @@ export function JobsList() {
                       <Link
                         href={`/jobs/${j.id}`}
                         data-testid="job-match-report"
-                        className="inline-flex items-center gap-1 rounded border border-[hsl(var(--border))] px-1.5 py-[1px] text-[11.5px] text-fg-muted hover:border-accent/40 hover:text-accent"
+                        className="inline-flex items-center gap-1 rounded border border-[hsl(var(--border))] px-2 py-[2px] text-[11.5px] text-fg-muted hover:border-accent/40 hover:text-accent"
                       >
-                        Match report
+                        View
                       </Link>
-                      <TrackButton jobId={j.id} />
-                      <DraftResumeButton jobId={j.id} />
-                      <DraftCoverButton jobId={j.id} />
-                      <a
-                        href={j.canonicalUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-accent hover:underline"
-                      >
-                        Open <ArrowUpRight className="h-3.5 w-3.5" />
-                      </a>
+                      <RowActions jobId={j.id} canonicalUrl={j.canonicalUrl} />
                     </div>
                   </td>
                 </tr>
@@ -415,6 +412,55 @@ export function JobsList() {
             </tbody>
           </table>
         </div>
+      )}
+    </div>
+  );
+}
+
+function RowActions({ jobId, canonicalUrl }: { jobId: string; canonicalUrl: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="More actions"
+        data-testid="job-actions-menu"
+        onClick={() => setOpen((o) => !o)}
+        className="inline-flex items-center rounded border border-[hsl(var(--border))] px-1.5 py-[2px] text-fg-muted hover:border-accent/40 hover:text-accent"
+      >
+        <MoreHorizontal className="h-3.5 w-3.5" />
+      </button>
+      {open && (
+        <>
+          {/* click-away catcher */}
+          <button
+            type="button"
+            aria-hidden
+            tabIndex={-1}
+            className="fixed inset-0 z-10 cursor-default"
+            onClick={() => setOpen(false)}
+          />
+          <div
+            role="menu"
+            onClick={() => setOpen(false)}
+            className="absolute right-0 z-20 mt-1 flex w-44 flex-col gap-0.5 rounded-[var(--radius)] border border-[hsl(var(--border))] bg-[hsl(var(--bg-elev-1))] p-1 shadow-lg"
+          >
+            <TrackButton jobId={jobId} />
+            <DraftResumeButton jobId={jobId} />
+            <DraftCoverButton jobId={jobId} />
+            <a
+              role="menuitem"
+              href={canonicalUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 rounded px-2 py-1 text-[12px] text-fg-muted hover:bg-[hsl(var(--bg-elev-2))] hover:text-fg"
+            >
+              <ArrowUpRight className="h-3.5 w-3.5" /> Open posting
+            </a>
+          </div>
+        </>
       )}
     </div>
   );
@@ -524,8 +570,11 @@ function DraftCoverButton({ jobId }: { jobId: string }) {
 function MatchCell({ match }: { match: JobListItem['match'] }) {
   if (match.score === null) {
     return (
-      <span className="font-mono text-[11.5px] text-fg-faint" title="Skill extraction pending">
-        -
+      <span
+        className="inline-flex items-center rounded border border-[hsl(var(--border))] px-1.5 py-[1px] text-[10.5px] text-fg-faint"
+        title="Not scored yet — click 'Score jobs' to extract skills, then this fills in"
+      >
+        Not scored
       </span>
     );
   }

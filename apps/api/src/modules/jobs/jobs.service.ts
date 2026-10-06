@@ -11,6 +11,7 @@ import {
   relevance,
   planIngest,
   computeMatchResult,
+  titleMatchesRoles,
   MissingCredentialError,
   type JobSourceAdapter,
   type NormalizedJob,
@@ -66,6 +67,7 @@ export interface RejectStats {
   mustHaveMissing: number;
   hasDealbreaker: number;
   companyBlacklisted: number;
+  roleMismatch: number;
   stale: number;
   /** How many rows were considered before filtering. Gives the UI honest pool scope. */
   scanned: number;
@@ -425,6 +427,7 @@ export class JobsService {
       mustHaveMissing: 0,
       hasDealbreaker: 0,
       companyBlacklisted: 0,
+      roleMismatch: 0,
       stale: 0,
       scanned: rows.length,
     };
@@ -441,7 +444,19 @@ export class JobsService {
         prefs,
         { maxAgeDays: FRESHNESS_DAYS, now: nowMs },
       );
-      if (result.relevant) return true;
+      if (result.relevant) {
+        // Drop titles unrelated to the candidate's target roles. "Similar" is
+        // fine; clearly different functions (finance, account exec, marketing)
+        // are not. No-op when the user hasn't set target roles.
+        if (
+          (prefs.targetRoles?.length ?? 0) > 0 &&
+          !titleMatchesRoles(r.title, prefs.targetRoles ?? [])
+        ) {
+          rejected.roleMismatch++;
+          return false;
+        }
+        return true;
+      }
       switch (result.reason) {
         case 'stale':
           rejected.stale++;
