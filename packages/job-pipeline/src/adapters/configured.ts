@@ -28,19 +28,26 @@ function str(value: string | undefined): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
+/** True when the record has at least one non-empty string value. */
+function hasAnyValue(rec: Record<string, string> | undefined): boolean {
+  return Object.values(rec ?? {}).some((x) => typeof x === 'string' && x.trim().length > 0);
+}
+
 /**
  * Build a configured adapter instance from stored credentials using the same
  * `create*Adapter(opts)` factories the registry uses. Returns null for an
- * unknown/keyless provider (the caller keeps its default instance). Empty
- * strings are never forwarded: an omitted option falls back to the factory's
- * own env/default behaviour.
+ * unknown/keyless provider OR when no credentials are stored, so the caller
+ * keeps its default (env-reading) instance — passing an empty array option
+ * would otherwise suppress the factory's env/default fallback. Empty strings
+ * are never forwarded.
  */
 export function createConfiguredAdapter(
   id: string,
   cfg: ProviderCredentials,
 ): JobSourceAdapter | null {
-  const v = cfg.values;
-  const s = cfg.secrets;
+  const v = cfg.values ?? {};
+  const s = cfg.secrets ?? {};
+  if (!hasAnyValue(v) && !hasAnyValue(s)) return null;
 
   switch (id) {
     case 'ashby':
