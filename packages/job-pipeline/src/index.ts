@@ -135,6 +135,8 @@ export {
   buildCandidateSearchQueries,
   containsBannedPlatformTerm,
   ATS_SITE_HINTS,
+  PLATFORM_SITE_HINTS,
+  SITE_HINTS,
   BANNED_PLATFORM_TERMS,
   type CandidateSearchProfile,
   type BuildCandidateSearchQueriesOptions,

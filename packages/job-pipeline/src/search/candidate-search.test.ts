@@ -25,12 +25,12 @@ const DEV = `https://jobs.lever.co/acme/123`;
 const ATS = `https://boards.greenhouse.io/globex/jobs/456`;
 
 describe('runCandidateSearch', () => {
-  it('maps hits to RawJobs, skips banned platforms, and dedupes canonical URLs', async () => {
+  it('maps hits to RawJobs, keeps now-permitted platforms, and dedupes canonical URLs', async () => {
     const { client } = fakeClient({
       'q1': [
         { url: DEV, title: 'Senior Backend Engineer', description: 'Build things with TypeScript.' },
         { url: ATS, title: 'Platform Engineer', description: 'Own the platform.' },
-        { url: 'https://www.linkedin.com/jobs/view/1', title: 'Banned', description: 'nope' },
+        { url: 'https://www.linkedin.com/jobs/view/1', title: 'LinkedIn role', description: 'kept' },
         // Duplicate canonical URL (tracking param variant resolves same path here).
         { url: DEV, title: 'Senior Backend Engineer', description: 'Build things with TypeScript.' },
       ],
@@ -41,9 +41,10 @@ describe('runCandidateSearch', () => {
 
     expect(out.queriesRun).toBe(2);
     expect(out.hitsScanned).toBe(5);
-    expect(out.bannedSkipped).toBe(1);
-    // DEV once + ATS once (q2 duplicate dropped).
-    expect(out.raw).toHaveLength(2);
+    expect(out.bannedSkipped).toBe(0);
+    // DEV + ATS + LinkedIn (q2 duplicate dropped).
+    expect(out.raw).toHaveLength(3);
+    expect(out.raw.some((r) => r.canonicalUrl.includes('linkedin.com'))).toBe(true);
     expect(out.duplicatesDropped).toBe(2);
     expect(out.calls.search).toBe(2);
     expect(out.calls.scrape).toBe(0);

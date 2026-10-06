@@ -148,7 +148,7 @@ describe('loadCandidateSearchPlans (F7 query builder from profile)', () => {
 });
 
 describe('runFirecrawlSearchCycle (F7 dedupe/feed)', () => {
-  it('filters banned platforms, dedupes, and persists normalized hits', async () => {
+  it('keeps now-permitted platforms, dedupes, and persists normalized hits', async () => {
     const repo = fakeRepo([GOAL]);
     const plans = await loadCandidateSearchPlans(repo);
     const firstQuery = plans[0]!.queries[0]!;
@@ -157,7 +157,7 @@ describe('runFirecrawlSearchCycle (F7 dedupe/feed)', () => {
       [firstQuery]: [
         hit(DEV, 'Senior Backend Engineer'),
         hit(ATS, 'Platform Engineer'),
-        hit(BANNED, 'Banned role'),
+        hit(BANNED, 'LinkedIn role'),
         hit(DEV, 'Senior Backend Engineer'),
       ],
     });
@@ -165,13 +165,13 @@ describe('runFirecrawlSearchCycle (F7 dedupe/feed)', () => {
     const summary = await runFirecrawlSearchCycle({ repo, client, logger, env: TEST_ENV });
 
     expect(search).toHaveBeenCalledTimes(3);
-    expect(summary.fetched).toBe(2);
-    expect(summary.rawInserted).toBe(2);
-    expect(summary.normalizedInserted).toBe(2);
-    expect(repo.rawRows).toHaveLength(2);
-    expect(repo.normalizedRows).toHaveLength(2);
-    for (const row of repo.rawRows) expect(String(row.canonicalUrl)).not.toContain('linkedin.com');
-    expect(summary.cost.creditsSpent).toBeGreaterThanOrEqual(2);
+    expect(summary.fetched).toBe(3);
+    expect(summary.rawInserted).toBe(3);
+    expect(summary.normalizedInserted).toBe(3);
+    expect(repo.rawRows).toHaveLength(3);
+    expect(repo.normalizedRows).toHaveLength(3);
+    expect(repo.rawRows.some((row) => String(row.canonicalUrl).includes('linkedin.com'))).toBe(true);
+    expect(summary.cost.creditsSpent).toBeGreaterThanOrEqual(3);
     expect(repo.auditRows.length).toBeGreaterThanOrEqual(1);
   });
 

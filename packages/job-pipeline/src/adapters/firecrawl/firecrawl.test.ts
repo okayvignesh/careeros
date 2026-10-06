@@ -56,18 +56,22 @@ describe('firecrawl adapter', () => {
     const adapter = client();
     expect(adapter.tier).toBe(3);
     const raws = await adapter.fetch();
-    expect(raws).toHaveLength(3);
+    expect(raws).toHaveLength(5);
     for (const r of raws) expect(() => RawJobSchema.parse(r)).not.toThrow();
     expect(raws.every((r) => r.sourceName === 'firecrawl')).toBe(true);
     expect(raws.every((r) => r.sourceId.startsWith('firecrawl:'))).toBe(true);
     expect(raws.every((r) => r.canonicalUrl.startsWith('https://'))).toBe(true);
   });
 
-  it('never ingests banned platforms (LinkedIn/Indeed/Naukri/Glassdoor)', async () => {
+  it('ingests and scrapes the now-permitted platforms (LinkedIn/Indeed/Naukri/Glassdoor)', async () => {
     server.use(http.post(SEARCH_URL, () => HttpResponse.json(FIXTURE.search)), scrapeHandlers());
     const raws = await client().fetch();
     const hosts = raws.map((r) => new URL(r.canonicalUrl).hostname);
-    expect(hosts.some((h) => h.includes('linkedin') || h.includes('indeed'))).toBe(false);
+    expect(hosts.some((h) => h.includes('linkedin'))).toBe(true);
+    expect(hosts.some((h) => h.includes('indeed'))).toBe(true);
+    const linkedin = raws.find((r) => new URL(r.canonicalUrl).hostname.includes('linkedin'));
+    // Scraped detail (not just the search snippet) proves the page was fetched.
+    expect(linkedin?.description).toContain('Scraped LinkedIn listing description');
   });
 
   it('derives company from the ATS token / site host and ogSiteName', async () => {
@@ -77,6 +81,8 @@ describe('firecrawl adapter', () => {
     expect(byTitle.get('Senior Backend Engineer')?.company).toBe('acme');
     expect(byTitle.get('Product Designer')?.company).toBe('Beta Corp');
     expect(byTitle.get('Staff Site Reliability Engineer')?.company).toBe('gamma.example');
+    expect(byTitle.get('Backend Engineer (LinkedIn)')?.company).toBe('linkedin.com');
+    expect(byTitle.get('Platform Engineer (Indeed)')?.company).toBe('indeed.com');
   });
 
   it('flags remote from listing text and marks DISCOVERED trust tier', async () => {
@@ -91,7 +97,7 @@ describe('firecrawl adapter', () => {
     // No scrape handler registered: onUnhandledRequest=error would fail if scraped.
     server.use(http.post(SEARCH_URL, () => HttpResponse.json(FIXTURE.search)));
     const raws = await client({ scrapeDetails: false }).fetch();
-    expect(raws).toHaveLength(3);
+    expect(raws).toHaveLength(5);
     expect(raws[0]?.description.length).toBeGreaterThan(0);
   });
 
@@ -107,7 +113,7 @@ describe('firecrawl adapter', () => {
       }),
     );
     const raws = await client().fetch();
-    expect(raws).toHaveLength(3);
+    expect(raws).toHaveLength(5);
     const ashby = raws.find((r) => r.canonicalUrl === failing);
     expect(ashby?.description).toContain('distributed platform'); // from search description
   });
@@ -143,12 +149,12 @@ describe('mapFirecrawl / helpers', () => {
     expect(mapFirecrawl({ url: 'https://acme.example/jobs/1' })).toBeNull();
   });
 
-  it('isBannedPlatformUrl covers subdomains and rejects unparseable URLs', () => {
-    expect(isBannedPlatformUrl('https://www.linkedin.com/jobs/view/1')).toBe(true);
-    expect(isBannedPlatformUrl('https://uk.indeed.com/viewjob')).toBe(true);
-    expect(isBannedPlatformUrl('https://www.glassdoor.co.uk/Job/x')).toBe(true);
+  it('isBannedPlatformUrl is a deprecated no-op kept for importers', () => {
+    expect(isBannedPlatformUrl('https://www.linkedin.com/jobs/view/1')).toBe(false);
+    expect(isBannedPlatformUrl('https://uk.indeed.com/viewjob')).toBe(false);
+    expect(isBannedPlatformUrl('https://www.glassdoor.co.uk/Job/x')).toBe(false);
     expect(isBannedPlatformUrl('https://jobs.ashbyhq.com/acme/x')).toBe(false);
-    expect(isBannedPlatformUrl('nope')).toBe(true);
+    expect(isBannedPlatformUrl('nope')).toBe(false);
   });
 
   it('companyFromUrl handles ATS tokens, Workday tenants, and generic career hosts', () => {

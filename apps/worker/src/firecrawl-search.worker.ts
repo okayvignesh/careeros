@@ -6,8 +6,8 @@
  *   1. triages the kill switch + API key (missing key = clean no-op);
  *   2. loads each candidate's career goals + job preferences + demonstrated
  *      skills, builds bounded queries (`buildCandidateSearchQueries`);
- *   3. runs `FirecrawlClient.search()` → banned-platform filter → canonical
- *      dedupe (`runCandidateSearch`), charging every call against a
+ *   3. runs `FirecrawlClient.search()` → canonical dedupe
+ *      (`runCandidateSearch`), charging every call against a
  *      `FirecrawlBudget`;
  *   4. optionally starts configured crawl targets and polls `getCrawlStatus`
  *      with a bounded poll budget (`runCrawlPhase`);
@@ -17,7 +17,8 @@
  *
  * Firecrawl hits stay `DISCOVERED` (adapter tier 3): only a canonical ATS board
  * confirmation promotes a listing later in the trust-order/verify stages.
- * Banned platforms never reach the pipeline. The API key is never logged.
+ * LinkedIn/Indeed/Naukri/Glassdoor are permitted via Firecrawl (owner decision
+ * 2026-10-06), so no host is filtered. The API key is never logged.
  */
 import type { PrismaClient } from '@prisma/client';
 import type { Logger } from 'pino';

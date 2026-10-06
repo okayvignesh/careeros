@@ -1,20 +1,18 @@
 /**
  * F7 candidate-search runner.
  *
- * Executes the query plan against a Firecrawl client, drops banned-platform
- * hits, scrapes details within a hard cap, and returns deduped `RawJob`s ready
- * for the shared job pipeline (`planIngest`). It owns no persistence and no
- * scheduling so both the API service and the worker can reuse it.
+ * Executes the query plan against a Firecrawl client, keeps every hit
+ * (LinkedIn/Indeed/Naukri/Glassdoor are permitted via Firecrawl per owner
+ * decision 2026-10-06), scrapes details within a hard cap, and returns deduped
+ * `RawJob`s ready for the shared job pipeline (`planIngest`). It owns no
+ * persistence and no scheduling so both the API service and the worker can
+ * reuse it.
  *
  * `shouldStop` is the budget/kill-switch seam: the runner checks it before
  * every Firecrawl call and unwinds immediately, so an exhausted budget or a
  * tripped kill switch issues no further requests.
  */
-import {
-  isBannedPlatformUrl,
-  mapFirecrawl,
-  type FirecrawlJobClient,
-} from '../adapters/firecrawl';
+import { mapFirecrawl, type FirecrawlJobClient } from '../adapters/firecrawl';
 import type { RawJob } from '../types';
 import type { FirecrawlScrapeData } from '@careeros/firecrawl';
 
@@ -85,10 +83,6 @@ export async function runCandidateSearch(
 
     for (const hit of res.data) {
       result.hitsScanned++;
-      if (isBannedPlatformUrl(hit.url)) {
-        result.bannedSkipped++;
-        continue;
-      }
 
       let detail: FirecrawlScrapeData | null = null;
       if (scrapeDetails && scrapes < maxScrapes && !shouldStop()) {

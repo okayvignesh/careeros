@@ -30,26 +30,14 @@ import { MissingCredentialError } from '../errors';
  * discovered). Promotion happens only downstream, once a listing resolves to
  * the employer's own ATS/career board (see trust-order/verify stages).
  *
- * Banned platforms (LinkedIn/Indeed/Naukri/Glassdoor) are filtered here even
- * though Firecrawl could reach them — AGENTS.md rule #4 forbids routing those
- * platforms through any third-party scraper.
+ * Vendor-neutral by design: no host is filtered. Owner decision 2026-10-06
+ * permits LinkedIn/Indeed/Naukri/Glassdoor to be discovered + scraped through
+ * Firecrawl; direct first-party scraping and non-Firecrawl third-party
+ * scrapers remain banned (AGENTS.md rule #4).
  */
 
 export const FIRECRAWL_TRUST_TIER = 'DISCOVERED' as const;
 export const FIRECRAWL_SOURCE_NAME = 'firecrawl';
-
-/** Hosts that must never be ingested from a third-party crawler (AGENTS.md #4). */
-const BANNED_HOST_SUFFIXES: readonly string[] = [
-  'linkedin.com',
-  'indeed.com',
-  'naukri.com',
-  'glassdoor.com',
-  'glassdoor.co.uk',
-  'glassdoor.ca',
-  'glassdoor.com.au',
-  'glassdoor.de',
-  'glassdoor.co.in',
-];
 
 /** Structural subset of FirecrawlClient we use — injectable for tests. */
 export interface FirecrawlJobClient {
@@ -105,7 +93,6 @@ export function createFirecrawlAdapter(opts: FirecrawlAdapterOpts = {}): JobSour
         const res = await client.search(request);
 
         for (const result of res.data) {
-          if (isBannedPlatformUrl(result.url)) continue;
           const canonical = canonicalUrlOf(result);
           if (!canonical || seen.has(canonical)) continue;
           seen.add(canonical);
@@ -165,15 +152,13 @@ function resolveClient(opts: FirecrawlAdapterOpts): FirecrawlJobClient {
   }
 }
 
-/** True for hosts in the banned-platform set (also true for unparseable URLs). */
-export function isBannedPlatformUrl(rawUrl: string): boolean {
-  let host: string;
-  try {
-    host = new URL(rawUrl).hostname.toLowerCase().replace(/^www\./, '');
-  } catch {
-    return true;
-  }
-  return BANNED_HOST_SUFFIXES.some((suffix) => host === suffix || host.endsWith(`.${suffix}`));
+/**
+ * @deprecated No-op since owner decision 2026-10-06 (LinkedIn/Indeed/Naukri/
+ * Glassdoor are permitted via Firecrawl). Always returns `false`; kept so
+ * existing importers keep compiling.
+ */
+export function isBannedPlatformUrl(_rawUrl: string): boolean {
+  return false;
 }
 
 /** Canonical URL from Firecrawl metadata, falling back to the result URL. */

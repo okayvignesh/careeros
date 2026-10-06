@@ -14,13 +14,13 @@
       },
       {
         "url": "https://www.linkedin.com/jobs/view/999",
-        "title": "Dream Job (must never be ingested)",
-        "description": "Banned platform."
+        "title": "Backend Engineer (LinkedIn)",
+        "description": "Permitted via Firecrawl (owner decision 2026-10-06)."
       },
       {
         "url": "https://www.indeed.com/viewjob?jk=abc",
-        "title": "Another banned listing",
-        "description": "Banned platform."
+        "title": "Platform Engineer (Indeed)",
+        "description": "Permitted via Firecrawl (owner decision 2026-10-06)."
       },
       {
         "url": "https://careers.gamma.example/roles/staff-sre",
@@ -58,6 +58,26 @@
         "metadata": {
           "title": "Staff Site Reliability Engineer",
           "sourceURL": "https://careers.gamma.example/roles/staff-sre"
+        }
+      }
+    },
+    "https://www.linkedin.com/jobs/view/999": {
+      "success": true,
+      "data": {
+        "markdown": "# Backend Engineer (LinkedIn)\n\nScraped LinkedIn listing description.",
+        "metadata": {
+          "title": "Backend Engineer (LinkedIn)",
+          "sourceURL": "https://www.linkedin.com/jobs/view/999"
+        }
+      }
+    },
+    "https://www.indeed.com/viewjob?jk=abc": {
+      "success": true,
+      "data": {
+        "markdown": "# Platform Engineer (Indeed)\n\nScraped Indeed listing description.",
+        "metadata": {
+          "title": "Platform Engineer (Indeed)",
+          "sourceURL": "https://www.indeed.com/viewjob?jk=abc"
         }
       }
     }

@@ -16,7 +16,7 @@ Career OS is a **self-hosted, provider-agnostic Personal AI Career Operating Sys
 1. The Postgres evidence graph is the source of truth — the AI is not. Models interpret evidence; they never decide what is true.
 2. Generated content may only rephrase verified facts from `resume_facts`/evidence; any claim without a fact ID is blocked by the fact-check gate.
 3. Every outbound action goes through the approval queue and an append-only audit log.
-4. No server-side scraping of LinkedIn/Indeed/Naukri/Glassdoor. Use partner APIs, the user's own desktop agent session, or parsed email alerts.
+4. No direct first-party (server) scraping of LinkedIn/Indeed/Naukri/Glassdoor, and no non-Firecrawl third-party scrapers for them. Owner decision 2026-10-06 permits accessing them via Firecrawl (discovery + scrape); partner APIs, the user's own desktop agent session, and parsed email alerts also remain valid.
 5. Every job flows through one pipeline (`packages/job-pipeline`); every reject logs a reason.
 6. Sensitivity labels (`public|personal|confidential|employer-confidential`) on data; employer-confidential never goes to an external LLM by default.
 7. Two skill values, never one: `historical_demonstrated_proficiency` and `current_readiness`.

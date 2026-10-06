@@ -169,9 +169,10 @@ export class JobsService {
   /**
    * F7 candidate-targeted search. Derives bounded Firecrawl queries from the
    * candidate's career goals, job preferences and demonstrated skills, fetches
-   * through the Firecrawl adapter (banned platforms filtered, `DISCOVERED`
-   * trust kept), then runs the identical ingest funnel as `sync`. A missing
-   * Firecrawl key degrades to a clean zero-stat no-op.
+   * through the Firecrawl adapter (`DISCOVERED` trust kept; LinkedIn/Indeed/
+   * Naukri/Glassdoor permitted via Firecrawl per owner decision 2026-10-06),
+   * then runs the identical ingest funnel as `sync`. A missing Firecrawl key
+   * degrades to a clean zero-stat no-op.
    */
   async syncCandidateSearch(
     userId: string,

@@ -1,9 +1,11 @@
 # Job sources — allowed sources, trust tiers, and crawling policy
 
-Authoritative owner decision: **U6** (Career OS may use Firecrawl and direct
-crawling of public company career sites and ATS boards). This page is the
-operational companion to `AGENTS.md` rule #4. If the two disagree, `AGENTS.md`
-wins and this page is wrong.
+Authoritative owner decisions: **U6** (Career OS may use Firecrawl and direct
+crawling of public company career sites and ATS boards) and **2026-10-06**
+(LinkedIn / Indeed / Naukri / Glassdoor are permitted via Firecrawl for
+discovery **and** scrape). This page is the operational companion to
+`AGENTS.md` rule #4. If the two disagree, `AGENTS.md` wins and this page is
+wrong.
 
 ## What is allowed
 
@@ -11,17 +13,30 @@ wins and this page is wrong.
 |---|---|---|---|
 | Authorized partner APIs | JSearch, Serpapi, Adzuna, Remotive, Arbeitnow | Direct HTTP via `packages/job-pipeline` adapters | 2 |
 | Verified ATS APIs | Ashby, Greenhouse (extendable: Lever, Workday, SmartRecruiters, Workable, iCIMS, SuccessFactors) | Public board JSON/HTML via a typed adapter | 1 |
-| Firecrawl | `api.firecrawl.dev/v1` `search` / `scrape` / `crawl` | `@careeros/firecrawl` client, SSRF-guarded egress | 2 (3 until verified against the employer's own board) |
+| Firecrawl — career sites / ATS boards | `api.firecrawl.dev/v1` `search` / `scrape` / `crawl` | `@careeros/firecrawl` client, SSRF-guarded egress | 2 (3 until verified against the employer's own board) |
+| Firecrawl — major job platforms | LinkedIn, Indeed, Naukri, Glassdoor | `@careeros/firecrawl` `search` + `/v1/scrape` (same client / egress pin) | 3 — stays `DISCOVERED` until verified on the employer's own board |
 | Direct crawl of public career sites / ATS boards | Company `/careers` pages, the ATS hosts above | `@careeros/firecrawl` scrape or a dedicated adapter | 2–3 |
 | Desktop agent (user's own session) | LinkedIn, Indeed, Naukri, Glassdoor | P3.5 Electron + Playwright, user's browser | 3 |
 | Parsed email alerts | Job-alert emails | P5 Gmail ingest | 3 |
 
+The four major platforms are reached **only** through the Firecrawl path
+(`@careeros/firecrawl`), which keeps our egress pinned to `api.firecrawl.dev`:
+the discovered URL is a parameter to a Firecrawl call, never a request our
+process makes. Firecrawl hits stay `DISCOVERED`; a listing is promoted to
+`VERIFIED` only after it resolves to the employer's own ATS/career board.
+
 ## What remains banned
 
-**Never scrape LinkedIn / Indeed / Naukri / Glassdoor from the server**, and
-never route those platforms through Firecrawl, Apify, or any other third-party
-scraper. Outsourcing a ToS violation does not launder it. Use partner APIs, the
-desktop agent (user's authenticated session), or parsed email alerts only.
+- **Direct first-party scraping** of LinkedIn / Indeed / Naukri / Glassdoor by
+  our server — no bespoke HTTP adapters pointed at those hosts.
+- **Non-Firecrawl third-party scrapers** (Apify or similar) aimed at those
+  platforms. Outsourcing a ToS violation to anything but the approved Firecrawl
+  path does not launder it.
+
+Partner APIs, the desktop agent (user's authenticated session), and parsed
+email alerts all remain valid alternatives. **The operator remains responsible
+for compliance** with each site's terms of service when enabling the Firecrawl
+path.
 
 ## robots.txt / ToS policy
 
