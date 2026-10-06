@@ -105,9 +105,13 @@ export function JobsList() {
     apiGet<{ providers: ProviderRow[] }>('/me/search-providers')
       .then((r) => {
         setProviders(r.providers);
-        setProviderId((cur) =>
-          r.providers.some((p) => p.id === cur) ? cur : (r.providers[0]?.id ?? 'remotive'),
-        );
+        setProviderId((cur) => {
+          const eligible = r.providers.filter(
+            (p) => p.id !== 'firecrawl' && p.status === 'active',
+          );
+          if (eligible.some((p) => p.id === cur)) return cur;
+          return eligible[0]?.id ?? 'remotive';
+        });
       })
       .catch(() => setProviders([]));
   }, []);
@@ -169,6 +173,9 @@ export function JobsList() {
 
   const activeSources = new Set(data.jobs.map((j) => j.primarySource));
   const visibleAttributions = adapters.filter((a) => activeSources.has(a.id));
+  const configuredSources = providers.filter(
+    (p) => p.id !== 'firecrawl' && p.status === 'active',
+  );
 
   return (
     <div className="flex flex-col gap-6">
@@ -190,17 +197,17 @@ export function JobsList() {
             onChange={(e) => setProviderId(e.target.value)}
             className="rounded-[var(--radius)] border border-[hsl(var(--border))] bg-[hsl(var(--bg-elev-1))] px-2 py-1.5 text-[12px] text-fg focus:border-accent focus:outline-none"
           >
-            {providers.length === 0 && <option value="remotive">Remotive</option>}
-            {providers
-              .filter((p) => p.id !== 'firecrawl')
-              .map((p) => (
+            {configuredSources.length === 0 ? (
+              <option value="">No sources configured</option>
+            ) : (
+              configuredSources.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
-                  {p.status === 'standby' ? ' (standby — not configured)' : ''}
                 </option>
-              ))}
+              ))
+            )}
           </select>
-          <Button size="sm" variant="ghost" onClick={sync} disabled={syncing}>
+          <Button size="sm" variant="ghost" onClick={sync} disabled={syncing || !providerId}>
             {syncing ? (
               <>
                 <ThinkingOrb state="working" size={20} /> Syncing
