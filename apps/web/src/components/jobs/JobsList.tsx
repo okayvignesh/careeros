@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ArrowUpRight, FileText, Mail, RefreshCw, Sliders, Sparkles, Target, X } from 'lucide-react';
+import { ArrowUpRight, FileText, Mail, RefreshCw, Search, Sliders, Sparkles, Target, X } from 'lucide-react';
 import { ThinkingOrb } from 'thinking-orbs';
 import { Button } from '@careeros/ui';
 import { apiGet, apiPost } from '@/lib/api-client';
@@ -66,14 +66,25 @@ interface AdapterInfo {
   attribution: string;
 }
 
+interface ProviderRow {
+  id: string;
+  name: string;
+  status: 'active' | 'standby';
+  authNote: string;
+}
+
 export function JobsList() {
   const router = useRouter();
   const search = useSearchParams();
   const skillFilter = search.get('skill') ?? '';
   const [adapters, setAdapters] = useState<AdapterInfo[]>([]);
+  const [providers, setProviders] = useState<ProviderRow[]>([]);
+  const [providerId, setProviderId] = useState('remotive');
   const [syncing, setSyncing] = useState(false);
+  const [finding, setFinding] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const [lastSync, setLastSync] = useState<SyncStats | null>(null);
+  const [lastFind, setLastFind] = useState<SyncStats | null>(null);
   const [lastExtract, setLastExtract] = useState<SkillExtractionStats | null>(null);
 
   const load = useCallback(() => {
@@ -88,6 +99,17 @@ export function JobsList() {
     apiGet<AdapterInfo[]>('/admin/jobs/adapters')
       .then(setAdapters)
       .catch(() => setAdapters([]));
+  }, []);
+
+  useEffect(() => {
+    apiGet<{ providers: ProviderRow[] }>('/me/search-providers')
+      .then((r) => {
+        setProviders(r.providers);
+        setProviderId((cur) =>
+          r.providers.some((p) => p.id === cur) ? cur : (r.providers[0]?.id ?? 'remotive'),
+        );
+      })
+      .catch(() => setProviders([]));
   }, []);
 
   async function extractSkills() {
@@ -112,13 +134,27 @@ export function JobsList() {
     setSyncing(true);
     setError(null);
     try {
-      const stats = await apiPost<SyncStats>('/admin/jobs/sync/remotive');
+      const stats = await apiPost<SyncStats>(`/admin/jobs/sync/${providerId}`);
       setLastSync(stats);
       await refetch();
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setSyncing(false);
+    }
+  }
+
+  async function findJobs() {
+    setFinding(true);
+    setError(null);
+    try {
+      const stats = await apiPost<SyncStats>('/admin/jobs/candidate-search', {});
+      setLastFind(stats);
+      await refetch();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setFinding(false);
     }
   }
 
@@ -143,14 +179,47 @@ export function JobsList() {
         <span className="text-[11.5px] text-fg-faint">
           Sorted by match score. Skills come from evidence on your dashboard.
         </span>
-        <Button size="sm" variant="ghost" onClick={sync} disabled={syncing}>
-          {syncing ? (
+        <div className="flex items-center gap-2">
+          <label htmlFor="jobs-source" className="sr-only">
+            Job source
+          </label>
+          <select
+            id="jobs-source"
+            data-testid="jobs-source-select"
+            value={providerId}
+            onChange={(e) => setProviderId(e.target.value)}
+            className="rounded-[var(--radius)] border border-[hsl(var(--border))] bg-[hsl(var(--bg-elev-1))] px-2 py-1.5 text-[12px] text-fg focus:border-accent focus:outline-none"
+          >
+            {providers.length === 0 && <option value="remotive">Remotive</option>}
+            {providers
+              .filter((p) => p.id !== 'firecrawl')
+              .map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                  {p.status === 'standby' ? ' (standby — not configured)' : ''}
+                </option>
+              ))}
+          </select>
+          <Button size="sm" variant="ghost" onClick={sync} disabled={syncing}>
+            {syncing ? (
+              <>
+                <ThinkingOrb state="working" size={20} /> Syncing
+              </>
+            ) : (
+              <>
+                <RefreshCw className="h-3.5 w-3.5" /> Sync
+              </>
+            )}
+          </Button>
+        </div>
+        <Button size="sm" variant="ghost" onClick={findJobs} disabled={finding}>
+          {finding ? (
             <>
-              <ThinkingOrb state="working" size={20} /> Syncing
+              <ThinkingOrb state="working" size={20} /> Searching
             </>
           ) : (
             <>
-              <RefreshCw className="h-3.5 w-3.5" /> Sync from Remotive
+              <Search className="h-3.5 w-3.5" /> Find jobs (Firecrawl)
             </>
           )}
         </Button>
@@ -167,8 +236,13 @@ export function JobsList() {
         </Button>
         {lastSync && (
           <span className="text-[12px] text-fg-faint">
-            Last sync: fetched {lastSync.fetched}, {lastSync.normalizedInserted} new,{' '}
-            {lastSync.normalizedUpdated} updated.
+            Last sync ({lastSync.adapter}): fetched {lastSync.fetched},{' '}
+            {lastSync.normalizedInserted} new, {lastSync.normalizedUpdated} updated.
+          </span>
+        )}
+        {lastFind && (
+          <span className="text-[12px] text-fg-faint">
+            Firecrawl search: {lastFind.rawInserted} discovered, {lastFind.normalizedInserted} new.
           </span>
         )}
         {lastExtract && (
