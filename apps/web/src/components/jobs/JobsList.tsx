@@ -81,6 +81,7 @@ export function JobsList() {
   const [adapters, setAdapters] = useState<AdapterInfo[]>([]);
   const [providers, setProviders] = useState<ProviderRow[]>([]);
   const [providerId, setProviderId] = useState('remotive');
+  const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [finding, setFinding] = useState(false);
   const [extracting, setExtracting] = useState(false);
@@ -406,7 +407,13 @@ export function JobsList() {
                       >
                         <Eye className="h-3.5 w-3.5" />
                       </Link>
-                      <RowActions jobId={j.id} canonicalUrl={j.canonicalUrl} />
+                      <RowActions
+                        jobId={j.id}
+                        canonicalUrl={j.canonicalUrl}
+                        open={openMenu === j.id}
+                        onOpen={() => setOpenMenu(j.id)}
+                        onClose={() => setOpenMenu(null)}
+                      />
                     </div>
                   </td>
                 </tr>
@@ -419,32 +426,49 @@ export function JobsList() {
   );
 }
 
-function RowActions({ jobId, canonicalUrl }: { jobId: string; canonicalUrl: string }) {
-  const [open, setOpen] = useState(false);
+function RowActions({
+  jobId,
+  canonicalUrl,
+  open,
+  onOpen,
+  onClose,
+}: {
+  jobId: string;
+  canonicalUrl: string;
+  open: boolean;
+  onOpen: () => void;
+  onClose: () => void;
+}) {
   const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
 
   function toggle() {
     if (open) {
-      setOpen(false);
+      onClose();
       return;
     }
     const r = btnRef.current?.getBoundingClientRect();
-    if (r) setPos({ top: r.bottom + 6, right: Math.max(8, window.innerWidth - r.right) });
-    setOpen(true);
+    if (r) {
+      const MENU_H = 184; // 4 items + padding; used only to decide open-up vs down
+      const openUp = r.bottom + MENU_H > window.innerHeight;
+      setPos({
+        top: openUp ? Math.max(8, r.top - MENU_H - 6) : r.bottom + 6,
+        right: Math.max(8, window.innerWidth - r.right),
+      });
+    }
+    onOpen();
   }
 
   useEffect(() => {
     if (!open) return;
     // Any scroll/resize invalidates the anchored position — close rather than float.
-    const close = () => setOpen(false);
-    window.addEventListener('scroll', close, true);
-    window.addEventListener('resize', close);
+    window.addEventListener('scroll', onClose, true);
+    window.addEventListener('resize', onClose);
     return () => {
-      window.removeEventListener('scroll', close, true);
-      window.removeEventListener('resize', close);
+      window.removeEventListener('scroll', onClose, true);
+      window.removeEventListener('resize', onClose);
     };
-  }, [open]);
+  }, [open, onClose]);
 
   return (
     <>
@@ -456,7 +480,12 @@ function RowActions({ jobId, canonicalUrl }: { jobId: string; canonicalUrl: stri
         aria-label="More actions"
         data-testid="job-actions-menu"
         onClick={toggle}
-        className="inline-flex items-center rounded border border-[hsl(var(--border))] px-1.5 py-[2px] text-fg-muted hover:border-accent/40 hover:text-accent"
+        className={cn(
+          'inline-flex items-center rounded border px-1.5 py-[2px] transition-colors',
+          open
+            ? 'border-accent/40 text-accent'
+            : 'border-[hsl(var(--border))] text-fg-muted hover:border-accent/40 hover:text-accent',
+        )}
       >
         <MoreHorizontal className="h-3.5 w-3.5" />
       </button>
@@ -468,12 +497,12 @@ function RowActions({ jobId, canonicalUrl }: { jobId: string; canonicalUrl: stri
             aria-hidden
             tabIndex={-1}
             className="fixed inset-0 z-40 cursor-default"
-            onClick={() => setOpen(false)}
+            onClick={onClose}
           />
           {/* Fixed positioning so the menu escapes the table's overflow clipping. */}
           <div
             role="menu"
-            onClick={() => setOpen(false)}
+            onClick={onClose}
             style={{ position: 'fixed', top: pos.top, right: pos.right }}
             className="z-50 flex w-48 flex-col gap-1 rounded-[var(--radius)] border border-[hsl(var(--border))] bg-[hsl(var(--bg-elev-1))] p-1.5 shadow-lg"
           >
