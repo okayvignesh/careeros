@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import type { JobPreferencesInput } from '@careeros/shared';
+import { Prisma } from '@prisma/client';
+import type { JobPreferencesInput, JobPreferenceCity } from '@careeros/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 
 export interface JobPreferencesDto extends JobPreferencesInput {
@@ -15,8 +16,22 @@ const EMPTY: JobPreferencesDto = {
   mustHaveSkills: [],
   dealbreakerSkills: [],
   companyBlacklist: [],
+  workplaceTypes: [],
+  remoteScopes: [],
+  countries: [],
+  cities: [],
+  citizenships: [],
+  workAuthorizations: [],
+  sponsorshipCountries: [],
+  relocationWilling: false,
+  relocationCountries: [],
+  language: 'en',
   updatedAt: null,
 };
+
+function upperAll(values: string[]): string[] {
+  return values.map((v) => v.toUpperCase());
+}
 
 @Injectable()
 export class JobPreferencesService {
@@ -36,6 +51,20 @@ export class JobPreferencesService {
       mustHaveSkills: row.mustHaveSkills,
       dealbreakerSkills: row.dealbreakerSkills,
       companyBlacklist: row.companyBlacklist,
+      workplaceTypes: row.workplaceTypes as JobPreferencesInput['workplaceTypes'],
+      remoteScopes: row.remoteScopes as JobPreferencesInput['remoteScopes'],
+      countries: row.countries,
+      cities: (row.cities as unknown as JobPreferenceCity[] | null) ?? [],
+      ...(row.homeCountry ? { homeCountry: row.homeCountry } : {}),
+      citizenships: row.citizenships,
+      workAuthorizations: row.workAuthorizations,
+      sponsorshipCountries: row.sponsorshipCountries,
+      relocationWilling: row.relocationWilling,
+      relocationCountries: row.relocationCountries,
+      ...(row.timezoneOverlapHours != null
+        ? { timezoneOverlapHours: row.timezoneOverlapHours }
+        : {}),
+      language: row.language ?? 'en',
       updatedAt: row.updatedAt.toISOString(),
     };
   }
@@ -54,6 +83,22 @@ export class JobPreferencesService {
       mustHaveSkills: input.mustHaveSkills,
       dealbreakerSkills: input.dealbreakerSkills,
       companyBlacklist: input.companyBlacklist,
+      workplaceTypes: input.workplaceTypes,
+      remoteScopes: input.remoteScopes,
+      // ISO alpha-2 is stored uppercase regardless of client casing.
+      countries: upperAll(input.countries),
+      cities: input.cities.map((c) => ({
+        country: c.country.toUpperCase(),
+        city: c.city,
+      })) as unknown as Prisma.InputJsonValue,
+      homeCountry: input.homeCountry ? input.homeCountry.toUpperCase() : null,
+      citizenships: upperAll(input.citizenships),
+      workAuthorizations: upperAll(input.workAuthorizations),
+      sponsorshipCountries: upperAll(input.sponsorshipCountries),
+      relocationWilling: input.relocationWilling,
+      relocationCountries: upperAll(input.relocationCountries),
+      timezoneOverlapHours: input.timezoneOverlapHours ?? null,
+      language: input.language,
     };
     await this.prisma.userJobPreferences.upsert({
       where: { userId },

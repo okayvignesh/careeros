@@ -11,6 +11,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { JobPreferencesService, type JobPreferencesDto } from '../job-prefs/job-prefs.service';
+import { jobMatchesMarketScope, marketScope } from '../market-demand/market-scope';
 import { computeStatsFn, type BriefStats } from './market-brief.service';
 
 const DAY_MS = 86_400_000;
@@ -28,6 +29,9 @@ export const DEFAULT_FILTER: SnapshotFilter = {
   mustHaveSkills: [],
   dealbreakerSkills: [],
   companyBlacklist: [],
+  countries: [],
+  workplaceTypes: [],
+  remoteScopes: [],
 };
 
 export interface SnapshotFilter {
@@ -35,6 +39,10 @@ export interface SnapshotFilter {
   mustHaveSkills: string[];
   dealbreakerSkills: string[];
   companyBlacklist: string[];
+  /** P2 geo scope. Empty arrays = no constraint on that axis. */
+  countries: string[];
+  workplaceTypes: string[];
+  remoteScopes: string[];
 }
 
 export interface MarketSnapshotRow {
@@ -84,17 +92,39 @@ export function hashFilter(f: SnapshotFilter): string {
     mustHaveSkills: [...f.mustHaveSkills].sort(),
     dealbreakerSkills: [...f.dealbreakerSkills].sort(),
     companyBlacklist: [...f.companyBlacklist].map((s) => s.toLowerCase().trim()).sort(),
+    // Geo scope participates in the hash so changing target market rotates the
+    // snapshot instead of silently reusing stale stats. `null` geo on a job is
+    // handled by `jobMatchesMarketScope` (excluded + reason), not here — the
+    // filter itself carries explicit arrays so `[]` (unconstrained) and a set
+    // of countries never collide.
+    countries: [...f.countries].map((c) => c.toUpperCase()).sort(),
+    workplaceTypes: [...f.workplaceTypes].sort(),
+    remoteScopes: [...f.remoteScopes].sort(),
   };
   return createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
 }
 
-/** Project a JobPreferencesDto onto the SnapshotFilter subset. */
-export function prefsToFilter(prefs: JobPreferencesDto): SnapshotFilter {
+/** Project the relevant JobPreferencesDto fields onto the SnapshotFilter subset. */
+export function prefsToFilter(
+  prefs: Pick<
+    JobPreferencesDto,
+    | 'remoteOnly'
+    | 'mustHaveSkills'
+    | 'dealbreakerSkills'
+    | 'companyBlacklist'
+    | 'countries'
+    | 'workplaceTypes'
+    | 'remoteScopes'
+  >,
+): SnapshotFilter {
   return {
     remoteOnly: prefs.remoteOnly,
     mustHaveSkills: prefs.mustHaveSkills,
     dealbreakerSkills: prefs.dealbreakerSkills,
     companyBlacklist: prefs.companyBlacklist,
+    countries: [...prefs.countries].map((c) => c.toUpperCase()),
+    workplaceTypes: [...prefs.workplaceTypes],
+    remoteScopes: [...prefs.remoteScopes],
   };
 }
 
@@ -138,7 +168,11 @@ export class SnapshotService {
     const blacklist = new Set(filter.companyBlacklist.map((c) => c.toLowerCase().trim()));
     const mustHave = new Set(filter.mustHaveSkills);
     const dealbreakers = new Set(filter.dealbreakerSkills);
+    const scope = marketScope(filter.countries, filter.workplaceTypes, filter.remoteScopes);
     const pool = rows.filter((r) => {
+      // Geo scope: unknown (null) geo on a constrained axis is excluded, with
+      // the reason available from `jobMatchesMarketScope`, never counted.
+      if (!jobMatchesMarketScope(scope, r).inScope) return false;
       if (blacklist.has(r.company.toLowerCase().trim())) return false;
       const jobSkills = new Set(r.skillIds);
       for (const d of dealbreakers) if (jobSkills.has(d)) return false;

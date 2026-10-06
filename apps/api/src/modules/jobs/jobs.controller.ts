@@ -53,6 +53,24 @@ export class JobsController {
     });
   }
 
+  /**
+   * P1 "Recommended for you": the two-track eligibility gate (verified AND
+   * authorized-or-likely-sponsor) plus a geo-fit threshold. Eligibility is
+   * necessary but not sufficient — approval still gates every apply.
+   */
+  @Get('jobs/recommended')
+  async recommended(
+    @Query('limit') limit: string | undefined,
+    @Req() req: Request,
+  ) {
+    const userId = this.session.requireUserId(req);
+    const parsedLimit = Number(limit ?? DEFAULT_LIMIT);
+    if (!Number.isFinite(parsedLimit) || parsedLimit <= 0 || parsedLimit > MAX_LIMIT) {
+      throw new BadRequestException(`limit must be between 1 and ${MAX_LIMIT}`);
+    }
+    return { jobs: await this.jobs.recommended({ userId, limit: parsedLimit }) };
+  }
+
   @Get('admin/jobs/adapters')
   @RequireAdmin()
   listAdapters(@Req() req: Request) {
@@ -64,8 +82,8 @@ export class JobsController {
   @RequireAdmin()
   @HttpCode(200)
   async sync(@Param('adapter') adapterId: string, @Req() req: Request) {
-    this.session.requireUserId(req);
-    return this.jobs.sync(adapterId);
+    const userId = this.session.requireUserId(req);
+    return this.jobs.syncForUser(adapterId, userId);
   }
 
   @Post('admin/jobs/extract-skills')

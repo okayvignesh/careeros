@@ -290,6 +290,16 @@ describe('MatcherService.scoreJob — orchestration', () => {
       evidence: {
         findMany: vi.fn<(args: Arg) => Promise<unknown[]>>(async () => overrides.evidence ?? []),
       },
+      userJobPreferences: {
+        findUnique: vi.fn<(args: Arg) => Promise<unknown>>(async () => ({
+          countries: [],
+          workplaceTypes: [],
+          remoteScopes: [],
+          currency: 'USD',
+          compMin: null,
+          compMax: null,
+        })),
+      },
     };
   }
 

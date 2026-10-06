@@ -1,7 +1,7 @@
 import { retry, RATE_LIMITS } from '@careeros/shared';
 import { safeFetch, type AssertPublicUrlOptions } from '@careeros/shared/net';
 import { z } from 'zod';
-import type { JobSourceAdapter, RawJob } from '../../types';
+import { normalizeWorkplaceType, type JobSourceAdapter, type RawJob } from '../../types';
 import { MalformedResponseError } from '../errors';
 
 /**
@@ -169,6 +169,7 @@ export function mapLever(p: LeverPosting, site: string, companyName?: string): R
     company: (companyName ?? site).slice(0, 200),
     location: location ? location.slice(0, 200) : null,
     remote,
+    workplaceType: normalizeWorkplaceType(p.workplaceType) ?? null,
     description: description.slice(0, 50_000),
     sourcePostedAt: created && !Number.isNaN(created.getTime()) ? created : null,
     fetchedAt: new Date(),

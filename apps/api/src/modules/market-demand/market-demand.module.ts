@@ -8,5 +8,6 @@ import { MarketDemandService } from './market-demand.service';
   imports: [AuthModule, JobPreferencesModule],
   controllers: [MarketDemandController],
   providers: [MarketDemandService],
+  exports: [MarketDemandService],
 })
 export class MarketDemandModule {}

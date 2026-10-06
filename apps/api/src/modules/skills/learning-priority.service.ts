@@ -1,75 +1,75 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { JobPreferencesService } from '../job-prefs/job-prefs.service';
+import { MarketDemandService } from '../market-demand/market-demand.service';
 import {
   computeLearningPriority,
+  readinessFactor,
+  TARGET_ROLE_PROF,
   type LearningPriorityRow,
 } from './learning-priority';
-import { resolveRoleSkills } from './role-skill-map';
+import { matchRoleFamily, resolveRoleSkills, skillsForFamily } from './role-skill-map';
 
 /**
- * C-P1.2b: orchestrator around the pure `computeLearningPriority` formula.
- * Pulls three signals from Postgres + one from the prefs service, hands
- * them to the pure function, returns the sorted rows.
+ * C-P1.2b (P2 scoped): orchestrator around the pure `computeLearningPriority`
+ * formula. Pulls signals from Postgres + the prefs service, hands them to the
+ * pure function, returns the sorted rows.
+ *
+ * P2 §8 changes:
+ *   - market demand now comes from `MarketDemandService.demandBySkill`, so the
+ *     pool is preference- AND geo-filtered exactly like the demand table. The
+ *     old direct `normalizedJob` query (no filters at all) is gone.
+ *   - target bars come from `aim_role_thresholds`; absent rows fall back to the
+ *     `TARGET_ROLE_PROF` / `TARGET_DEFAULT_PROF` constants.
+ *   - `current_readiness` (recency-adjusted) drives the gap; the never-decaying
+ *     historical demonstrated proficiency is carried separately (AGENTS §11).
  *
  * Freshness window on the job pool matches B-10 verify stage (45 days).
- * No caching -- three Prisma reads on the "give me my learning list" page
- * are cheap enough at MVP scale (< 200 skills, < 5000 jobs). Add a Redis
- * key `learning-priority:${userId}` with a 60s TTL if the endpoint shows
- * up on the hot path.
  */
 const DEMAND_WINDOW_DAYS = 45;
-const DAY_MS = 86_400_000;
 
 @Injectable()
 export class LearningPriorityService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly prefs: JobPreferencesService,
+    private readonly demand: MarketDemandService,
   ) {}
 
   async rankFor(userId: string): Promise<LearningPriorityRow[]> {
-    const cutoff = new Date(Date.now() - DEMAND_WINDOW_DAYS * DAY_MS);
+    const [states, marketDemandBySkill, evidenceRows, prefsDto, thresholdRows] =
+      await Promise.all([
+        this.prisma.candidateSkillState.findMany({
+          where: { userId },
+          select: { skillId: true, proficiency: true, recencyDays: true },
+        }),
+        // Scoped by the same prefs/geo rules as the demand table (P2 §8).
+        this.demand.demandBySkill(userId, DEMAND_WINDOW_DAYS),
+        // Group-by (userId, skillId) MAX(observedAt). No Prisma helper for
+        // MAX-per-group without raw SQL; scan-then-max in memory is fine for
+        // the < few-thousand rows a single user will accumulate.
+        this.prisma.evidence.findMany({
+          where: { userId },
+          select: { skillId: true, observedAt: true },
+        }),
+        this.prefs.get(userId),
+        // Per-user role bars. Empty is the common case → constant fallback.
+        this.prisma.aimRoleThreshold.findMany({
+          where: { userId },
+          select: { roleKey: true, threshold: true },
+        }),
+      ]);
 
-    const [states, jobs, evidenceRows, prefsDto] = await Promise.all([
-      this.prisma.candidateSkillState.findMany({
-        where: { userId },
-        select: { skillId: true, proficiency: true },
-      }),
-      // Freshness gate matches B-10 verify stage. Only skillIds are needed
-      // for the demand histogram, so the select is minimal.
-      this.prisma.normalizedJob.findMany({
-        where: {
-          OR: [
-            { sourcePostedAt: { gte: cutoff } },
-            { sourcePostedAt: null, firstSeenAt: { gte: cutoff } },
-          ],
-        },
-        select: { skillIds: true },
-      }),
-      // Group-by (userId, skillId) MAX(observedAt). No Prisma helper for
-      // MAX-per-group without raw SQL; scan-then-max in memory is fine
-      // for the < few-thousand rows a single user will accumulate. Upgrade
-      // to `SELECT skill_id, max(observed_at) ... GROUP BY skill_id` if a
-      // user's evidence table crosses ~50k rows.
-      this.prisma.evidence.findMany({
-        where: { userId },
-        select: { skillId: true, observedAt: true },
-      }),
-      this.prefs.get(userId),
-    ]);
-
-    // Proficiency stored as 0..100 Decimal; the pure formula speaks 0..1.
-    const userProficiencyBySkill = new Map<string, number>();
+    // Proficiency is stored as 0..100. Historical demonstrated proficiency is
+    // the raw value; current readiness decays with recency (AGENTS §11).
+    const currentReadinessBySkill = new Map<string, number>();
+    const historicalProficiencyBySkill = new Map<string, number>();
     for (const s of states) {
-      userProficiencyBySkill.set(s.skillId, Number(s.proficiency) / 100);
-    }
-
-    const marketDemandBySkill = new Map<string, number>();
-    for (const j of jobs) {
-      for (const id of j.skillIds) {
-        marketDemandBySkill.set(id, (marketDemandBySkill.get(id) ?? 0) + 1);
-      }
+      const demonstrated = clamp01(Number(s.proficiency) / 100);
+      historicalProficiencyBySkill.set(s.skillId, demonstrated);
+      // `recencyDays` is undefined in some legacy fakes/rows; treat as fresh.
+      const recencyDays = typeof s.recencyDays === 'number' ? s.recencyDays : 0;
+      currentReadinessBySkill.set(s.skillId, clamp01(demonstrated * readinessFactor(recencyDays)));
     }
 
     const evidenceRecencyBySkill = new Map<string, Date>();
@@ -81,11 +81,17 @@ export class LearningPriorityService {
     }
 
     const targetRoleSkills = resolveRoleSkills(prefsDto.targetRoles ?? []);
+    const roleThresholdBySkill = this.resolveRoleThresholds(
+      prefsDto.targetRoles ?? [],
+      thresholdRows,
+    );
 
     return computeLearningPriority({
-      userProficiencyBySkill,
+      userProficiencyBySkill: currentReadinessBySkill,
+      historicalProficiencyBySkill,
       marketDemandBySkill,
       targetRoleSkills,
+      roleThresholdBySkill,
       evidenceRecencyBySkill,
     });
   }
@@ -100,4 +106,36 @@ export class LearningPriorityService {
     }
     return hit;
   }
+
+  /**
+   * Map persisted `aim_role_thresholds` rows onto the per-skill bar the pure
+   * formula consumes. Unknown roles are ignored; when several target roles map
+   * to one skill the most demanding bar wins. Any target role without a row
+   * falls back to `TARGET_ROLE_PROF`, which preserves the pre-P2 behavior.
+   */
+  private resolveRoleThresholds(
+    targetRoles: readonly string[],
+    rows: Array<{ roleKey: string; threshold: unknown }>,
+  ): Map<string, number> {
+    const byRole = new Map<string, number>();
+    for (const row of rows) {
+      byRole.set(row.roleKey, clamp01(Number(row.threshold)));
+    }
+    const bySkill = new Map<string, number>();
+    for (const role of targetRoles) {
+      const family = matchRoleFamily(role);
+      if (!family) continue;
+      const threshold = byRole.get(family) ?? TARGET_ROLE_PROF;
+      for (const skillId of skillsForFamily(family)) {
+        const prev = bySkill.get(skillId);
+        if (prev === undefined || threshold > prev) bySkill.set(skillId, threshold);
+      }
+    }
+    return bySkill;
+  }
+}
+
+function clamp01(n: number): number {
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(1, n));
 }

@@ -170,8 +170,20 @@ export const RubricGradeSchema = z.object({
 });
 export type RubricGradeResponse = z.infer<typeof RubricGradeSchema>;
 
-// Per-user job-search preferences. Every field is optional — empty means
-// "no filter on this axis". Skill ID arrays reference the ESCO-lite catalogue.
+/** Structured city target: country (ISO alpha-2) + city name. */
+export const JobPreferenceCitySchema = z.object({
+  country: z.string().regex(/^[A-Za-z]{2}$/),
+  city: z.string().min(1).max(120),
+});
+export type JobPreferenceCity = z.infer<typeof JobPreferenceCitySchema>;
+
+/** ISO-3166 alpha-2 (normalized to uppercase by the service). */
+const CountryCodeSchema = z.string().regex(/^[A-Za-z]{2}$/);
+const CountryCodeListSchema = z.array(CountryCodeSchema).max(50);
+
+// Per-user job-search preferences. Legacy fields stay (free-text `locations`
+// is still read by market-brief + query building); the P1 targeting fields are
+// additive and empty arrays mean "no constraint on this axis".
 export const JobPreferencesInputSchema = z.object({
   targetRoles: z.array(z.string().min(1).max(120)).max(20).default([]),
   locations: z.array(z.string().min(1).max(120)).max(20).default([]),
@@ -185,6 +197,26 @@ export const JobPreferencesInputSchema = z.object({
   mustHaveSkills: z.array(z.string().min(1).max(60)).max(20).default([]),
   dealbreakerSkills: z.array(z.string().min(1).max(60)).max(20).default([]),
   companyBlacklist: z.array(z.string().min(1).max(200)).max(100).default([]),
+  // --- P1 targeting profile ---
+  workplaceTypes: z
+    .array(z.enum(['remote', 'hybrid', 'onsite']))
+    .max(3)
+    .default([]),
+  remoteScopes: z
+    .array(z.enum(['remote_local', 'remote_regional', 'remote_global']))
+    .max(3)
+    .default([]),
+  countries: CountryCodeListSchema.default([]),
+  cities: z.array(JobPreferenceCitySchema).max(200).default([]),
+  homeCountry: CountryCodeSchema.nullable().optional(),
+  citizenships: CountryCodeListSchema.default([]),
+  workAuthorizations: CountryCodeListSchema.default([]),
+  sponsorshipCountries: CountryCodeListSchema.default([]),
+  relocationWilling: z.boolean().default(false),
+  relocationCountries: CountryCodeListSchema.default([]),
+  /** Reserved for P2 timezone overlap; accepted and stored, not scored in P1. */
+  timezoneOverlapHours: z.number().int().min(0).max(24).nullable().optional(),
+  language: z.string().min(2).max(10).default('en'),
 });
 export type JobPreferencesInput = z.infer<typeof JobPreferencesInputSchema>;
 

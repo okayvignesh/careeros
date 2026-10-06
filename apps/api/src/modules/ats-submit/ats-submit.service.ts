@@ -2,7 +2,8 @@ import { BadRequestException, Injectable, Logger, NotFoundException, type OnModu
 import { createHash, randomUUID } from 'node:crypto';
 import { retry } from '@careeros/shared';
 import { decrypt, loadMasterKey } from '@careeros/secrets';
-import { renderResumePdf } from '@careeros/resume-render';
+import { renderResumePdfByTemplate, type ResumeContact } from '@careeros/resume-render';
+import { isEligibleToApply } from '@careeros/job-pipeline';
 import type { TailoredResumeContent } from '@careeros/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ApprovalsService, type ApprovalItemDto, type ApprovalsWorker } from '../approvals/approvals.service';
@@ -150,6 +151,9 @@ export class AtsSubmitService implements OnModuleInit, ApprovalsWorker {
     if (!this.adapters[input.ats]) {
       throw new BadRequestException(`Unknown ats: ${input.ats}`);
     }
+    // P1 two-track gate. Eligibility is necessary but NOT sufficient: even an
+    // eligible job still goes through the approval queue below (AGENTS §3.3).
+    await this.assertEligibleToApply(input.userId, input.applicationId);
     const diffJson = await this.buildDiffPreview(input);
     const payload: AtsSubmitApprovalPayload = {
       userId: input.userId,
@@ -371,7 +375,7 @@ export class AtsSubmitService implements OnModuleInit, ApprovalsWorker {
       app.resumeVariantId
         ? this.prisma.resumeVariant.findUnique({
             where: { id: app.resumeVariantId },
-            select: { contentJson: true, roleTarget: true },
+            select: { contentJson: true, roleTarget: true, templateId: true },
           })
         : Promise.resolve(null),
       this.prisma.integration.findUnique({
@@ -418,17 +422,93 @@ export class AtsSubmitService implements OnModuleInit, ApprovalsWorker {
   private async renderResume(variant: {
     contentJson: unknown;
     roleTarget: string | null;
+    templateId: string | null;
   }): Promise<SubmitPayload['resume']> {
     const content = unwrapResumeContent(variant.contentJson);
-    const bytes = await renderResumePdf({
-      roleTarget: variant.roleTarget ?? '',
-      // ponytail: no jobCompany lookup here - the PDF header line is cosmetic
-      // and the ATS discards it on parse. If a template ever requires it,
-      // add a NormalizedJob join in loadContext.
-      jobCompany: null,
-      content,
-    });
+    const contact = unwrapResumeContact(variant.contentJson);
+    // P2b: honor the variant's region-template (legacy `ats-first`/`standard`
+    // ids normalize to `classic` inside the renderer). The contact block, when
+    // present, comes from verified facts only.
+    const bytes = await renderResumePdfByTemplate(
+      {
+        roleTarget: variant.roleTarget ?? '',
+        // ponytail: no jobCompany lookup here - the PDF header line is cosmetic
+        // and the ATS discards it on parse. If a template ever requires it,
+        // add a NormalizedJob join in loadContext.
+        jobCompany: null,
+        ...(contact ? { contact } : {}),
+        content,
+      },
+      variant.templateId ? { template: variant.templateId } : {},
+    );
     return { bytes, filename: 'resume.pdf' };
+  }
+
+  /**
+   * P1 two-track eligibility gate. Loads the tracked job + targeting profile
+   * and refuses to enqueue an application for a job that isn't VERIFIED with a
+   * passing authorization-or-sponsorship track. Every decision (allow or block)
+   * is written to the audit log.
+   */
+  private async assertEligibleToApply(userId: string, applicationId: string): Promise<void> {
+    const app = await this.prisma.application.findFirst({
+      where: { id: applicationId, userId },
+      select: { jobId: true },
+    });
+    if (!app) throw new NotFoundException('Application not found');
+
+    const [job, prefs] = await Promise.all([
+      this.prisma.normalizedJob.findUnique({
+        where: { id: app.jobId },
+        select: { id: true, state: true, country: true, sponsorshipSignal: true },
+      }),
+      this.prisma.userJobPreferences.findUnique({
+        where: { userId },
+        select: {
+          homeCountry: true,
+          citizenships: true,
+          workAuthorizations: true,
+          sponsorshipCountries: true,
+        },
+      }),
+    ]);
+    if (!job) throw new NotFoundException('Job not found for application');
+
+    const decision = isEligibleToApply(
+      {
+        homeCountry: prefs?.homeCountry ?? null,
+        citizenships: prefs?.citizenships ?? [],
+        workAuthorizations: prefs?.workAuthorizations ?? [],
+        sponsorshipCountries: prefs?.sponsorshipCountries ?? [],
+      },
+      { state: job.state, country: job.country, sponsorshipSignal: job.sponsorshipSignal },
+    );
+
+    await this.prisma.auditEvent
+      .create({
+        data: {
+          userId,
+          actor: 'system',
+          action: 'ats.eligibility.decision',
+          resourceType: 'normalized_job',
+          resourceId: job.id,
+          payload: {
+            applicationId,
+            eligible: decision.eligible,
+            reason: decision.reason,
+            authorization: decision.authorization,
+            sponsorship: decision.sponsorship,
+            state: job.state,
+          } as never,
+        },
+      })
+      .catch(() => undefined);
+
+    if (!decision.eligible) {
+      throw new BadRequestException(
+        `Job is not eligible to apply (${decision.reason}); eligibility is required before an approval can be queued`,
+      );
+    }
   }
 
   private async assertApproved(userId: string, approvalItemId: string): Promise<void> {
@@ -555,6 +635,13 @@ function unwrapResumeContent(raw: unknown): TailoredResumeContent {
     return (raw as { content: TailoredResumeContent }).content;
   }
   return raw as TailoredResumeContent;
+}
+
+/** Extract the verified contact block from the stored `{content, audit, contact}` wrapper. */
+function unwrapResumeContact(raw: unknown): ResumeContact | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const contact = (raw as Record<string, unknown>).contact;
+  return contact && typeof contact === 'object' ? (contact as ResumeContact) : undefined;
 }
 
 /**

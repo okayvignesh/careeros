@@ -12,11 +12,11 @@ import type { TemplateId } from '../types';
  */
 
 describe('template registry', () => {
-  const expected: TemplateId[] = ['classic', 'dense-tech', 'modern-minimal'];
+  const expected: TemplateId[] = ['classic', 'dense-tech', 'modern-minimal', 'international'];
 
-  it('registers all three plan templates', () => {
+  it('registers all four plan templates', () => {
     expect(Object.keys(templates).sort()).toEqual([...expected].sort());
-    expect(templateList).toHaveLength(3);
+    expect(templateList).toHaveLength(4);
   });
 
   it('every entry has id/name/description/renderPdf/renderDocx and id matches its key', () => {

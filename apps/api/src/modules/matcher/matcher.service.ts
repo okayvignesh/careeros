@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import {
   computeMatch,
+  type ComputeInput,
   type MatchScore,
   type RequiredSkill,
 } from '@careeros/job-pipeline';
@@ -32,7 +33,17 @@ export class MatcherService {
   async scoreJob(userId: string, jobId: string): Promise<MatchScore> {
     const job = await this.prisma.normalizedJob.findUnique({
       where: { id: jobId },
-      select: { id: true, skillIds: true },
+      select: {
+        id: true,
+        skillIds: true,
+        country: true,
+        region: true,
+        workplaceType: true,
+        remoteScope: true,
+        compCurrency: true,
+        compMin: true,
+        compMax: true,
+      },
     });
     if (!job) throw new NotFoundException(`Job '${jobId}' not found`);
 
@@ -89,12 +100,49 @@ export class MatcherService {
       evidenceBySkill.set(ev.skillId, bucket);
     }
 
-    return computeMatch({
+    const input: ComputeInput = {
       jobId: job.id,
       required,
       nameById,
       stateBySkill,
       evidenceBySkill,
-    });
+    };
+
+    // P1: only augment with geo/comp when there are skills to score, so the
+    // empty-required short-circuit keeps its exact legacy shape.
+    if (required.length > 0) {
+      const prefs = await this.prisma.userJobPreferences.findUnique({
+        where: { userId },
+        select: {
+          countries: true,
+          workplaceTypes: true,
+          remoteScopes: true,
+          currency: true,
+          compMin: true,
+          compMax: true,
+        },
+      });
+      if (prefs) {
+        input.geo = {
+          job: {
+            country: job.country,
+            region: job.region,
+            workplaceType: job.workplaceType,
+            remoteScope: job.remoteScope,
+          },
+          profile: {
+            countries: prefs.countries,
+            workplaceTypes: prefs.workplaceTypes,
+            remoteScopes: prefs.remoteScopes,
+          },
+        };
+        input.comp = {
+          job: { currency: job.compCurrency, min: job.compMin, max: job.compMax },
+          profile: { currency: prefs.currency, min: prefs.compMin, max: prefs.compMax },
+        };
+      }
+    }
+
+    return computeMatch(input);
   }
 }

@@ -33,6 +33,7 @@ export {
   mapAdzuna,
   mapArbeitnow,
   mapFirecrawl,
+  marketRequest,
   mapWorkday,
   mapIcims,
   mapSuccessFactors,
@@ -84,6 +85,7 @@ export {
   type ArbeitnowAdapterOpts,
   type FirecrawlAdapterOpts,
   type FirecrawlJobClient,
+  type FirecrawlMarketScope,
   type WorkdayAdapterOpts,
   type IcimsAdapterOpts,
   type SuccessFactorsAdapterOpts,
@@ -102,7 +104,12 @@ export {
   type ArbeitnowJob,
   type RemotiveJob,
 } from './adapters';
-export { normalize, type NormalizedJob, type NormalizeInput } from './stages/normalize';
+export {
+  normalize,
+  type NormalizedJob,
+  type NormalizeInput,
+  type SponsorshipEvidence,
+} from './stages/normalize';
 export {
   classifySeniority,
   type SeniorityLevel,
@@ -114,6 +121,30 @@ export {
   type RoleResult,
 } from './stages/classify-role';
 export { parseCompBand } from './stages/comp-band';
+export {
+  parseLocation,
+  sponsorshipSignal,
+  type ParsedLocation,
+  type SponsorshipResult,
+} from './stages/geo';
+export {
+  isEligibleToApply,
+  authorizationFor,
+  normalizeSponsorship,
+  type EligibilityProfile,
+  type EligibilityJob,
+  type EligibilityResult,
+  type EligibilityReason,
+  type AuthorizationTrack,
+} from './stages/eligibility';
+export {
+  buildMarketSyncRequests,
+  marketTargetsFromProfile,
+  type MarketPlan,
+  type MarketTarget,
+  type MarketSyncRequest,
+  type MarketProfile,
+} from './stages/market-plan';
 export {
   convertToUsd,
   convertToUsdBand,
@@ -128,6 +159,7 @@ export {
   planIngest,
   type IngestPlan,
   type RejectedIngestRow,
+  type PromotedState,
 } from './stages/ingest-plan';
 export {
   buildCandidateSearchQueries,
@@ -174,10 +206,14 @@ export {
   type RelevanceOpts,
   type RelevanceReason,
   type RelevanceResult,
+  type RelevanceSignal,
+  type RelevanceSignalType,
 } from './stages/relevance';
 export {
   computeMatch,
   computeMatchResult,
+  computeGeoFit,
+  computeCompFit,
   type MatchResult,
   type MatchScore,
   type GapItem,
@@ -185,6 +221,10 @@ export {
   type Explanation,
   type RequiredSkill,
   type ComputeInput,
+  type GeoFitInput,
+  type GeoFitJob,
+  type GeoFitProfile,
+  type CompFitInput,
 } from './stages/match';
 // Wire-shape schemas per adapter (C-P3.6a). Used by contract tests + optional
 // pre-parse guards. The `node:fs`-backed snapshot helpers in schemas.ts are

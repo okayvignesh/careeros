@@ -1,5 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { LearningPriorityService } from '../skills/learning-priority.service';
 
 /**
  * E.3 (Wave E / P5): daily-brief composer.
@@ -51,11 +52,27 @@ export interface DailyBriefPayload {
     risingSkill: string | null;
     snapshotAt: string | null;
   } | null;
+  /**
+   * P2 §8: the top scoped learning priorities (market + role-gap ranked).
+   * `learningPriorities` is `[]` when the user has no market scope/data or the
+   * ranking service is unavailable — never fabricated.
+   */
+  learningPriorities: Array<{
+    skillId: string;
+    skillName: string | null;
+    priority: number;
+    reason: string;
+  }>;
 }
+
+const TOP_LEARNING_PRIORITIES = 3;
 
 @Injectable()
 export class DailyBriefComposerService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly priorities?: LearningPriorityService,
+  ) {}
 
   async compose(userId: string, now: Date = new Date()): Promise<DailyBriefPayload> {
     const dayAgo = new Date(now.getTime() - 86_400_000);
@@ -122,6 +139,38 @@ export class DailyBriefComposerService {
     const skillById = new Map(skills.map((s) => [s.id, s.name]));
     const jobById = new Map(jobs.map((j) => [j.id, j]));
 
+    // P2 §8: inject the top scoped learning priorities. The service is optional
+    // so the composer still works in isolation; any failure (e.g. empty market
+    // scope) degrades to [] rather than blocking the brief.
+    let learningPriorities: DailyBriefPayload['learningPriorities'] = [];
+    try {
+      if (this.priorities) {
+        const ranked = await this.priorities.rankFor(userId);
+        const top = ranked.slice(0, TOP_LEARNING_PRIORITIES);
+        const missing = top
+          .map((r) => r.skillId)
+          .filter((id) => !skillById.has(id));
+        const extra = missing.length
+          ? await this.prisma.skill.findMany({
+              where: { id: { in: missing } },
+              select: { id: true, name: true },
+            })
+          : [];
+        const nameById = new Map([
+          ...skillById,
+          ...extra.map((s) => [s.id, s.name] as const),
+        ]);
+        learningPriorities = top.map((r) => ({
+          skillId: r.skillId,
+          skillName: nameById.get(r.skillId) ?? null,
+          priority: r.priority,
+          reason: r.reasons.join('; '),
+        }));
+      }
+    } catch {
+      learningPriorities = [];
+    }
+
     return {
       userId,
       composedAt: now.toISOString(),
@@ -155,6 +204,7 @@ export class DailyBriefComposerService {
             snapshotAt: snapshot.snapshotAt.toISOString(),
           }
         : null,
+      learningPriorities,
     };
   }
 }

@@ -436,3 +436,107 @@ describe('JobsService injection defence (C-P3.7a)', () => {
     // a 400, and no audit row is written.
   });
 });
+
+// P1 job-targeting: verify-verdict → NormalizedJob.state promotion.
+describe('JobsService.sync — P1 state promotion', () => {
+  it('promotes a verify-trusted row to state=verified on insert', async () => {
+    const m = makePrismaMock();
+    const svc = makeService(m.prisma, makeAdapter([raw(0)]));
+    await svc.sync('remotive');
+    const data = (
+      m.prisma.normalizedJob.createMany.mock.calls[0]![0] as { data: Array<{ state: string }> }
+    ).data;
+    expect(data[0]!.state).toBe('verified');
+  });
+
+  it('promotes a verify-flagged row to state=discovered (never verified)', async () => {
+    const flagged = { ...raw(1), description: 'short' };
+    const m = makePrismaMock();
+    const svc = makeService(m.prisma, makeAdapter([flagged]));
+    await svc.sync('remotive');
+    const data = (
+      m.prisma.normalizedJob.createMany.mock.calls[0]![0] as { data: Array<{ state: string }> }
+    ).data;
+    expect(data[0]!.state).toBe('discovered');
+  });
+});
+
+// P1 job-targeting: "Recommended for you" two-track gate + geo-fit threshold.
+describe('JobsService.recommended — P1 two-track gate', () => {
+  const USER_ID = '00000000-0000-0000-0000-000000000002';
+  const prefsStub = {
+    get: async () => ({
+      remoteOnly: false,
+      mustHaveSkills: [] as string[],
+      dealbreakerSkills: [] as string[],
+      companyBlacklist: [] as string[],
+      workplaceTypes: [] as string[],
+      remoteScopes: [] as string[],
+      countries: [] as string[],
+      cities: [] as Array<{ country: string; city: string }>,
+      homeCountry: 'IN',
+      citizenships: ['IN'],
+      workAuthorizations: [] as string[],
+      sponsorshipCountries: [] as string[],
+      relocationWilling: false,
+      relocationCountries: [] as string[],
+      currency: 'USD',
+      compMin: null,
+      compMax: null,
+    }),
+  };
+
+  function row(id: string, over: Record<string, unknown> = {}) {
+    const now = new Date();
+    return {
+      id,
+      canonicalUrl: `https://ex.com/${id}`,
+      title: 'Backend Engineer',
+      company: 'Acme',
+      location: null,
+      remote: true,
+      description: 'd',
+      sourcePostedAt: now,
+      firstSeenAt: now,
+      primarySource: 'remotive',
+      state: 'verified',
+      skillIds: [] as string[],
+      country: null,
+      region: null,
+      city: null,
+      workplaceType: null,
+      remoteScope: null,
+      sponsorshipSignal: 'unclear',
+      compCurrency: null,
+      compMin: null,
+      compMax: null,
+      ...over,
+    };
+  }
+
+  it('returns only eligible jobs (authorized home or likely sponsor, all verified)', async () => {
+    const rows = [
+      row('in-home', { country: 'IN' }),
+      row('foreign-likely', { country: 'US', sponsorshipSignal: 'likely' }),
+      row('foreign-none', { country: 'US', sponsorshipSignal: 'none' }),
+      row('unverified', { country: 'IN', state: 'discovered' }),
+    ];
+    const prisma = {
+      normalizedJob: {
+        findMany: async () => rows,
+        count: async () => rows.length,
+      },
+      candidateSkillState: { findMany: async () => [] },
+    };
+    const svc = new JobsService(
+      prisma as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      prefsStub as never,
+      {} as never,
+    );
+    const out = await svc.recommended({ userId: USER_ID, limit: 10 });
+    expect(out.map((j) => j.id).sort()).toEqual(['foreign-likely', 'in-home']);
+  });
+});

@@ -68,8 +68,11 @@ const ROLE_SKILLS: Record<RoleFamily, readonly string[]> = {
   'engineering-manager': ['system-design', 'code-review', 'agile', 'documentation', 'engineering-manager', 'tech-lead'],
 };
 
+/** All family keys in declaration order, so callers can iterate the map. */
+export const ROLE_FAMILIES: readonly RoleFamily[] = Object.keys(ROLE_SKILLS) as RoleFamily[];
+
 /** Count of families exposed; used by tests + report. */
-export const ROLE_FAMILY_COUNT = (Object.keys(ROLE_SKILLS) as RoleFamily[]).length;
+export const ROLE_FAMILY_COUNT = ROLE_FAMILIES.length;
 
 /**
  * Normalise a user-entered role string ("Senior Backend Engineer") into a

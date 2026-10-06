@@ -23,6 +23,10 @@ function job(partial: Partial<DemandJob> & { skillIds: string[]; daysAgo: number
     primarySource: rest.primarySource ?? 'remotive',
     sourcePostedAt: rest.sourcePostedAt === undefined ? at : rest.sourcePostedAt,
     firstSeenAt: rest.firstSeenAt ?? at,
+    country: rest.country !== undefined ? rest.country : null,
+    region: rest.region !== undefined ? rest.region : null,
+    workplaceType: rest.workplaceType !== undefined ? rest.workplaceType : null,
+    remoteScope: rest.remoteScope !== undefined ? rest.remoteScope : null,
   };
 }
 
@@ -133,25 +137,29 @@ describe('computeTrendSignals', () => {
   });
 });
 
-describe('MarketDemandService empty-pool contract', () => {
-  function service(jobs: DemandJob[]) {
-    const prisma = { normalizedJob: { findMany: async () => jobs } };
-    const prefs = {
-      get: async () => ({
-        targetRoles: [],
-        locations: [],
-        remoteOnly: false,
-        currency: 'USD',
-        seniority: [],
-        mustHaveSkills: [],
-        dealbreakerSkills: [],
-        companyBlacklist: [],
-        updatedAt: null,
-      }),
-    };
-    return new MarketDemandService(prisma as never, prefs as never);
-  }
+function service(jobs: DemandJob[], prefsOverride: Record<string, unknown> = {}) {
+  const prisma = { normalizedJob: { findMany: async () => jobs } };
+  const prefs = {
+    get: async () => ({
+      targetRoles: [],
+      locations: [],
+      remoteOnly: false,
+      currency: 'USD',
+      seniority: [],
+      mustHaveSkills: [],
+      dealbreakerSkills: [],
+      companyBlacklist: [],
+      countries: [],
+      workplaceTypes: [],
+      remoteScopes: [],
+      updatedAt: null,
+      ...prefsOverride,
+    }),
+  };
+  return new MarketDemandService(prisma as never, prefs as never);
+}
 
+describe('MarketDemandService empty-pool contract', () => {
   it('returns an empty rows array (not an error) when the pool is empty', async () => {
     await expect(service([]).skillDemand('user-1', 30)).resolves.toEqual({
       windowDays: 30,
@@ -163,5 +171,47 @@ describe('MarketDemandService empty-pool contract', () => {
     const out = await service([]).trendSignals('user-1');
     expect(out.signals).toEqual([]);
     expect(typeof out.generatedAt).toBe('string');
+  });
+});
+
+describe('MarketDemandService geo-scoped pool (P2 §8)', () => {
+  const corpus: DemandJob[] = [
+    job({ skillIds: ['ts', 'postgres'], daysAgo: 1, country: 'US', region: 'north_america' }),
+    job({ skillIds: ['java'], daysAgo: 2, country: 'DE', region: 'europe' }),
+    // Null geo row: excluded when a country axis is constrained.
+    job({ skillIds: ['php'], daysAgo: 3, country: null, region: null }),
+  ];
+
+  it('demandBySkill counts only jobs in the target country', async () => {
+    const demand = await service(corpus, { countries: ['DE'] }).demandBySkill('u1', 30);
+    expect([...demand.keys()]).toEqual(['java']);
+  });
+
+  it('null geo is excluded when a country axis is constrained (with a reason)', async () => {
+    const demand = await service(corpus, { countries: ['DE'] }).demandBySkill('u1', 30);
+    expect(demand.has('php')).toBe(false);
+  });
+
+  it('counts null-geo jobs when NO country axis is constrained', async () => {
+    const demand = await service(corpus, {}).demandBySkill('u1', 30);
+    expect([...demand.keys()].sort()).toEqual(['java', 'php', 'postgres', 'ts']);
+  });
+
+  it('scopes by region when the country is unknown but the region is targeted', async () => {
+    const rows: DemandJob[] = [
+      job({ skillIds: ['rust'], daysAgo: 1, country: null, region: 'europe' }),
+      job({ skillIds: ['go'], daysAgo: 1, country: null, region: 'north_america' }),
+    ];
+    const demand = await service(rows, { countries: ['DE'] }).demandBySkill('u1', 30);
+    expect([...demand.keys()]).toEqual(['rust']);
+  });
+
+  it('is a behavior change: the old learning-priority pool applied no prefs/geo filter', async () => {
+    // Blacklist still applies (loadPool always did), but geo now does too.
+    const demand = await service(corpus, {
+      countries: ['US'],
+      companyBlacklist: ['Acme'],
+    }).demandBySkill('u1', 30);
+    expect(demand.size).toBe(0);
   });
 });

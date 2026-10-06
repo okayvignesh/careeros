@@ -140,6 +140,7 @@ export {
   createFirecrawlAdapter,
   firecrawlAdapter,
   mapFirecrawl,
+  marketRequest,
   isBannedPlatformUrl,
   companyFromUrl,
   firecrawlRateLimit,
@@ -147,6 +148,7 @@ export {
   FIRECRAWL_SOURCE_NAME,
   type FirecrawlAdapterOpts,
   type FirecrawlJobClient,
+  type FirecrawlMarketScope,
 } from './firecrawl';
 export {
   createWorkdayAdapter,

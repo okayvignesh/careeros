@@ -60,11 +60,14 @@ function fakeRepo(goals: CandidateGoalRow[]): FakeRepo {
     careerGoal: { findMany: async () => goals },
     userJobPreferences: {
       findUnique: async () => ({
-        targetRoles: [],
-        locations: [],
+        targetRoles: ['Backend Engineer', 'Platform Engineer', 'SRE'],
+        locations: ['Berlin'],
         remoteOnly: false,
+        seniority: ['senior'],
         mustHaveSkills: ['ts'],
         dealbreakerSkills: ['php'],
+        countries: [],
+        cities: [],
       }),
     },
     candidateSkillState: {
@@ -135,13 +138,16 @@ describe('loadCandidateSearchPlans (F7 query builder from profile)', () => {
   });
 
   it('returns no plan when there is no target role', async () => {
-    const repo = fakeRepo([{ ...GOAL, targetRoles: [] }]);
+    const repo = fakeRepo([GOAL]);
     repo.userJobPreferences.findUnique = async () => ({
       targetRoles: [],
       locations: [],
       remoteOnly: false,
+      seniority: [],
       mustHaveSkills: [],
       dealbreakerSkills: [],
+      countries: [],
+      cities: [],
     });
     expect(await loadCandidateSearchPlans(repo)).toEqual([]);
   });
@@ -171,6 +177,11 @@ describe('runFirecrawlSearchCycle (F7 dedupe/feed)', () => {
     expect(repo.rawRows).toHaveLength(2);
     expect(repo.normalizedRows).toHaveLength(2);
     for (const row of repo.rawRows) expect(String(row.canonicalUrl)).not.toContain('linkedin.com');
+    // P1 state promotion: verify-trusted rows land as `verified`.
+    for (const row of repo.normalizedRows) {
+      expect(row.state).toBe('verified');
+      expect(row.geoParsedAt).toBeInstanceOf(Date);
+    }
     expect(summary.cost.creditsSpent).toBeGreaterThanOrEqual(2);
     expect(repo.auditRows.length).toBeGreaterThanOrEqual(1);
   });

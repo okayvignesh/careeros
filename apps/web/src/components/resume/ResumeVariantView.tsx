@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { AlertTriangle, ArrowUpRight, CheckCircle2, ClipboardCopy, Download, FileText, ShieldQuestion } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { AlertTriangle, ArrowUpRight, CheckCircle2, ClipboardCopy, Download, FileText, RefreshCw, ShieldQuestion } from 'lucide-react';
 import { Button } from '@careeros/ui';
-import { apiBrowserUrl, apiGet } from '@/lib/api-client';
+import { apiBrowserUrl, apiGet, apiPost } from '@/lib/api-client';
 
 interface Bullet {
   text: string;
@@ -42,10 +43,24 @@ interface Variant {
   jobCompany: string | null;
   roleTarget: string;
   templateId: string;
+  region: string | null;
+  contact: { name?: string; email?: string; location?: string; headline?: string } | null;
   content: Content;
   factRefs: FactRefInfo[];
   audit: FactCheckAudit;
   createdAt: string;
+}
+
+const TEMPLATE_OPTIONS: Array<{ id: string; label: string }> = [
+  { id: 'classic', label: 'Classic (ATS baseline)' },
+  { id: 'dense-tech', label: 'Dense Tech' },
+  { id: 'modern-minimal', label: 'Modern Minimal' },
+  { id: 'international', label: 'International (A4)' },
+];
+
+function canonicalTemplateId(raw: string): string {
+  const aliases: Record<string, string> = { 'ats-first': 'classic', standard: 'classic', default: 'classic' };
+  return aliases[raw] ?? raw;
 }
 
 export function ResumeVariantView({ id }: { id: string }) {
@@ -91,8 +106,12 @@ export function ResumeVariantView({ id }: { id: string }) {
             Tailored for <span className="font-medium">{v.jobTitle ?? v.roleTarget}</span>
             {v.jobCompany && <span className="text-fg-muted"> @ {v.jobCompany}</span>}
           </span>
-          <span className="text-[11.5px] text-fg-faint">
-            Template {v.templateId} · Generated {new Date(v.createdAt).toLocaleString()}
+          <span className="flex flex-wrap items-center gap-1.5 text-[11.5px] text-fg-faint">
+            <span data-testid="resume-region">Region {v.region ?? 'unspecified'}</span>
+            <span aria-hidden>·</span>
+            <span data-testid="resume-template">Template {canonicalTemplateId(v.templateId)}</span>
+            <span aria-hidden>·</span>
+            <span>Generated {new Date(v.createdAt).toLocaleString()}</span>
           </span>
         </div>
         <div className="ml-auto flex items-center gap-2">
@@ -114,6 +133,8 @@ export function ResumeVariantView({ id }: { id: string }) {
       </div>
 
       <AuditPanel audit={v.audit} />
+
+      {v.jobId && <RegenerateControls variant={v} onError={setError} />}
 
       <section className="rounded-[var(--radius)] border border-[hsl(var(--border))] bg-[hsl(var(--bg-elev-1))] px-6 py-5">
         <h2 className="text-[11px] font-medium uppercase tracking-[0.08em] text-fg-subtle">Summary</h2>
@@ -156,6 +177,57 @@ export function ResumeVariantView({ id }: { id: string }) {
           </ul>
         </section>
       ))}
+    </div>
+  );
+}
+
+/**
+ * P2b: real control over the region-template. The resolved default comes from
+ * the API (region → template, code-selected); this lets the user override it
+ * and regenerate through the real endpoint.
+ */
+function RegenerateControls({ variant, onError }: { variant: Variant; onError: (e: string) => void }) {
+  const router = useRouter();
+  const [template, setTemplate] = useState(canonicalTemplateId(variant.templateId));
+  const [busy, setBusy] = useState(false);
+
+  async function regenerate() {
+    if (!variant.jobId) return;
+    setBusy(true);
+    onError('');
+    try {
+      const next = await apiPost<{ id: string }>(
+        `/me/resume-variants/for-job/${encodeURIComponent(variant.jobId)}?template=${encodeURIComponent(template)}`,
+      );
+      router.push(`/resume-variants/${next.id}`);
+    } catch (e) {
+      onError((e as Error).message);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-[var(--radius)] border border-[hsl(var(--border))] bg-[hsl(var(--bg-elev-1))] px-4 py-2.5 text-[12.5px]">
+      <label htmlFor="resume-template-select" className="text-fg-muted">
+        Template
+      </label>
+      <select
+        id="resume-template-select"
+        data-testid="resume-template-select"
+        value={template}
+        onChange={(e) => setTemplate(e.target.value)}
+        disabled={busy}
+        className="rounded-[var(--radius)] border border-[hsl(var(--border-strong))] bg-[hsl(var(--bg))] px-2 py-1 text-[12.5px] text-fg"
+      >
+        {TEMPLATE_OPTIONS.map((opt) => (
+          <option key={opt.id} value={opt.id}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+      <Button size="sm" variant="ghost" onClick={regenerate} disabled={busy} data-testid="resume-regenerate">
+        <RefreshCw className="h-3.5 w-3.5" /> {busy ? 'Regenerating' : 'Regenerate'}
+      </Button>
     </div>
   );
 }

@@ -211,6 +211,19 @@ function fakePrisma(opts: {
     encryptedSecret: {
       findUnique: async () => opts.secret ?? null,
     },
+    // P1 eligibility gate reads: a VERIFIED job that likely sponsors so the
+    // approval-wire tests exercise the happy path.
+    normalizedJob: {
+      findUnique: async () => ({
+        id: 'job-1',
+        state: 'verified',
+        country: null,
+        sponsorshipSignal: 'likely',
+      }),
+    },
+    userJobPreferences: {
+      findUnique: async () => null,
+    },
     auditEvent: {
       create: async ({
         data,
@@ -411,5 +424,81 @@ describe('AtsSubmitService: F.1 approval wire', () => {
     const row = prisma._approvalItems.find((r) => r.id === item.id)!;
     expect(row.state).toBe('failed');
     expect(row.failedReason).toContain('bad job id');
+  });
+});
+
+describe('AtsSubmitService: P1 eligibility gate', () => {
+  it('logs an eligible decision and allows the approval to be queued', async () => {
+    const { svc, prisma } = mkSvc({
+      application: { id: 'app-1', userId: 'user-1' },
+      user: { id: 'user-1', email: 'jane@example.com', displayName: 'Jane' },
+    });
+    await svc.enqueue({
+      userId: 'user-1',
+      applicationId: 'app-1',
+      ats: 'ashby',
+      jobBoardId: 'job-xyz',
+    });
+    const decision = prisma._audit.find((a) => a.action === 'ats.eligibility.decision');
+    expect(decision).toBeDefined();
+    expect(decision!.payload).toMatchObject({ eligible: true, reason: 'eligible' });
+  });
+
+  it('refuses to enqueue an unverified job and logs why', async () => {
+    const { svc, prisma } = mkSvc({
+      application: { id: 'app-1', userId: 'user-1' },
+      user: { id: 'user-1', email: 'jane@example.com', displayName: 'Jane' },
+    });
+    prisma.normalizedJob.findUnique = async () => ({
+      id: 'job-1',
+      state: 'discovered',
+      country: null,
+      sponsorshipSignal: 'likely',
+    });
+
+    await expect(
+      svc.enqueue({
+        userId: 'user-1',
+        applicationId: 'app-1',
+        ats: 'ashby',
+        jobBoardId: 'job-xyz',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    const decision = prisma._audit.find((a) => a.action === 'ats.eligibility.decision');
+    expect(decision).toBeDefined();
+    expect(decision!.payload).toMatchObject({ eligible: false, reason: 'not_verified' });
+    // Nothing was queued for approval.
+    expect(prisma._approvalItems).toHaveLength(0);
+  });
+});
+
+describe('AtsSubmitService renderResume (P2b region template)', () => {
+  it('renders through renderResumePdfByTemplate and normalizes the legacy `ats-first` id', async () => {
+    const { svc } = mkSvc();
+    const resume = await (
+      svc as unknown as {
+        renderResume: (v: {
+          contentJson: unknown;
+          roleTarget: string | null;
+          templateId: string | null;
+        }) => Promise<{ bytes: Buffer; filename: string }>;
+      }
+    ).renderResume({
+      contentJson: {
+        content: {
+          summary: 'Backend engineer with production experience.',
+          sections: [{ heading: 'Experience', bullets: [{ text: 'Ran production systems.' }] }],
+        },
+        audit: { status: 'passed' },
+        contact: { location: 'Berlin, Germany' },
+      },
+      roleTarget: 'SRE',
+      templateId: 'ats-first',
+    });
+    expect(resume.bytes.slice(0, 5).toString('ascii')).toBe('%PDF-');
+    expect(resume.filename).toBe('resume.pdf');
+    // MUTATION-SMOKE: revert to renderResumePdf and passing `ats-first` to
+    // renderResumePdfByTemplate throws `Unknown template` instead of rendering.
   });
 });

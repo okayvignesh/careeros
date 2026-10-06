@@ -34,6 +34,10 @@ type Job = {
   skillIds: string[];
   sourcePostedAt: Date | null;
   firstSeenAt: Date;
+  country?: string | null;
+  region?: string | null;
+  workplaceType?: string | null;
+  remoteScope?: string | null;
 };
 
 function pool(now = new Date('2026-09-27T12:00:00Z')): Job[] {
@@ -115,6 +119,9 @@ const DEFAULT_PREFS = {
   mustHaveSkills: [] as string[],
   dealbreakerSkills: [] as string[],
   companyBlacklist: [] as string[],
+  countries: [] as string[],
+  workplaceTypes: [] as string[],
+  remoteScopes: [] as string[],
   updatedAt: '2026-09-20T00:00:00.000Z',
 };
 
@@ -301,6 +308,25 @@ describe('MarketBriefService.generate stats contract', () => {
     };
     expect(stats.totalCount).toBe(4);
     expect(stats.topCompanies.find((c) => c.company === 'Acme')).toBeUndefined();
+  });
+
+  it('filters by prefs: geo scope drops other markets and null-geo rows', async () => {
+    const d = (deltaMs: number) => new Date(NOW.getTime() - deltaMs);
+    const jobs: Job[] = [
+      { id: 'us1', title: 'US Backend', company: 'Acme', canonicalUrl: 'u-us', remote: true, skillIds: ['typescript'], sourcePostedAt: d(86_400_000), firstSeenAt: d(86_400_000), country: 'US', region: 'north_america', workplaceType: 'remote', remoteScope: 'remote_global' },
+      { id: 'de1', title: 'DE Backend', company: 'Acme', canonicalUrl: 'u-de', remote: true, skillIds: ['java'], sourcePostedAt: d(2 * 86_400_000), firstSeenAt: d(2 * 86_400_000), country: 'DE', region: 'europe', workplaceType: 'remote', remoteScope: 'remote_regional' },
+      { id: 'null1', title: 'Unlocated', company: 'Acme', canonicalUrl: 'u-null', remote: true, skillIds: ['php'], sourcePostedAt: d(3 * 86_400_000), firstSeenAt: d(3 * 86_400_000), country: null, region: null, workplaceType: null, remoteScope: null },
+    ];
+    const { svc, prisma } = build({ jobs, prefs: { countries: ['DE'] } });
+    await svc.generate('u1');
+    const stats = prisma.calls.created[0].statsJson as {
+      totalCount: number;
+      topSkills: Array<{ skillId: string }>;
+    };
+    // Only the DE row is in scope; the null-geo row is excluded (never counted).
+    expect(stats.totalCount).toBe(1);
+    expect(stats.topSkills.map((s) => s.skillId)).toEqual(['java']);
+    // MUTATION SMOKE: drop the geo filter -> totalCount 3 and php/typescript show.
   });
 
   it('mutation smoke on remoteShare: an all-remote pool reports 1.0', async () => {

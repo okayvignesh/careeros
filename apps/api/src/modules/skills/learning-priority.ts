@@ -13,9 +13,15 @@
 //   demand_norm(s)    = demand(s) / max(demand)          in [0..1]
 //                       0 when max(demand) == 0 (nothing scraped yet).
 //
-//   target(s)         = 0.7 if s in targetRoleSkills, else 0.5
+//   target(s)         = roleThresholdBySkill(s) when the user has an
+//                       `aim_role_thresholds` row for a target role mapping to
+//                       s, else 0.7 if s in targetRoleSkills, else 0.5.
 //   gap(s)            = clamp(target(s) - min(current(s), target(s)), 0..1)
 //                       0 when current >= target.
+//                       `current` is current_readiness (recency-adjusted);
+//                       historical_demonstrated_proficiency is tracked
+//                       separately in `factors.historical` and never feeds the
+//                       gap (AGENTS §11).
 //                       Uses `min(current, target)` so surplus above target
 //                       doesn't push gap negative -- the goal is "reach the
 //                       bar", not "beat it".
@@ -48,6 +54,20 @@ export interface LearningPriorityInput {
   marketDemandBySkill: Map<string, number>;
   /** Skill IDs the user's targetRoles map onto (via role-skill-map.ts). */
   targetRoleSkills?: Set<string>;
+  /**
+   * Per-skill target bar resolved from `aim_role_thresholds` (roleKey →
+   * threshold) by the orchestrator. Absent skill IDs fall back to
+   * `TARGET_ROLE_PROF` for target-role skills and `TARGET_DEFAULT_PROF`
+   * otherwise, so the legacy `0.5/0.7` behaviour is preserved for users with
+   * no explicit threshold rows.
+   */
+  roleThresholdBySkill?: Map<string, number>;
+  /**
+   * Never-decaying demonstrated proficiency per skill (0..1). Kept distinct
+   * from `userProficiencyBySkill` (current readiness) per AGENTS §11; defaults
+   * to the current value when absent so legacy callers are unchanged.
+   */
+  historicalProficiencyBySkill?: Map<string, number>;
   /** `Date` of most recent evidence per skill; missing = no evidence. */
   evidenceRecencyBySkill?: Map<string, Date>;
   /** Wall clock for recency deltas. Injected for determinism in tests. */
@@ -55,7 +75,10 @@ export interface LearningPriorityInput {
 }
 
 export interface LearningPriorityFactors {
+  /** Recency-adjusted readiness used for gap math (AGENTS §11 current_readiness). */
   current: number;
+  /** Best-ever demonstrated proficiency (AGENTS §11 historical_demonstrated_proficiency). */
+  historical: number;
   demand: number;
   gap: number;
   recency: number;
@@ -69,8 +92,8 @@ export interface LearningPriorityRow {
   factors: LearningPriorityFactors;
 }
 
-const TARGET_ROLE_PROF = 0.7;
-const TARGET_DEFAULT_PROF = 0.5;
+export const TARGET_ROLE_PROF = 0.7;
+export const TARGET_DEFAULT_PROF = 0.5;
 const RECENCY_FRESH_DAYS = 90;
 const RECENCY_MID_DAYS = 180;
 const RECENCY_FRESH = 1.0;
@@ -86,6 +109,8 @@ const DAY_MS = 86_400_000;
 // numeric priority is unaffected.
 const HIGH_DEMAND_NORM = 0.6;
 const LARGE_GAP = 0.4;
+/** Readiness below demonstrated by at least this much is surfaced as decay. */
+const READINESS_DECAY = 0.2;
 
 /**
  * Rank the union of skills present in either `userProficiencyBySkill` or
@@ -119,11 +144,18 @@ export function computeLearningPriority(
 
   const rows: LearningPriorityRow[] = [];
   for (const skillId of allSkills) {
+    // `current` is current_readiness (recency-adjusted, supplied already
+    // decayed by the orchestrator); `historical` is the never-decaying
+    // demonstrated proficiency. Gap math uses readiness, never history.
     const current = clamp01(input.userProficiencyBySkill.get(skillId) ?? 0);
+    const historical = clamp01(input.historicalProficiencyBySkill?.get(skillId) ?? current);
     const demandRaw = input.marketDemandBySkill.get(skillId) ?? 0;
     const demandNorm = maxDemand === 0 ? 0 : demandRaw / maxDemand;
     const isTargetRole = targetRoleSkills.has(skillId);
-    const target = isTargetRole ? TARGET_ROLE_PROF : TARGET_DEFAULT_PROF;
+    // An explicit `aim_role_thresholds` row wins; otherwise the shipped
+    // 0.7 (target role) / 0.5 (default) fallback applies.
+    const targetOverride = input.roleThresholdBySkill?.get(skillId);
+    const target = clamp01(targetOverride ?? (isTargetRole ? TARGET_ROLE_PROF : TARGET_DEFAULT_PROF));
     const gap = clamp01(target - Math.min(current, target));
     const recencyPenalty = recencyBand(recency.get(skillId), now);
     const roleBoost = isTargetRole ? ROLE_BOOST : 1.0;
@@ -146,9 +178,11 @@ export function computeLearningPriority(
         hasEvidence: recency.has(skillId),
         isTargetRole,
         current,
+        historical,
       }),
       factors: {
         current,
+        historical,
         demand: demandNorm,
         gap,
         recency: recencyPenalty,
@@ -162,6 +196,19 @@ export function computeLearningPriority(
     return a.skillId < b.skillId ? -1 : a.skillId > b.skillId ? 1 : 0;
   });
   return rows;
+}
+
+/**
+ * Recency factor applied to demonstrated proficiency to derive current
+ * readiness. Mirrors `match.ts` recency bands (fresh <=90d, mid <=180d, else
+ * stale; `recencyDays < 0` means "never seen"). Exported so the orchestrator
+ * and its tests share one definition.
+ */
+export function readinessFactor(recencyDays: number): number {
+  if (recencyDays < 0) return 0.5;
+  if (recencyDays <= RECENCY_FRESH_DAYS) return 1.0;
+  if (recencyDays <= RECENCY_MID_DAYS) return 0.75;
+  return 0.5;
 }
 
 function recencyBand(last: Date | undefined, now: Date): number {
@@ -180,6 +227,7 @@ function buildReasons(x: {
   hasEvidence: boolean;
   isTargetRole: boolean;
   current: number;
+  historical: number;
 }): string[] {
   const out: string[] = [];
   if (x.isTargetRole) out.push('required by your target role');
@@ -191,6 +239,9 @@ function buildReasons(x: {
     out.push(`small gap vs target ${x.target.toFixed(1)}`);
   } else if (x.current > 0) {
     out.push('already at or above target');
+  }
+  if (x.historical - x.current >= READINESS_DECAY) {
+    out.push(`readiness decayed from demonstrated ${x.historical.toFixed(2)}`);
   }
   if (!x.hasEvidence) {
     out.push('no recent evidence');

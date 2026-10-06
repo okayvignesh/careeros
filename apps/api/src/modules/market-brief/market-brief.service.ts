@@ -15,6 +15,7 @@ import { UsageCache } from '../usage/usage.cache';
 import { SensitivityGateService } from '../../common/sensitivity-gate.service';
 import { ProviderLoaderService } from '../../common/provider-loader.service';
 import { JobPreferencesService } from '../job-prefs/job-prefs.service';
+import { jobMatchesMarketScope, marketScope } from '../market-demand/market-scope';
 import { SnapshotService, type TrendDiff } from './snapshot.service';
 
 const WINDOW_DAYS = 7;
@@ -365,7 +366,11 @@ export class MarketBriefService {
       orderBy: [{ sourcePostedAt: { sort: 'desc', nulls: 'last' } }, { firstSeenAt: 'desc' }],
       take: 500,
     });
+    const scope = marketScope(prefs.countries, prefs.workplaceTypes, prefs.remoteScopes);
     return rows.filter((r) => {
+      // Geo scope first; null geo on a constrained axis is excluded (never
+      // fabricated as a match), matching the snapshot + demand pool rules.
+      if (!jobMatchesMarketScope(scope, r).inScope) return false;
       if (blacklist.has(r.company.toLowerCase().trim())) return false;
       const jobSkills = new Set(r.skillIds);
       for (const d of dealbreakers) if (jobSkills.has(d)) return false;

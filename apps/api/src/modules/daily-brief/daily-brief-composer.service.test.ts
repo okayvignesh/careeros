@@ -113,6 +113,52 @@ describe('DailyBriefComposerService.compose', () => {
     expect(brief.quests).toEqual([]);
     expect(brief.jobMatches).toEqual([]);
     expect(brief.marketPulse).toBeNull();
+    // No ranking service injected -> no fabricated priorities.
+    expect(brief.learningPriorities).toEqual([]);
+  });
+
+  it('injects the top scoped learning priorities with skill names (P2 §8)', async () => {
+    const priorities = {
+      rankFor: async () => [
+        { skillId: 'k8s', priority: 0.9, reasons: ['high market demand', 'large gap vs target 0.7'], factors: {} },
+        { skillId: 'ts', priority: 0.8, reasons: ['required by your target role'], factors: {} },
+        { skillId: 'go', priority: 0.7, reasons: ['some market demand'], factors: {} },
+        { skillId: 'rust', priority: 0.2, reasons: ['low'], factors: {} },
+      ],
+    };
+    const svc = new DailyBriefComposerService(
+      fakePrisma({
+        skills: [
+          { id: 'k8s', name: 'Kubernetes' },
+          { id: 'ts', name: 'TypeScript' },
+          { id: 'go', name: 'Go' },
+        ],
+      }),
+      priorities as never,
+    );
+    const brief = await svc.compose('u-1');
+    expect(brief.learningPriorities).toHaveLength(3);
+    expect(brief.learningPriorities[0]).toEqual({
+      skillId: 'k8s',
+      skillName: 'Kubernetes',
+      priority: 0.9,
+      reason: 'high market demand; large gap vs target 0.7',
+    });
+    // Only the top 3 are injected.
+    expect(brief.learningPriorities.map((p) => p.skillId)).toEqual(['k8s', 'ts', 'go']);
+    // MUTATION SMOKE: drop the slice -> 4 rows appear and this fails.
+  });
+
+  it('degrades gracefully (empty priorities, no throw) when ranking fails', async () => {
+    const priorities = {
+      rankFor: async () => {
+        throw new Error('no market scope');
+      },
+    };
+    const svc = new DailyBriefComposerService(fakePrisma({}), priorities as never);
+    const brief = await svc.compose('u-1');
+    expect(brief.learningPriorities).toEqual([]);
+    // MUTATION SMOKE: remove the try/catch -> compose() rejects.
   });
 
   it('is resilient to a job row missing from the join set', async () => {

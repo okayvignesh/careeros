@@ -20,6 +20,12 @@ export const RawJobSchema = z.object({
   company: z.string().min(1).max(200),
   location: z.string().max(200).nullable(),
   remote: z.boolean(),
+  /**
+   * Employer-declared workplace type when the source exposes it (Lever
+   * `workplaceType`, Workday `remoteType`, Ashby `isRemote`). Omitted when the
+   * source only gives a boolean `remote` — never inferred here.
+   */
+  workplaceType: z.enum(['remote', 'hybrid', 'onsite']).nullable().optional(),
   description: z.string().min(1).max(50_000),
   sourcePostedAt: z.date().nullable(),
   fetchedAt: z.date(),
@@ -34,6 +40,23 @@ export type RawJob = z.infer<typeof RawJobSchema>;
  *   2 — Aggregator API (Adzuna, Remotive, Arbeitnow, JSearch, Serpapi)
  *   3 — Agent/email (P3.5 / P5)
  */
+export type RawWorkplaceType = 'remote' | 'hybrid' | 'onsite';
+
+/**
+ * Normalize an employer-declared workplace string to the closed vocabulary.
+ * Unknown/empty → undefined so callers never invent a value.
+ */
+export function normalizeWorkplaceType(
+  value: string | null | undefined,
+): RawWorkplaceType | undefined {
+  if (!value) return undefined;
+  const t = value.toLowerCase();
+  if (t.includes('remote')) return 'remote';
+  if (t.includes('hybrid') || t.includes('flex')) return 'hybrid';
+  if (t.includes('onsite') || t.includes('on-site') || t.includes('office')) return 'onsite';
+  return undefined;
+}
+
 export interface JobSourceAdapter {
   id: string;
   name: string;

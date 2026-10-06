@@ -21,6 +21,9 @@ const BRIEF: DailyBriefPayload = {
     { id: 'a1', title: 'Backend Engineer', company: 'Stripe', location: 'Remote', postedAt: null },
   ],
   marketPulse: { risingSkill: 'Go', snapshotAt: '2026-06-14T00:00:00.000Z' },
+  learningPriorities: [
+    { skillId: 'k8s', skillName: 'Kubernetes', priority: 0.9, reason: 'high market demand' },
+  ],
 };
 
 function recordingRegistry() {

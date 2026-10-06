@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { FirecrawlJobClient } from '../adapters/firecrawl';
+import { createFirecrawlAdapter, type FirecrawlJobClient } from '../adapters/firecrawl';
 import { RawJobSchema } from '../types';
+import { planIngest } from '../stages/ingest-plan';
+import { buildMarketSyncRequests } from '../stages/market-plan';
 import { runCandidateSearch } from './candidate-search';
 
 interface FakeHit {
@@ -102,5 +104,43 @@ describe('runCandidateSearch', () => {
       onCall: (kind) => calls.push(kind),
     });
     expect(calls).toEqual(['search', 'scrape']);
+  });
+
+  // Regression (job-targeting §6): `buildMarketSyncRequests` lowercases the
+  // target country for Adzuna's path segment; a country-only market plan must
+  // still survive the Firecrawl map → ingest chain with structured geo.
+  it('country-only market target keeps structured country through map → ingest', async () => {
+    const requests = buildMarketSyncRequests('firecrawl', {
+      targets: [{ country: 'DE' }],
+      queries: ['backend engineer'],
+    });
+    expect(requests[0]?.country).toBe('de');
+
+    const client: FirecrawlJobClient = {
+      search: async () => ({
+        success: true,
+        data: [
+          {
+            url: DEV,
+            title: 'Senior Backend Engineer',
+            description:
+              'Build distributed systems with TypeScript, Postgres and Kubernetes for our Berlin platform team.',
+          },
+        ],
+      }),
+      scrape: async () => ({ success: true, data: {} }),
+    };
+    const adapter = createFirecrawlAdapter({
+      queries: ['backend engineer'],
+      country: requests[0]!.country,
+      scrapeDetails: false,
+      client,
+    });
+
+    const raws = await adapter.fetch();
+    expect(raws[0]?.location).toBe('DE');
+
+    const plan = planIngest(raws, { now: new Date() });
+    expect(plan.normalized[0]?.country).toBe('DE');
   });
 });

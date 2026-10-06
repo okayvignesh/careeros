@@ -14,6 +14,12 @@ import { UsageService } from '../usage/usage.service';
 import { UsageCache } from '../usage/usage.cache';
 import { SensitivityGateService } from '../../common/sensitivity-gate.service';
 import { ProviderLoaderService } from '../../common/provider-loader.service';
+import {
+  resolveTargetingContext,
+  EMPTY_TARGETING_PROFILE,
+  type TargetingProfile,
+} from '../resume-variants/targeting-context';
+import { selectCoverTone } from './cover-tone';
 
 export interface FactRefInfo {
   id: string;
@@ -41,6 +47,8 @@ export interface CoverLetterDto {
   jobCompany: string | null;
   roleTarget: string;
   templateId: string;
+  region: string | null;
+  tone: string | null;
   content: CoverLetterContent;
   factRefs: FactRefInfo[];
   audit: FactCheckAudit;
@@ -75,6 +83,7 @@ export class CoverLettersService {
     const jobById = new Map(jobs.map((j) => [j.id, j]));
     return rows.map((r) => {
       const j = r.jobId ? jobById.get(r.jobId) : undefined;
+      const wrapper = unwrapContentJson(r.contentJson);
       return {
         id: r.id,
         jobId: r.jobId,
@@ -82,6 +91,8 @@ export class CoverLettersService {
         jobCompany: j?.company ?? null,
         roleTarget: r.roleTarget,
         templateId: r.templateId,
+        region: wrapper.region ?? null,
+        tone: wrapper.tone ?? null,
         createdAt: r.createdAt.toISOString(),
       };
     });
@@ -97,7 +108,7 @@ export class CoverLettersService {
         })
       : null;
     const factRefs = await this.loadFactRefs(userId, row.factRefs);
-    const { content, audit } = unwrapContentJson(row.contentJson);
+    const { content, audit, region, tone } = unwrapContentJson(row.contentJson);
     return {
       id: row.id,
       jobId: row.jobId,
@@ -105,6 +116,8 @@ export class CoverLettersService {
       jobCompany: job?.company ?? null,
       roleTarget: row.roleTarget,
       templateId: row.templateId,
+      region: region ?? null,
+      tone: tone ?? null,
       content,
       audit,
       factRefs,
@@ -112,9 +125,37 @@ export class CoverLettersService {
     };
   }
 
-  async generateForJob(userId: string, jobId: string): Promise<CoverLetterDto> {
+  async generateForJob(
+    userId: string,
+    jobId: string,
+    opts: { tone?: string } = {},
+  ): Promise<CoverLetterDto> {
     const job = await this.prisma.normalizedJob.findUnique({ where: { id: jobId } });
     if (!job) throw new NotFoundException('Job not found');
+
+    // P2b targeting context: role + region resolved in code; tone selected from
+    // the profile enum (or a validated override), never by the LLM.
+    const profileRow = await this.prisma.userJobPreferences.findUnique({
+      where: { userId },
+      select: {
+        targetRoles: true,
+        countries: true,
+        homeCountry: true,
+        seniority: true,
+        relocationWilling: true,
+        relocationCountries: true,
+      },
+    });
+    const profile: TargetingProfile = profileRow ?? EMPTY_TARGETING_PROFILE;
+    const ctx = resolveTargetingContext(profile, {
+      title: job.title,
+      country: job.country ?? null,
+    });
+    const tone = selectCoverTone({
+      seniority: profile.seniority,
+      relocationWilling: profile.relocationWilling,
+      ...(opts.tone !== undefined ? { explicit: opts.tone } : {}),
+    });
 
     const facts = await this.prisma.resumeFact.findMany({
       where: { userId, verified: true },
@@ -144,6 +185,10 @@ export class CoverLettersService {
       jobCompany: job.company,
       jobDescription: descWrapped.content,
       facts: factsRendered,
+      targetRole: ctx.targetRole,
+      targetMarket: ctx.targetMarket,
+      region: ctx.region ?? 'unspecified',
+      tone,
     });
     // A-M9: per-user LLM concurrency ceiling.
     const raw = (await this.usage.runWithUserLimit(userId, () =>
@@ -198,12 +243,18 @@ export class CoverLettersService {
     };
     const allRefs = Array.from(new Set(finalParagraphs.flatMap((p) => p.factRefs)));
 
-    const persistPayload = { content: finalContent, audit };
+    const persistPayload = {
+      content: finalContent,
+      audit,
+      region: ctx.region,
+      tone,
+      targetMarket: ctx.targetMarket,
+    };
     const row = await this.prisma.coverLetter.create({
       data: {
         userId,
         jobId,
-        roleTarget: job.title,
+        roleTarget: ctx.targetRole,
         contentJson: persistPayload as unknown as Prisma.InputJsonValue,
         factRefs: allRefs,
       },
@@ -343,13 +394,26 @@ export class CoverLettersService {
  */
 function unwrapContentJson(
   raw: Prisma.JsonValue,
-): { content: CoverLetterContent; audit: FactCheckAudit } {
+): {
+  content: CoverLetterContent;
+  audit: FactCheckAudit;
+  region?: string | null;
+  tone?: string | null;
+} {
   const obj = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   if (obj && 'content' in obj && 'audit' in obj) {
-    return {
+    const out: {
+      content: CoverLetterContent;
+      audit: FactCheckAudit;
+      region?: string | null;
+      tone?: string | null;
+    } = {
       content: obj.content as unknown as CoverLetterContent,
       audit: obj.audit as unknown as FactCheckAudit,
     };
+    if (typeof obj.region === 'string' || obj.region === null) out.region = obj.region;
+    if (typeof obj.tone === 'string' || obj.tone === null) out.tone = obj.tone;
+    return out;
   }
   return {
     content: raw as unknown as CoverLetterContent,

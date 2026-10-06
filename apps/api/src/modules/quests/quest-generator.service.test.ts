@@ -20,6 +20,7 @@ function row(
     reasons,
     factors: {
       current: 0,
+      historical: 0,
       demand: 0.5,
       gap: 0.5,
       recency: 0.4,
@@ -194,5 +195,28 @@ describe('QuestGeneratorService.plan', () => {
     const svc = new QuestGeneratorService({ rankFor } as never);
     const plan = await svc.plan('u1', { targetHorizon: 'quarter' });
     expect(plan.length).toBeLessThanOrEqual(25);
+  });
+
+  it('inherits the market-scoped ranking: two profiles over one corpus yield different quests (P2 §8)', async () => {
+    // Scoping lives entirely in LearningPriorityService; the generator must
+    // pass the scoped ranking straight through with no duplicate geo logic.
+    const usProfile = vi.fn(async (): Promise<LearningPriorityRow[]> => [
+      row('kubernetes', 0.9, { current: 0, targetRole: true }),
+      row('typescript', 0.85),
+    ]);
+    const deProfile = vi.fn(async (): Promise<LearningPriorityRow[]> => [
+      row('java', 0.9, { current: 0, targetRole: true }),
+      row('spring', 0.85),
+    ]);
+    const us = await new QuestGeneratorService({ rankFor: usProfile } as never).plan('u1', {
+      maxItems: 5,
+    });
+    const de = await new QuestGeneratorService({ rankFor: deProfile } as never).plan('u1', {
+      maxItems: 5,
+    });
+    const ids = (q: typeof us) => new Set(q.map((x) => x.skillId));
+    expect(ids(us)).not.toEqual(ids(de));
+    expect(ids(us).has('java')).toBe(false);
+    expect(ids(de).has('kubernetes')).toBe(false);
   });
 });

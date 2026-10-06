@@ -78,6 +78,12 @@ import {
   QUEUE_FIRECRAWL_SEARCH,
   type FirecrawlSearchPayload,
 } from './firecrawl-search.worker.js';
+import {
+  handleJobsGeoBackfill,
+  JOB_JOBS_GEO_BACKFILL,
+  QUEUE_JOBS_GEO_BACKFILL,
+  type JobsGeoBackfillPayload,
+} from './geo-backfill.worker.js';
 
 // Error tracking first: no-op when neither SENTRY_DSN nor GLITCHTIP_DSN is set.
 initSentry();
@@ -324,8 +330,25 @@ async function bootstrap() {
     logger,
   );
 
+  // P1 job-targeting: on-demand geo backfill for legacy rows. One-off queue
+  // (no schedule); producers enqueue per row with the stable id
+  // `geo-backfill:<jobId>` so duplicate enqueues collapse.
+  await registerWorker(
+    {
+      queue: QUEUE_JOBS_GEO_BACKFILL,
+      jobName: JOB_JOBS_GEO_BACKFILL,
+      connection,
+      concurrency: 2,
+      handler: (data: JobsGeoBackfillPayload) => handleJobsGeoBackfill(prisma, logger, data),
+      unknownJobNameMessage: 'unknown jobs.geo-backfill job name',
+      failedMessage: 'jobs.geo-backfill job failed',
+      completed: { message: 'jobs.geo-backfill job completed', include: 'result' },
+    },
+    logger,
+  );
+
   logger.info(
-    `worker up, listening on queues '${QUEUE_GITHUB}', '${QUEUE_GITLAB}', '${QUEUE_EMBEDDING}', '${QUEUE_RETENTION}', '${QUEUE_CORPUS_REFRESH}', '${QUEUE_MARKET_SNAPSHOT}', '${QUEUE_AUDIT_LOG_RETENTION}', '${QUEUE_GMAIL_WATCH_RENEWAL}', '${QUEUE_SELECTOR_HEALTH}', '${QUEUE_FIRECRAWL_SEARCH}'`,
+    `worker up, listening on queues '${QUEUE_GITHUB}', '${QUEUE_GITLAB}', '${QUEUE_EMBEDDING}', '${QUEUE_RETENTION}', '${QUEUE_CORPUS_REFRESH}', '${QUEUE_MARKET_SNAPSHOT}', '${QUEUE_AUDIT_LOG_RETENTION}', '${QUEUE_GMAIL_WATCH_RENEWAL}', '${QUEUE_SELECTOR_HEALTH}', '${QUEUE_FIRECRAWL_SEARCH}', '${QUEUE_JOBS_GEO_BACKFILL}'`,
   );
 }
 

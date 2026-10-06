@@ -83,6 +83,9 @@ function makeStubs(opts: {
       mustHaveSkills: [] as string[],
       dealbreakerSkills: [] as string[],
       companyBlacklist: [] as string[],
+      countries: [] as string[],
+      workplaceTypes: [] as string[],
+      remoteScopes: [] as string[],
       updatedAt: null,
     }),
   };
