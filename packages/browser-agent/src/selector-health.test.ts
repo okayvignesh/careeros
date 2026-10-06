@@ -63,4 +63,16 @@ describe('checkSelectorHealth', () => {
     const r = checkSelectorHealth('<html></html>', ['button.primary']);
     expect(r.missing).toEqual(['button.primary']);
   });
+
+  it('supports quoted attribute values, including a ] inside the quotes', () => {
+    const html = '<div data-x="a]b" title="hello world"></div>';
+    const r = checkSelectorHealth(html, ['div[title="hello world"]', 'div[data-x="a]b"]']);
+    expect(r).toEqual({ healthy: true, missing: [], drifted: [] });
+  });
+
+  it('parses ~= and |= attribute operators as presence checks', () => {
+    const html = '<div data-x="en-US"></div>';
+    const r = checkSelectorHealth(html, ['div[data-x~=en]', 'div[data-x|=en]']);
+    expect(r.healthy).toBe(true);
+  });
 });

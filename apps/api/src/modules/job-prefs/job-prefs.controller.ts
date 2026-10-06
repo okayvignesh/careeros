@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, Put, Req } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, HttpCode, Post, Put, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import { JobPreferencesInputSchema } from '@careeros/shared';
 import { SessionService } from '../auth/session.service';
@@ -26,5 +26,13 @@ export class JobPreferencesController {
       throw new BadRequestException(parsed.error.issues.map((i) => i.message).join('; '));
     }
     return this.prefs.upsert(userId, parsed.data);
+  }
+
+  /** B: fill blank preference fields from the resume + skill graph. */
+  @Post('derive-from-resume')
+  @HttpCode(200)
+  async deriveFromResume(@Req() req: Request) {
+    const userId = this.session.requireUserId(req);
+    return this.prefs.deriveFromResume(userId, { onlyFillEmpty: true });
   }
 }

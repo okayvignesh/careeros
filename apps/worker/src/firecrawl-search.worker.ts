@@ -6,8 +6,8 @@
  *   1. triages the kill switch + API key (missing key = clean no-op);
  *   2. loads each candidate's career goals + job preferences + demonstrated
  *      skills, builds bounded queries (`buildCandidateSearchQueries`);
- *   3. runs `FirecrawlClient.search()` → banned-platform filter → canonical
- *      dedupe (`runCandidateSearch`), charging every call against a
+ *   3. runs `FirecrawlClient.search()` → canonical dedupe
+ *      (`runCandidateSearch`), charging every call against a
  *      `FirecrawlBudget`;
  *   4. optionally starts configured crawl targets and polls `getCrawlStatus`
  *      with a bounded poll budget (`runCrawlPhase`);
@@ -17,7 +17,8 @@
  *
  * Firecrawl hits stay `DISCOVERED` (adapter tier 3): only a canonical ATS board
  * confirmation promotes a listing later in the trust-order/verify stages.
- * Banned platforms never reach the pipeline. The API key is never logged.
+ * LinkedIn/Indeed/Naukri/Glassdoor are permitted via Firecrawl (owner decision
+ * 2026-10-06), so no host is filtered. The API key is never logged.
  */
 import type { PrismaClient } from '@prisma/client';
 import type { Logger } from 'pino';
@@ -31,7 +32,8 @@ import {
   type NormalizedJob,
   type RawJob,
 } from '@careeros/job-pipeline';
-import { createFirecrawlClient, isFirecrawlConfigured } from '@careeros/firecrawl';
+import { createFirecrawlClient, readFirecrawlApiKey } from '@careeros/firecrawl';
+import { decryptField, loadMasterKey } from '@careeros/secrets';
 import {
   QUEUE_FIRECRAWL_SEARCH,
   JOB_FIRECRAWL_SEARCH,
@@ -101,6 +103,40 @@ export interface FirecrawlSearchRepo {
   };
   jobRejectLog: { createMany(args: { data: Array<Record<string, unknown>> }): Promise<{ count: number }> };
   auditEvent: { create(args: { data: Record<string, unknown> }): Promise<unknown> };
+  /** Optional: present on the real Prisma client, absent on plain-object test stubs. */
+  appConfig?: {
+    findUnique(args: { where: { key: string } }): Promise<{ value: unknown } | null>;
+  };
+}
+
+const FIRECRAWL_CONFIG_KEY = 'provider_config:firecrawl';
+const FIRECRAWL_KEY_PURPOSE = 'provider.firecrawl.apiKey';
+
+function readSealedSecret(value: unknown, field: string): string | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const secrets = (value as { secrets?: unknown }).secrets;
+  if (!secrets || typeof secrets !== 'object' || Array.isArray(secrets)) return null;
+  const raw = (secrets as Record<string, unknown>)[field];
+  return typeof raw === 'string' && raw.trim().length > 0 ? raw : null;
+}
+
+/**
+ * Resolve the Firecrawl key DB-first (`provider_config:firecrawl`, sealed with
+ * `packages/secrets`) then env as a last-resort fallback. Returns null when no
+ * usable key exists. `decryptField` passes legacy plaintext through unchanged.
+ */
+export async function resolveFirecrawlApiKey(
+  repo: FirecrawlSearchRepo,
+  env: NodeJS.ProcessEnv,
+): Promise<string | null> {
+  try {
+    const row = await repo.appConfig?.findUnique({ where: { key: FIRECRAWL_CONFIG_KEY } });
+    const sealed = readSealedSecret(row?.value, 'apiKey');
+    if (sealed) return decryptField(sealed, loadMasterKey(), FIRECRAWL_KEY_PURPOSE);
+  } catch {
+    // A malformed/undecryptable stored key must not crash the run; fall back to env.
+  }
+  return readFirecrawlApiKey(env);
 }
 
 // ---------------------------------------------------------------------------
@@ -454,10 +490,11 @@ export async function handleFirecrawlSearch(
   const env = deps.env ?? process.env;
   const repo = prisma as unknown as FirecrawlSearchRepo;
 
-  if (!isFirecrawlConfigured(env)) {
+  const apiKey = await resolveFirecrawlApiKey(repo, env);
+  if (!apiKey) {
     logger.warn(
       { job: JOB_FIRECRAWL_SEARCH },
-      'firecrawl-search: FIRECRAWL_API_KEY unset; skipping',
+      'firecrawl-search: no API key in DB or FIRECRAWL_API_KEY; skipping',
     );
     await audit(repo, 'job.firecrawl_search.unconfigured', { reason: 'missing-api-key' }, new Date());
     return { skipped: true, reason: 'missing-api-key' };
@@ -465,7 +502,7 @@ export async function handleFirecrawlSearch(
 
   const client = deps.createClient
     ? deps.createClient({ env })
-    : (createFirecrawlClient({ env }) as unknown as FirecrawlJobClient);
+    : (createFirecrawlClient({ apiKey, env }) as unknown as FirecrawlJobClient);
 
   return runFirecrawlSearchCycle({
     repo,

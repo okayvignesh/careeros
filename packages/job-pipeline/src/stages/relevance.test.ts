@@ -76,6 +76,15 @@ describe('relevance — pure filter stage', () => {
     // both cases flip and fail.
   });
 
+  it('must-have is OR: any one listed skill keeps the job', () => {
+    const out = relevance(
+      job({ skillIds: ['ts', 'react'] }),
+      prefs({ mustHaveSkills: ['rust', 'react', 'go'] }),
+      { now: NOW },
+    );
+    expect(out).toEqual({ relevant: true });
+  });
+
   it('precedence matches the old inline filter: stale beats remote-only', () => {
     const out = relevance(
       job({ remote: false, sourcePostedAt: new Date(NOW.getTime() - 60 * DAY) }),

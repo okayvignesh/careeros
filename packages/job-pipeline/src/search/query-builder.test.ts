@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   ATS_SITE_HINTS,
-  BANNED_PLATFORM_TERMS,
+  PLATFORM_SITE_HINTS,
+  SITE_HINTS,
   buildCandidateSearchQueries,
   containsBannedPlatformTerm,
   type CandidateSearchProfile,
@@ -34,10 +35,45 @@ describe('buildCandidateSearchQueries', () => {
   });
 
   it('biases discovery toward permitted ATS boards via site: hints', () => {
-    const [q] = buildCandidateSearchQueries(profile(), { siteHintsPerQuery: 2 });
+    const [q] = buildCandidateSearchQueries(profile(), {
+      siteHints: ATS_SITE_HINTS,
+      siteHintsPerQuery: 2,
+    });
     expect(q).toContain(`site:${ATS_SITE_HINTS[0]}`);
     expect(q).toContain(`site:${ATS_SITE_HINTS[1]}`);
     expect(q).not.toContain(`site:${ATS_SITE_HINTS[2]}`);
+  });
+
+  it('includes the now-permitted platforms in the default site hints', () => {
+    expect(SITE_HINTS).toEqual(expect.arrayContaining([...ATS_SITE_HINTS, ...PLATFORM_SITE_HINTS]));
+    expect(SITE_HINTS.some((h) => ATS_SITE_HINTS.includes(h))).toBe(true);
+    expect(SITE_HINTS.some((h) => PLATFORM_SITE_HINTS.includes(h))).toBe(true);
+  });
+
+  it('round-robins site hints across queries so platform hosts surface', () => {
+    const queries = buildCandidateSearchQueries(
+      profile({
+        targetRoles: ['A', 'B', 'C', 'D'],
+        locations: ['X'],
+        seniority: [],
+        mustHaveSkills: [],
+        candidateSkills: [],
+        dealbreakerSkills: [],
+      }),
+      { maxRoles: 4, maxLocationsPerRole: 1, maxQueries: 4, siteHintsPerQuery: 3 },
+    );
+    expect(queries).toHaveLength(4);
+
+    // Each query carries at most the per-query cap and they differ.
+    const counts = queries.map((q) => (q.match(/site:/g) ?? []).length);
+    expect(counts.every((n) => n === 3)).toBe(true);
+
+    // First window includes a platform (interleaved), later windows rotate on.
+    expect(queries[0]).toContain('site:linkedin.com/jobs');
+    expect(queries[1]).toContain('site:indeed.com');
+    expect(queries[2]).toContain('site:glassdoor.com');
+    // The union across the first two queries covers distinct hints.
+    expect(queries[0]).not.toEqual(queries[1]);
   });
 
   it('rotates the skill window across queries so coverage broadens', () => {
@@ -70,7 +106,7 @@ describe('buildCandidateSearchQueries', () => {
     expect(buildCandidateSearchQueries(profile({ targetRoles: ['   '] }))).toEqual([]);
   });
 
-  it('never emits a banned platform, even if the profile names one', () => {
+  it('keeps platform names in queries now that Firecrawl may target them', () => {
     const queries = buildCandidateSearchQueries(
       profile({
         targetRoles: ['LinkedIn Recruiter', 'Backend Engineer'],
@@ -78,15 +114,15 @@ describe('buildCandidateSearchQueries', () => {
         mustHaveSkills: ['Glassdoor', 'Naukri', 'Rust'],
         dealbreakerSkills: [],
       }),
+      { siteHints: [] },
     );
-    for (const q of queries) {
-      expect(containsBannedPlatformTerm(q)).toBe(false);
-      for (const banned of BANNED_PLATFORM_TERMS) {
-        expect(q.toLowerCase()).not.toContain(banned);
-      }
+    const all = queries.join(' ').toLowerCase();
+    // The deprecated filter no longer drops these terms.
+    for (const platform of ['linkedin', 'indeed', 'glassdoor', 'naukri']) {
+      expect(all).toContain(platform);
     }
-    // The clean skill still survives; only the poisoned terms are dropped.
     expect(queries[0]).toContain('Rust');
+    for (const q of queries) expect(containsBannedPlatformTerm(q)).toBe(false);
   });
 
   it('marks remote-only candidates as remote and omits an explicit location', () => {

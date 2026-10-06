@@ -9,6 +9,11 @@ import { SessionService } from '../auth/session.service';
 import { SlackController } from './slack.controller';
 import { SlackService } from './slack.service';
 import { SlackOAuthService } from './slack.oauth';
+import { SlackCommandsService } from './slack.commands.service';
+import { SlackEventsService } from './slack.events.service';
+import { SlackInteractiveService } from './slack.interactive.service';
+import { buildSlashRouter } from './slack.slash-commands';
+import { ephemeralText } from './slack.block-kit';
 
 const SECRET = 'controller_test_signing_secret_16char';
 
@@ -40,7 +45,16 @@ function buildController(session: SessionService = fakeSession('u-1')) {
   };
   (slack as unknown as { redis: typeof stub }).redis = stub;
   const oauth = { completeInstall: vi.fn(), loadBotToken: vi.fn() } as unknown as SlackOAuthService;
-  return new SlackController(slack, oauth, session);
+  const commands = { router: () => buildSlashRouter() } as unknown as SlackCommandsService;
+  const events = {
+    handle: vi.fn().mockResolvedValue({ handled: true, action: 'test' }),
+  } as unknown as SlackEventsService;
+  const interactive = {
+    handle: vi.fn(async (p: { actions?: Array<{ action_id?: string }> }) =>
+      ephemeralText(p.actions?.[0]?.action_id ?? 'unknown'),
+    ),
+  } as unknown as SlackInteractiveService;
+  return new SlackController(slack, oauth, session, commands, events, interactive);
 }
 
 /** Sealed-session double: `read` returns a session only when a userId is set. */
@@ -89,7 +103,7 @@ describe('SlackController.events', () => {
     const req = fakeReq(body, sign(body, ts), ts);
     const first = await ctrl.events(req);
     const second = await ctrl.events(fakeReq(body, sign(body, ts), ts));
-    expect(first).toEqual({ ok: true });
+    expect(first).toEqual({ ok: true, handled: true, action: 'test' });
     expect(second).toEqual({ ok: true, dedup: true });
   });
 
@@ -192,7 +206,16 @@ function buildOauth(userId: string | null = 'u-owner') {
     }),
     loadBotToken: vi.fn(),
   } as unknown as SlackOAuthService;
-  return { ctrl: new SlackController(slack, oauth, fakeSession(userId)), slack, oauth };
+  const commands = { router: () => buildSlashRouter() } as unknown as SlackCommandsService;
+  const events = {
+    handle: vi.fn().mockResolvedValue({ handled: false, action: 'test' }),
+  } as unknown as SlackEventsService;
+  const interactive = { handle: vi.fn() } as unknown as SlackInteractiveService;
+  return {
+    ctrl: new SlackController(slack, oauth, fakeSession(userId), commands, events, interactive),
+    slack,
+    oauth,
+  };
 }
 
 describe('SlackController.oauthStart', () => {
@@ -263,7 +286,7 @@ describe('SlackController.oauthCallback', () => {
     const res = await ctrl.oauthCallback('code_123', state, fakeReq(''));
     expect(res).toMatchObject({ ok: true, team: { id: 'T1', name: 'Test' } });
     // Caller-supplied redirect_uri is never consulted; the registered env value is.
-    expect(oauth.completeInstall).toHaveBeenCalledWith('code_123', OAUTH_REDIRECT);
+    expect(oauth.completeInstall).toHaveBeenCalledWith('code_123', OAUTH_REDIRECT, 'u-owner');
   });
 
   it('rejects replay of an already-consumed state', async () => {
@@ -287,7 +310,7 @@ describe('SlackController.oauthCallbackBrowser', () => {
     const state = await slack.createOAuthState('u-owner');
     const res = fakeRes();
     await ctrl.oauthCallbackBrowser('code_123', state, undefined, fakeReq(''), res);
-    expect(oauth.completeInstall).toHaveBeenCalledWith('code_123', OAUTH_REDIRECT);
+    expect(oauth.completeInstall).toHaveBeenCalledWith('code_123', OAUTH_REDIRECT, 'u-owner');
     expect(res.redirect).toHaveBeenCalledWith(
       302,
       'https://web.test/settings/integrations?connected=slack',

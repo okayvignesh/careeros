@@ -44,6 +44,8 @@ export const EmbeddingConfigSchema = z.object({
   model: z.string().min(1).max(120).default('Xenova/bge-small-en-v1.5'),
   externalBaseUrl: PublicUrlSchema.optional(),
   externalApiKey: z.string().min(1).max(500).optional(),
+  /** Expected vector dimension for external mode. Required by the API when mode=external. */
+  dimensions: z.number().int().positive().max(8192).optional(),
 });
 export type EmbeddingConfigInput = z.infer<typeof EmbeddingConfigSchema>;
 
@@ -451,6 +453,25 @@ export type TrendSignalsResponse = z.infer<typeof TrendSignalsResponseSchema>;
 export const SearchProviderStatusSchema = z.enum(['active', 'standby', 'error']);
 export type SearchProviderStatus = z.infer<typeof SearchProviderStatusSchema>;
 
+/**
+ * Definition of one editable provider config field. Mirrors
+ * `ProviderFieldDef` in `@careeros/shared/provider-config`; the API ships the
+ * definition so the settings form is driven by the same source of truth the
+ * server validates against.
+ */
+export const ProviderFieldSchema = z.object({
+  name: z.string().min(1),
+  label: z.string().min(1),
+  secret: z.boolean(),
+  required: z.boolean(),
+  kind: z.enum(['text', 'csv', 'select']).optional(),
+  options: z.array(z.string()).optional(),
+  placeholder: z.string().optional(),
+  help: z.string().optional(),
+  envVar: z.string().optional(),
+});
+export type ProviderField = z.infer<typeof ProviderFieldSchema>;
+
 export const SearchProviderSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
@@ -465,8 +486,24 @@ export const SearchProviderSchema = z.object({
   /** Requests used this month; null = usage tracking not persisted. */
   used: z.number().int().nonnegative().nullable(),
   authNote: z.string(),
+  /** Editable fields for this provider (empty for keyless sources). */
+  fields: z.array(ProviderFieldSchema),
+  /** Non-secret values, DB-first with env fallback. Secrets are never included. */
+  values: z.record(z.string()),
+  /** Secret field → whether a value is stored (DB) or present in env. */
+  has: z.record(z.boolean()),
+  /** True when every required field is present. */
+  configured: z.boolean(),
+  /** Required field names still absent. */
+  missing: z.array(z.string()),
 });
 export type SearchProvider = z.infer<typeof SearchProviderSchema>;
+
+/** `PUT /me/search-providers/:id` body. Secret fields are sent only when changed. */
+export const ProviderFieldsInputSchema = z.object({
+  values: z.record(z.string().max(4000)),
+});
+export type ProviderFieldsInput = z.infer<typeof ProviderFieldsInputSchema>;
 
 export const SearchProviderWorkloadSchema = z.object({
   workload: z.string().min(1),

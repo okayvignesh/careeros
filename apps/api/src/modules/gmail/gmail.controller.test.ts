@@ -3,6 +3,7 @@ import { Reflector } from '@nestjs/core';
 import type { Request, Response } from 'express';
 import { GmailController } from './gmail.controller';
 import { GmailService } from './gmail.service';
+import type { GmailOutboundService } from './gmail.outbound.service';
 import { SessionService } from '../auth/session.service';
 
 /**
@@ -39,8 +40,9 @@ describe('GmailController OAuth return hop', () => {
       }),
     } as unknown as GmailService;
     const session = { read: () => ({ userId: 'u-1' }) } as unknown as SessionService;
+    const outbound = {} as unknown as GmailOutboundService;
     const req = { headers: accept === undefined ? {} : { accept } } as unknown as Request;
-    return { ctrl: new GmailController(gmail, session), req };
+    return { ctrl: new GmailController(gmail, outbound, session), req };
   }
 
   function fakeRes() {

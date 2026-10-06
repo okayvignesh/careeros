@@ -15,7 +15,7 @@
 //      single button row (max 5 per row per Slack limits).
 
 export type SlackBlock =
-  | { type: 'section'; text: { type: 'mrkdwn' | 'plain_text'; text: string; emoji?: boolean }; fields?: Array<{ type: 'mrkdwn' | 'plain_text'; text: string }> }
+  | { type: 'section'; text?: { type: 'mrkdwn' | 'plain_text'; text: string; emoji?: boolean }; fields?: Array<{ type: 'mrkdwn' | 'plain_text'; text: string }> }
   | { type: 'divider' }
   | { type: 'header'; text: { type: 'plain_text'; text: string; emoji?: boolean } }
   | { type: 'context'; elements: Array<{ type: 'mrkdwn' | 'plain_text'; text: string }> }

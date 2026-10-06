@@ -12,8 +12,10 @@ import { runAshbyApply } from './ashby-apply';
 import { runGenericApply } from './generic-apply';
 import { runGreenhouseApply } from './greenhouse-apply';
 import { runIndeedEasyApply } from './indeed-easy-apply';
+import { runLeverApply } from './lever-apply';
 import { runLinkedinEasyApply } from './linkedin-easy-apply';
 import { runNaukriApply } from './naukri-apply';
+import { runWorkdayApply } from './workday-apply';
 import type { FormFillMode, FormFillPage, FormFillPayload, FormFillResult } from './form-fill';
 
 export type FormFillScript = (
@@ -27,6 +29,8 @@ export type FormFillScript = (
 const SCRIPT_MAP: Partial<Record<AgentTaskKind, FormFillScript>> = {
   'ashby-apply': runAshbyApply,
   'greenhouse-apply': runGreenhouseApply,
+  'lever-apply': runLeverApply,
+  'workday-apply': runWorkdayApply,
   'linkedin-easy-apply': runLinkedinEasyApply,
   'indeed-easy-apply': runIndeedEasyApply,
   'naukri-apply': runNaukriApply,

@@ -14,14 +14,33 @@ forbidden_selectors:
 required_headers:
   - user-agent
   - accept-language
-# F.3 form-fill: LinkedIn Easy Apply uses a multi-step modal with
-# dynamic field ids per application. The script linkedin-easy-apply ships
-# as a stub (selectors not yet captured). When a user hits this flow,
-# the selector-health probe will mark it stale and page the operator.
-# ponytail: stub, selectors not yet captured; wire when a user hits
-# this ATS, upgrade path is capture fixtures via LIVE=1 probe then fill
-# this block the same way ashby/greenhouse are filled.
-submit_selector: "button[aria-label*='Submit application']"
-success_signal: "div.artdeco-modal__content:has-text('Application sent')"
+# F.3 form-fill: LinkedIn Easy Apply is a modal funnel. Runs only in the user's
+# own logged-in desktop-agent session (AGENTS.md rule 4: client-side agent is
+# allowed; server-side LinkedIn scraping stays banned).
+field_selectors:
+  name: "input[id*=fullName]"
+  email: "input[id*=email]"
+  phone: "input[id*=phoneNumber]"
+  linkedin_url: "input[id*=linkedin]"
+  resume_upload: "input[type=file]"
+# ponytail: selectors drift; the YAML is the single edit point. `:has-text()`
+# and `:not()` variants deliberately avoided here so selector-health (regex
+# matcher) can grade them; if a tenant needs them, add a per-tenant entry.
+apply_flow:
+  entry: "button.jobs-apply-button"
+  steps:
+    - name: contact
+      advance:
+        - 'button[aria-label*="Continue to next step"]'
+        - 'button[aria-label*="Continue"]'
+    - name: resume
+      advance:
+        - 'button[aria-label*="Continue to next step"]'
+        - 'button[aria-label*="Review your application"]'
+    - name: review
+  submit: 'button[aria-label*="Submit application"]'
+  success: 'div[aria-label*="Application sent"]'
+submit_selector: 'button[aria-label*="Submit application"]'
+success_signal: 'div[aria-label*="Application sent"]'
 pacing_overrides:
   per_min: 3

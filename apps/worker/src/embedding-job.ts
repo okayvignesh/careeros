@@ -3,20 +3,25 @@
 // collection. Idempotent by content hash: repeating the same
 // (sourceId, chunk_idx, hash) upsert is a no-op even across worker restarts.
 //
-// Vectors are semantic only when `EMBEDDING_MODE=local` (the default) and the
-// bge-small-en weights are available; offline the provider permanently falls back
-// to the deterministic embedder with a warning. Vectors written before the provider
-// switch are deterministic — re-enqueue their `embedding.generate` jobs (settings
-// "Re-embed" / `POST /embeddings/reembed`) so they become semantic.
+// The effective mode/model/dimension are resolved from `app_config` (the
+// settings UI's saved embedding config), falling back to `EMBEDDING_MODE`. An
+// external config saved with a 1536-d model therefore produces 1536-d vectors
+// here too; `external` without a saved config throws instead of degrading to
+// deterministic. Vectors written before a provider switch are stale — re-enqueue
+// their `embedding.generate` jobs (settings "Re-embed" / `POST /embeddings/reembed`).
 import { createHash } from 'node:crypto';
 import type { Logger } from 'pino';
 import {
-  createEmbeddingProvider,
-  resolveEmbeddingMode,
+  createProviderFromResolved,
+  loadResolvedEmbeddingConfig,
+  EMBEDDING_API_KEY_PURPOSE,
+  type EmbeddingConfigRepo,
   type EmbeddingLogger,
   type EmbeddingProvider,
   type QdrantStore,
+  type ResolvedEmbeddingConfig,
 } from '@careeros/embeddings';
+import { decryptField, loadMasterKey } from '@careeros/secrets';
 import {
   ALL_COLLECTIONS,
   chunkText,
@@ -24,28 +29,51 @@ import {
   type EmbeddingGeneratePayload,
 } from '@careeros/shared';
 
-/**
- * Process-wide provider, constructed lazily on the first job so the model
- * pipeline is loaded once per worker and the first job's logger carries any
- * fallback warning. `createEmbeddingProvider` does not touch the network until
- * the first `embed()`.
- */
-let provider: EmbeddingProvider | undefined;
+/** Decrypt a sealed `app_config` API key; plaintext legacy values pass through. */
+export function decryptEmbeddingApiKey(stored: string): string {
+  return decryptField(stored, loadMasterKey(), EMBEDDING_API_KEY_PURPOSE);
+}
 
-function getEmbeddingProvider(logger: EmbeddingLogger): EmbeddingProvider {
-  if (!provider) {
-    const cacheDir = process.env.EMBEDDING_MODEL_CACHE_DIR;
-    provider = createEmbeddingProvider({
-      mode: resolveEmbeddingMode(process.env.EMBEDDING_MODE),
-      ...(cacheDir ? { cacheDir } : {}),
-      logger,
-    });
-  }
-  return provider;
+/**
+ * Process-wide provider, rebuilt only when the resolved config signature
+ * changes (settings edit). The BGE pipeline itself is a process-wide singleton
+ * inside the package, so a rebuild does not re-download weights.
+ */
+let cached: { key: string; provider: EmbeddingProvider; dim: number } | undefined;
+
+function configKey(resolved: ResolvedEmbeddingConfig): string {
+  return [
+    resolved.mode,
+    resolved.model,
+    resolved.dim,
+    resolved.external?.baseUrl ?? '',
+    resolved.hasApiKey ? 'key' : 'nokey',
+  ].join('|');
+}
+
+async function resolveEmbeddingProvider(
+  prisma: EmbeddingConfigRepo,
+  logger: EmbeddingLogger,
+): Promise<{ provider: EmbeddingProvider; dim: number }> {
+  const cacheDir = process.env.EMBEDDING_MODEL_CACHE_DIR;
+  const resolved = await loadResolvedEmbeddingConfig(prisma, {
+    envMode: process.env.EMBEDDING_MODE,
+    decryptApiKey: decryptEmbeddingApiKey,
+    logger,
+  });
+  const key = configKey(resolved);
+  if (cached?.key === key) return cached;
+  const provider = createProviderFromResolved(resolved, {
+    logger,
+    ...(cacheDir ? { cacheDir } : {}),
+  });
+  cached = { key, provider, dim: resolved.dim };
+  return cached;
 }
 
 export async function handleEmbeddingGenerate(
   qdrant: QdrantStore,
+  prisma: EmbeddingConfigRepo,
   logger: Logger,
   payload: EmbeddingGeneratePayload,
 ): Promise<{ chunks: number; skipped: number }> {
@@ -64,7 +92,23 @@ export async function handleEmbeddingGenerate(
     return { chunks: 0, skipped: 0 };
   }
 
-  const embed = getEmbeddingProvider(child);
+  const { provider: embed, dim } = await resolveEmbeddingProvider(prisma, child);
+
+  // Keep the collection aligned with the *current* effective dimension. A
+  // settings change to a differently-sized external model recreates the
+  // collection here (and on the next bootstrap), so the upsert never fails on a
+  // dimension mismatch.
+  const outcome = await qdrant.ensureCollection(collection, dim, {
+    recreateOnMismatch: true,
+    logger: child,
+  });
+  if (outcome === 'recreated') {
+    child.warn(
+      { collection, dim },
+      'qdrant collection recreated at a new embedding dimension; previously stored vectors were dropped — re-enqueue embedding.generate for this collection (Settings → Re-embed)',
+    );
+  }
+
   const now = new Date().toISOString();
   const points: Array<{
     id: string;
@@ -84,11 +128,17 @@ export async function handleEmbeddingGenerate(
       timestamp: now,
       ...(meta ?? {}),
     };
-    points.push({ id: pointId, vector: await embed.embed(c.text), payload });
+    const vector = await embed.embed(c.text);
+    if (vector.length !== dim) {
+      throw new Error(
+        `embedding dimension mismatch: provider produced ${vector.length}, collection '${collection}' expects ${dim}`,
+      );
+    }
+    points.push({ id: pointId, vector, payload });
   }
 
   await qdrant.upsert(collection, points);
-  child.info({ chunks: points.length }, 'embedded + upserted');
+  child.info({ chunks: points.length, dim }, 'embedded + upserted');
   return { chunks: points.length, skipped: 0 };
 }
 

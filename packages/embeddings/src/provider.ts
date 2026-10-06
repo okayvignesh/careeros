@@ -8,19 +8,22 @@
  *   missing model throws, so this mode is wrapped in `FallbackEmbeddingProvider`.
  * - `deterministic`: the offline SHA-256 fallback in `local.ts`, never touches
  *   the network (useful for CI and fully air-gapped installs).
- * - `external`: a pluggable hosted adapter injected by the caller; no adapter
- *   ships in this package, so an unconfigured external mode degrades to
- *   deterministic with a warning.
+ * - `external`: the OpenAI-compatible `/embeddings` adapter in `external.ts`,
+ *   built from an `ExternalEmbeddingConfig` (`externalConfig`). An external mode
+ *   without a config throws `EmbeddingConfigError` — it never silently degrades;
+ *   a configured one never silently degrades either, call failures throw.
  *
  * Callers should read `mode`/`model`/`dim` off the provider they actually got:
  * after a local failure the reported mode is `deterministic`, never a stale
- * `bge-small-en` claim. Dimension is always 384.
+ * `bge-small-en` claim. Local/deterministic dimensions are 384; `external`
+ * reports the configured model dimension (e.g. 1536).
  */
 import { EMBED_DIM, embedDeterministic } from './local';
+import { createExternalEmbeddingProvider, type ExternalEmbeddingConfig } from './external';
 
 /** Which embedding backend is active. `local` downloads model weights on first
- * use; `deterministic` never touches the network; `external` is a pluggable
- * seam with no adapter shipped in this package. */
+ * use; `deterministic` never touches the network; `external` calls a hosted
+ * OpenAI-compatible `/embeddings` endpoint. */
 export type EmbeddingMode = 'local' | 'deterministic' | 'external';
 
 export const DEFAULT_EMBEDDING_MODE: EmbeddingMode = 'local';
@@ -169,6 +172,18 @@ export class FallbackEmbeddingProvider implements EmbeddingProvider {
   }
 }
 
+/**
+ * Raised when `external` mode is requested without a usable config. The mode is
+ * an explicit operator choice, so an unconfigured external backend fails loudly
+ * rather than quietly poisoning the vector space with deterministic vectors.
+ */
+export class EmbeddingConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'EmbeddingConfigError';
+  }
+}
+
 export interface CreateEmbeddingProviderOptions {
   mode?: EmbeddingMode;
   model?: string;
@@ -176,6 +191,13 @@ export interface CreateEmbeddingProviderOptions {
   logger?: EmbeddingLogger;
   /** Optional external adapter, used only when `mode === 'external'`. */
   external?: EmbeddingProvider;
+  /**
+   * Optional external adapter config. When `mode === 'external'` and no
+   * `external` instance is supplied, the OpenAI-compatible adapter is built
+   * from this. A configured-but-invalid config throws rather than silently
+   * degrading to deterministic.
+   */
+  externalConfig?: ExternalEmbeddingConfig;
 }
 
 /** Parse `EMBEDDING_MODE`; unknown/empty values fall back to the default. */
@@ -193,11 +215,11 @@ export function createEmbeddingProvider(
 
   if (mode === 'external') {
     if (options.external) return options.external;
-    options.logger?.warn(
-      { mode },
-      'external embedding provider not configured; using deterministic fallback',
+    if (options.externalConfig) return createExternalEmbeddingProvider(options.externalConfig);
+    // `external` is an explicit choice; never silently degrade to deterministic.
+    throw new EmbeddingConfigError(
+      'external embedding mode is enabled but no external provider/config was supplied',
     );
-    return new DeterministicEmbedder();
   }
 
   const bgeOptions: BgeSmallOptions = {};

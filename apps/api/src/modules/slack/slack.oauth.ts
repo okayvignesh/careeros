@@ -84,7 +84,11 @@ export class SlackOAuthService {
    * Exchange the temporary `code` for a bot token, then encrypt + store it.
    * `redirectUri` MUST match the one registered in the Slack app manifest.
    */
-  async completeInstall(code: string, redirectUri: string): Promise<SlackOAuthResult> {
+  async completeInstall(
+    code: string,
+    redirectUri: string,
+    userId?: string,
+  ): Promise<SlackOAuthResult> {
     const clientId = process.env.SLACK_CLIENT_ID;
     const clientSecret = process.env.SLACK_CLIENT_SECRET;
     if (!clientId || !clientSecret) {
@@ -116,7 +120,7 @@ export class SlackOAuthService {
     }
 
     const ciphertext = encrypt(json.access_token, KEY, PURPOSE);
-    await this.prisma.encryptedSecret.upsert({
+    const secret = await this.prisma.encryptedSecret.upsert({
       where: {
         ownerType_ownerId_purpose: {
           ownerType: 'system',
@@ -132,6 +136,30 @@ export class SlackOAuthService {
       },
       update: { ciphertext },
     });
+
+    // Bind the workspace to the Career OS user who started the install so
+    // inbound Slack interactions can be attributed (single-user default, but
+    // the binding is what makes multi-user possible later). Omitted for
+    // out-of-band installs that call completeInstall directly.
+    if (userId) {
+      const metadata = {
+        teamId: json.team.id,
+        teamName: json.team.name ?? null,
+        botUserId: json.bot_user_id ?? null,
+        appId: json.app_id ?? null,
+      };
+      await this.prisma.integration.upsert({
+        where: { userId_kind: { userId, kind: 'slack' } },
+        create: {
+          userId,
+          kind: 'slack',
+          status: 'connected',
+          tokenSecretId: secret.id,
+          metadata,
+        },
+        update: { status: 'connected', tokenSecretId: secret.id, metadata },
+      });
+    }
 
     const scopes = (json.scope ?? '').split(',').filter(Boolean);
     const audit = auditSlackScopes(scopes);

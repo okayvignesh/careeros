@@ -191,6 +191,8 @@ export class SlackService implements OnModuleDestroy {
     text: string;
     blocks?: unknown[];
     metadata?: Record<string, unknown>;
+    /** Reply in a thread (Events API quick-action replies). */
+    thread_ts?: string;
   }): Promise<{ ok: boolean; ts?: string; error?: string }> {
     const stored = this.oauth ? await this.oauth.loadBotToken().catch(() => null) : null;
     const token = stored ?? process.env.SLACK_BOT_TOKEN ?? null;
@@ -201,6 +203,7 @@ export class SlackService implements OnModuleDestroy {
       const res = await client.chat.postMessage({
         channel: args.channel,
         text: args.text,
+        ...(args.thread_ts ? { thread_ts: args.thread_ts } : {}),
         // ponytail: the Block Kit builder in this module owns the shape; the
         // WebClient's Block union is structurally compatible, so assert at the
         // boundary rather than re-importing @slack/types.

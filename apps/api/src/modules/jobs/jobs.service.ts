@@ -5,11 +5,13 @@ import { InjectionBlockedError, renderPrompt, wrapUntrusted, type AIProvider } f
 import {
   adapters as allAdapters,
   buildCandidateSearchQueries,
+  createConfiguredAdapter,
   createFirecrawlAdapter,
   freshness,
   relevance,
   planIngest,
   computeMatchResult,
+  titleMatchesRoles,
   MissingCredentialError,
   type JobSourceAdapter,
   type NormalizedJob,
@@ -21,7 +23,9 @@ import { UsageService } from '../usage/usage.service';
 import { UsageCache } from '../usage/usage.cache';
 import { SensitivityGateService } from '../../common/sensitivity-gate.service';
 import { ProviderLoaderService } from '../../common/provider-loader.service';
+import { ProviderConfigService } from '../../common/provider-config.service';
 import { JobPreferencesService } from '../job-prefs/job-prefs.service';
+import { resolveSkillNamesToIds } from '../skills/skill-name-resolver';
 
 export interface JobsSyncStats {
   adapter: string;
@@ -64,6 +68,7 @@ export interface RejectStats {
   mustHaveMissing: number;
   hasDealbreaker: number;
   companyBlacklisted: number;
+  roleMismatch: number;
   stale: number;
   /** How many rows were considered before filtering. Gives the UI honest pool scope. */
   scanned: number;
@@ -77,6 +82,13 @@ export interface RejectStats {
  */
 const FRESHNESS_DAYS = 45;
 const AGING_DAYS = 14;
+/**
+ * Max rows loaded per list request. The relevance filter + match sort run
+ * in-memory over the whole eligible pool, then we slice the page — so paging is
+ * globally correct (page N sorts the same set as page 1). ponytail: fine up to
+ * ~2k jobs; materialize per-user match rows when the pool outgrows this.
+ */
+const LIST_SCAN_CAP = 2000;
 
 @Injectable()
 export class JobsService {
@@ -92,7 +104,38 @@ export class JobsService {
     private readonly sensitivity: SensitivityGateService,
     private readonly prefs: JobPreferencesService,
     private readonly providerLoader: ProviderLoaderService,
+    private readonly providerConfig: ProviderConfigService,
   ) {}
+
+  /**
+   * Resolve the adapter to run: the DB-configured instance when credentials are
+   * stored, else the env-reading default from the registry. Config errors fall
+   * back to the default rather than failing the sync.
+   */
+  private async configuredAdapter(
+    adapterId: string,
+    fallback: JobSourceAdapter,
+  ): Promise<JobSourceAdapter> {
+    try {
+      const creds = await this.providerConfig.resolve(adapterId);
+      return createConfiguredAdapter(adapterId, creds) ?? fallback;
+    } catch (err) {
+      this.logger.warn(
+        `jobs: provider config for ${adapterId} unavailable, using default: ${(err as Error).message}`,
+      );
+      return fallback;
+    }
+  }
+
+  /** Firecrawl API key from the DB config, else env. undefined when neither is set. */
+  private async firecrawlApiKey(): Promise<string | undefined> {
+    try {
+      const creds = await this.providerConfig.resolve('firecrawl');
+      return creds.secrets['apiKey']?.trim() || undefined;
+    } catch {
+      return undefined;
+    }
+  }
 
   listAdapters() {
     return Object.values(this.adapters).map((a) => ({
@@ -123,8 +166,9 @@ export class JobsService {
    * method from the API — that would be the half-migration.
    */
   async sync(adapterId: string): Promise<JobsSyncStats> {
-    const adapter = this.adapters[adapterId];
-    if (!adapter) throw new NotFoundException(`Unknown adapter: ${adapterId}`);
+    const base = this.adapters[adapterId];
+    if (!base) throw new NotFoundException(`Unknown adapter: ${adapterId}`);
+    const adapter = await this.configuredAdapter(adapterId, base);
     const raws = await adapter.fetch();
     return this.ingest(raws, adapterId);
   }
@@ -132,9 +176,10 @@ export class JobsService {
   /**
    * F7 candidate-targeted search. Derives bounded Firecrawl queries from the
    * candidate's career goals, job preferences and demonstrated skills, fetches
-   * through the Firecrawl adapter (banned platforms filtered, `DISCOVERED`
-   * trust kept), then runs the identical ingest funnel as `sync`. A missing
-   * Firecrawl key degrades to a clean zero-stat no-op.
+   * through the Firecrawl adapter (`DISCOVERED` trust kept; LinkedIn/Indeed/
+   * Naukri/Glassdoor permitted via Firecrawl per owner decision 2026-10-06),
+   * then runs the identical ingest funnel as `sync`. A missing Firecrawl key
+   * degrades to a clean zero-stat no-op.
    */
   async syncCandidateSearch(
     userId: string,
@@ -154,7 +199,9 @@ export class JobsService {
       this.logger.warn(`candidate ${userId} has no target roles; firecrawl search skipped`);
       return stats;
     }
-    const adapter = adapterOverride ?? createFirecrawlAdapter({ queries });
+    const apiKey = await this.firecrawlApiKey();
+    const adapter =
+      adapterOverride ?? createFirecrawlAdapter({ queries, ...(apiKey ? { apiKey } : {}) });
     let raws: RawJob[];
     try {
       raws = await adapter.fetch();
@@ -360,17 +407,12 @@ export class JobsService {
     // Same set and same canonical scorer as MatcherService.scoreJob, so the
     // list score and the detail score cannot diverge for one job/candidate.
     // One batched read per request — constant regardless of page size.
-    const [rows, total, skillStates, prefs] = await Promise.all([
+    const [rows, skillStates, prefs] = await Promise.all([
       this.prisma.normalizedJob.findMany({
         where,
         orderBy: [{ sourcePostedAt: { sort: 'desc', nulls: 'last' } }, { firstSeenAt: 'desc' }],
-        // Over-fetch so we can score-then-sort client-side in this method; DB
-        // can't sort by a computed match without materializing per-user scores.
-        // ponytail: acceptable up to ~2k jobs and offset < ~1k; precompute +
-        // `user_job_match` lands when either ceiling is hit.
-        take: Math.max(limit, limit + offset) * 2,
+        take: LIST_SCAN_CAP,
       }),
-      this.prisma.normalizedJob.count({ where }),
       this.prisma.candidateSkillState.findMany({
         where: { userId: params.userId },
         select: { skillId: true, proficiency: true, recencyDays: true },
@@ -389,6 +431,7 @@ export class JobsService {
       mustHaveMissing: 0,
       hasDealbreaker: 0,
       companyBlacklisted: 0,
+      roleMismatch: 0,
       stale: 0,
       scanned: rows.length,
     };
@@ -405,7 +448,19 @@ export class JobsService {
         prefs,
         { maxAgeDays: FRESHNESS_DAYS, now: nowMs },
       );
-      if (result.relevant) return true;
+      if (result.relevant) {
+        // Drop titles unrelated to the candidate's target roles. "Similar" is
+        // fine; clearly different functions (finance, account exec, marketing)
+        // are not. No-op when the user hasn't set target roles.
+        if (
+          (prefs.targetRoles?.length ?? 0) > 0 &&
+          !titleMatchesRoles(r.title, prefs.targetRoles ?? [])
+        ) {
+          rejected.roleMismatch++;
+          return false;
+        }
+        return true;
+      }
       switch (result.reason) {
         case 'stale':
           rejected.stale++;
@@ -446,6 +501,9 @@ export class JobsService {
       return bs - as;
     });
     const paged = scored.slice(offset, offset + limit);
+    // Total is the count of jobs that actually pass the filter (not the raw DB
+    // count), so the UI page count matches what the user can browse.
+    const total = scored.length;
 
     return {
       total,
@@ -501,13 +559,14 @@ export class JobsService {
       this.logger.warn('skill catalogue empty; extraction is a no-op. Run the worker seed first.');
       return stats;
     }
-    const knownIds = new Set(catalogue.map((s) => s.id));
     const catalogueRendered = catalogue.map((s) => `- ${s.id} (${s.name})`).join('\n');
 
     for (const job of jobs) {
       try {
         const extracted = await this.extractSkillsForOne(userId, provider, job, catalogueRendered);
-        const validIds = extracted.skillIds.filter((id) => knownIds.has(id));
+        // The model may return catalogue *names* rather than ids; resolve either,
+        // drop unknowns. Without this, name-shaped output was silently discarded.
+        const validIds = resolveSkillNamesToIds(extracted.skillIds, catalogue);
         await this.prisma.normalizedJob.update({
           where: { id: job.id },
           data: { skillIds: validIds, skillsExtractedAt: new Date() },
@@ -536,7 +595,6 @@ export class JobsService {
     const provider = await this.tryLoadProvider(userId);
     if (!provider) throw new BadRequestException('LLM provider not configured or paused');
     const catalogue = await this.prisma.skill.findMany({ select: { id: true, name: true } });
-    const knownIds = new Set(catalogue.map((s) => s.id));
     const catalogueRendered = catalogue.map((s) => `- ${s.id} (${s.name})`).join('\n');
     let extracted: JobSkillExtraction;
     try {
@@ -552,7 +610,7 @@ export class JobsService {
       }
       throw err;
     }
-    const validIds = extracted.skillIds.filter((id) => knownIds.has(id));
+    const validIds = resolveSkillNamesToIds(extracted.skillIds, catalogue);
     await this.prisma.normalizedJob.update({
       where: { id: job.id },
       data: { skillIds: validIds, skillsExtractedAt: new Date() },

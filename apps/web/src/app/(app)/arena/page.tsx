@@ -1,3 +1,5 @@
+import Link from 'next/link';
+import { ArrowRight, Mic } from 'lucide-react';
 import { Eyebrow } from '@careeros/ui';
 import { ArenaOverview } from '@/components/arena/ArenaOverview';
 
@@ -14,6 +16,22 @@ export default function ArenaPage() {
           signals; proficiency is capability. The two are tracked separately.
         </p>
       </header>
+      <Link
+        href="/arena/verbal"
+        data-testid="arena-verbal-entry"
+        className="flex items-center justify-between gap-4 rounded-[var(--radius)] border border-accent/40 bg-accent/10 px-5 py-4 transition-colors hover:bg-accent/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--accent))] focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--bg))]"
+      >
+        <span className="flex items-start gap-3">
+          <Mic className="mt-0.5 h-5 w-5 shrink-0 text-accent" />
+          <span className="flex flex-col gap-0.5">
+            <span className="text-[15px] font-medium text-fg">Verbal defense</span>
+            <span className="text-[13px] leading-relaxed text-fg-muted">
+              Answer a prompt aloud. The transcript is graded against its key points.
+            </span>
+          </span>
+        </span>
+        <ArrowRight className="h-4 w-4 shrink-0 text-accent" />
+      </Link>
       <ArenaOverview />
     </main>
   );

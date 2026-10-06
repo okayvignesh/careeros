@@ -1,5 +1,21 @@
 import Link from 'next/link';
-import { Activity, ArrowUpRight, Boxes, Briefcase, Cpu, MonitorSmartphone, Receipt, ScrollText, Sparkles } from 'lucide-react';
+import {
+  Activity,
+  ArrowUpRight,
+  Bell,
+  Boxes,
+  Briefcase,
+  Cpu,
+  DatabaseBackup,
+  KeyRound,
+  Lock,
+  MonitorSmartphone,
+  Receipt,
+  Rss,
+  ScrollText,
+  Search,
+  Sparkles,
+} from 'lucide-react';
 import { Eyebrow } from '@careeros/ui';
 
 const cards = [
@@ -22,6 +38,18 @@ const cards = [
     body: 'Switch between local bge-small and an external embedding endpoint. Re-embed your corpus.',
   },
   {
+    href: '/settings/search-providers',
+    icon: Search,
+    title: 'Search providers',
+    body: 'The external job source adapters this install is wired to, their hosts, rate limits and workloads.',
+  },
+  {
+    href: '/settings/job-sources',
+    icon: Rss,
+    title: 'Job sources',
+    body: 'The tiered source model: employer and ATS feeds first, authorised platforms second, discovery last.',
+  },
+  {
     href: '/settings/integrations',
     icon: Activity,
     title: 'Integrations',
@@ -32,6 +60,30 @@ const cards = [
     icon: MonitorSmartphone,
     title: 'Devices',
     body: 'Download the desktop agent, pair a machine, see last-seen status, and revoke access.',
+  },
+  {
+    href: '/settings/notifications',
+    icon: Bell,
+    title: 'Notifications',
+    body: 'What gets sent, where, and when. The daily brief schedule and delivery channels.',
+  },
+  {
+    href: '/settings/backup',
+    icon: DatabaseBackup,
+    title: 'Backup & storage',
+    body: 'What to back up, on what schedule, and which files exist only on this host.',
+  },
+  {
+    href: '/settings/security',
+    icon: KeyRound,
+    title: 'Security',
+    body: 'Register and revoke passkeys, rotate the master key, and review what is encrypted at rest.',
+  },
+  {
+    href: '/settings/data',
+    icon: Lock,
+    title: 'Data & privacy',
+    body: 'Export everything, understand the sensitivity labels, and delete your account through re-authentication.',
   },
   {
     href: '/settings/workers',

@@ -5,6 +5,7 @@ import { StorageModule } from './common/storage.module';
 import { QueueModule } from './common/queue.module';
 import { SensitivityGateModule } from './common/sensitivity-gate.module';
 import { ProviderLoaderModule } from './common/provider-loader.module';
+import { ProviderConfigModule } from './common/provider-config.module';
 import { InjectionAuditModule } from './common/injection-audit.module';
 import { MetricsModule } from './common/metrics/metrics.module';
 import { HttpMetricsMiddleware } from './common/metrics/http-metrics.middleware';
@@ -19,6 +20,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { ProvidersModule } from './modules/providers/providers.module';
 import { EmbeddingsModule } from './modules/embeddings/embeddings.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
+import { RepositoryAnalysisModule } from './modules/repository-analysis/repository-analysis.module';
 import { GitlabModule } from './modules/integrations/gitlab/gitlab.module';
 import { ResumeModule } from './modules/resume/resume.module';
 import { GoalsModule } from './modules/goals/goals.module';
@@ -88,6 +90,7 @@ const loggerParams: Params = {
     QueueModule,
     SensitivityGateModule,
     ProviderLoaderModule,
+    ProviderConfigModule,
     InjectionAuditModule,
     MetricsModule,
     AuthModule,
@@ -95,6 +98,7 @@ const loggerParams: Params = {
     EmbeddingsModule,
     IntegrationsModule,
     GitlabModule,
+    RepositoryAnalysisModule,
     ResumeModule,
     GoalsModule,
     RecoveryModule,

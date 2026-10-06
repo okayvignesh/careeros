@@ -53,6 +53,7 @@ function makeService(prisma: PrismaClient, adapterId: string, raws: RawJob[]): J
     {} as never,
     {} as never,
     {} as never,
+    { resolve: async () => ({ values: {}, secrets: {} }) } as never,
   );
   (svc as unknown as { adapters: Record<string, unknown> }).adapters = {
     [adapterId]: {

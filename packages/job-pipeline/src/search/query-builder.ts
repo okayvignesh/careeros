@@ -4,8 +4,9 @@
  * Turns a candidate's career goals (target roles, locations, remote-only,
  * seniority), job preferences (must-have / dealbreaker skills) and demonstrated
  * skills into a bounded set of web-search queries. The queries bias discovery
- * toward public ATS/career boards (U6-permitted) and never mention a banned
- * platform (LinkedIn/Indeed/Naukri/Glassdoor, AGENTS.md §3.4).
+ * toward public ATS/career boards and the major job platforms now permitted via
+ * Firecrawl (owner decision 2026-10-06: LinkedIn/Indeed/Naukri/Glassdoor may be
+ * discovered + scraped through Firecrawl only).
  *
  * Pure + injectable: no network, no clock. The worker/service feeds the strings
  * to `FirecrawlClient.search()`.
@@ -25,7 +26,31 @@ export const ATS_SITE_HINTS: readonly string[] = [
   'myworkdayjobs.com',
 ];
 
-/** Banned-platform tokens. A query containing any of these is dropped. */
+/**
+ * Major-platform hosts now permitted via Firecrawl (owner decision 2026-10-06).
+ * Discovery + scrape of their pages is allowed through Firecrawl; direct
+ * first-party scraping and non-Firecrawl third-party scrapers stay banned.
+ */
+export const PLATFORM_SITE_HINTS: readonly string[] = [
+  'linkedin.com/jobs',
+  'indeed.com',
+  'naukri.com',
+  'glassdoor.com',
+];
+
+/**
+ * Default `site:` hints: ATS boards interleaved with the permitted platforms.
+ * Interleaving (rather than appending) means a low per-query cap still surfaces
+ * platform hits in the first emitted queries instead of only after the ATS
+ * hosts run out.
+ */
+export const SITE_HINTS: readonly string[] = interleave(ATS_SITE_HINTS, PLATFORM_SITE_HINTS);
+
+/**
+ * @deprecated Owner decision 2026-10-06 permits LinkedIn/Indeed/Naukri/Glassdoor
+ * via Firecrawl, so these tokens no longer filter anything. Kept exported for
+ * import compatibility; see {@link containsBannedPlatformTerm}.
+ */
 export const BANNED_PLATFORM_TERMS: readonly string[] = [
   'linkedin',
   'indeed',
@@ -61,9 +86,9 @@ export interface BuildCandidateSearchQueriesOptions {
   maxLocationsPerRole?: number;
   /** Max dealbreaker negatives attached to one query. Default 4. */
   maxDealbreakersPerQuery?: number;
-  /** Site hints; defaults to {@link ATS_SITE_HINTS}. Pass [] to disable. */
+  /** Site hints; defaults to {@link SITE_HINTS}. Pass [] to disable. */
   siteHints?: readonly string[];
-  /** How many site hints per query. Default 3. */
+  /** How many site hints per query, round-robined across queries. Default 3. */
   siteHintsPerQuery?: number;
 }
 
@@ -91,10 +116,8 @@ export function buildCandidateSearchQueries(
   const maxLocationsPerRole = options.maxLocationsPerRole ?? DEFAULTS.maxLocationsPerRole;
   const maxDealbreakersPerQuery =
     options.maxDealbreakersPerQuery ?? DEFAULTS.maxDealbreakersPerQuery;
-  const siteHints = (options.siteHints ?? ATS_SITE_HINTS).slice(
-    0,
-    options.siteHintsPerQuery ?? DEFAULTS.siteHintsPerQuery,
-  );
+  const siteHintPool = options.siteHints ?? SITE_HINTS;
+  const siteHintsPerQuery = options.siteHintsPerQuery ?? DEFAULTS.siteHintsPerQuery;
 
   const roles = dedupeTerms(profile.targetRoles).slice(0, maxRoles);
   if (roles.length === 0) return [];
@@ -133,6 +156,7 @@ export function buildCandidateSearchQueries(
       else if (profile.remoteOnly) parts.push('remote');
       else parts.push('remote OR onsite');
       parts.push(...skills);
+      const siteHints = pickSiteHints(siteHintPool, siteHintsPerQuery, queries.length);
       if (siteHints.length > 0) {
         parts.push(`(${siteHints.map((h) => `site:${h}`).join(' OR ')})`);
       }
@@ -141,7 +165,6 @@ export function buildCandidateSearchQueries(
       const query = normalizeWhitespace(parts.join(' '));
       const key = query.toLowerCase();
       if (seen.has(key)) continue;
-      if (containsBannedPlatformTerm(query)) continue;
       seen.add(key);
       queries.push(query);
     }
@@ -150,10 +173,14 @@ export function buildCandidateSearchQueries(
   return queries;
 }
 
-/** True when a term/query references a banned platform. Also true on empty. */
-export function containsBannedPlatformTerm(value: string): boolean {
-  const needle = value.toLowerCase();
-  return BANNED_PLATFORM_TERMS.some((term) => needle.includes(term));
+/**
+ * @deprecated No-op since owner decision 2026-10-06 (LinkedIn/Indeed/Naukri/
+ * Glassdoor are permitted via Firecrawl). Always returns `false`; kept so
+ * existing importers keep compiling. Use {@link BANNED_PLATFORM_TERMS} only as
+ * a historical record.
+ */
+export function containsBannedPlatformTerm(_value: string): boolean {
+  return false;
 }
 
 function dedupeTerms(terms: readonly string[]): string[] {
@@ -162,11 +189,44 @@ function dedupeTerms(terms: readonly string[]): string[] {
   for (const raw of terms) {
     const trimmed = normalizeWhitespace(raw);
     if (!trimmed) continue;
-    if (containsBannedPlatformTerm(trimmed)) continue;
     const key = trimmed.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(trimmed);
+  }
+  return out;
+}
+
+/**
+ * Round-robin `perQuery` site hints starting at `index`, wrapping the pool and
+ * never exceeding `perQuery` (or the pool size). Bounded by design so a query
+ * never balloons with dozens of `site:` clauses.
+ */
+function pickSiteHints(
+  pool: readonly string[],
+  perQuery: number,
+  index: number,
+): string[] {
+  if (pool.length === 0 || perQuery <= 0) return [];
+  const count = Math.min(perQuery, pool.length);
+  const start = (index * perQuery) % pool.length;
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < count; i++) {
+    const hint = pool[(start + i) % pool.length]!;
+    if (seen.has(hint)) continue;
+    seen.add(hint);
+    out.push(hint);
+  }
+  return out;
+}
+
+/** Alternate two lists: a[0], b[0], a[1], b[1], … then any remainder. */
+function interleave(a: readonly string[], b: readonly string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    if (i < a.length) out.push(a[i]!);
+    if (i < b.length) out.push(b[i]!);
   }
   return out;
 }

@@ -107,11 +107,11 @@ describe('createEmbeddingProvider mode selection', () => {
     expect(refs.pipelineCalls).toHaveLength(0);
   });
 
-  it('external mode falls back to deterministic with a warning when no adapter is wired', async () => {
-    const { logger, warns } = makeLogger();
-    const provider = createEmbeddingProvider({ mode: 'external', logger });
-    expect(provider.mode).toBe('deterministic');
-    expect(warns[0]?.msg).toMatch(/external embedding provider not configured/i);
+  it('external mode throws (never silently degrades) when no adapter is wired', async () => {
+    const { logger } = makeLogger();
+    expect(() => createEmbeddingProvider({ mode: 'external', logger })).toThrow(
+      /no external provider\/config/i,
+    );
   });
 
   it('external mode uses an injected adapter when provided', async () => {

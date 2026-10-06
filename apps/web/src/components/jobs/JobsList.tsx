@@ -1,11 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ArrowUpRight, FileText, Mail, RefreshCw, Sliders, Sparkles, Target, X } from 'lucide-react';
+import { Eye, FileText, Mail, MoreHorizontal, RefreshCw, Search, Sliders, Sparkles, Target, X } from 'lucide-react';
 import { ThinkingOrb } from 'thinking-orbs';
-import { Button } from '@careeros/ui';
+import { Button, cn } from '@careeros/ui';
 import { apiGet, apiPost } from '@/lib/api-client';
 import { useApi } from '@/lib/use-api';
 
@@ -45,6 +45,7 @@ interface ListResponse {
     mustHaveMissing: number;
     hasDealbreaker: number;
     companyBlacklisted: number;
+    roleMismatch: number;
     stale: number;
     scanned: number;
   };
@@ -66,22 +67,37 @@ interface AdapterInfo {
   attribution: string;
 }
 
+interface ProviderRow {
+  id: string;
+  name: string;
+  status: 'active' | 'standby';
+  authNote: string;
+}
+
+const PAGE_SIZE = 50;
+
 export function JobsList() {
   const router = useRouter();
   const search = useSearchParams();
   const skillFilter = search.get('skill') ?? '';
   const [adapters, setAdapters] = useState<AdapterInfo[]>([]);
+  const [providers, setProviders] = useState<ProviderRow[]>([]);
+  const [providerId, setProviderId] = useState('remotive');
+  const [openMenu, setOpenMenu] = useState<string | null>(null);
+  const [offset, setOffset] = useState(0);
   const [syncing, setSyncing] = useState(false);
+  const [finding, setFinding] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const [lastSync, setLastSync] = useState<SyncStats | null>(null);
+  const [lastFind, setLastFind] = useState<SyncStats | null>(null);
   const [lastExtract, setLastExtract] = useState<SkillExtractionStats | null>(null);
+  const [extractProgress, setExtractProgress] = useState<string | null>(null);
 
   const load = useCallback(() => {
-    const url = skillFilter
-      ? `/jobs?limit=50&skill=${encodeURIComponent(skillFilter)}`
-      : '/jobs?limit=50';
+    const base = `/jobs?limit=${PAGE_SIZE}&offset=${offset}`;
+    const url = skillFilter ? `${base}&skill=${encodeURIComponent(skillFilter)}` : base;
     return apiGet<ListResponse>(url);
-  }, [skillFilter]);
+  }, [skillFilter, offset]);
   const { data, error, setError, refetch } = useApi(load);
 
   useEffect(() => {
@@ -90,12 +106,50 @@ export function JobsList() {
       .catch(() => setAdapters([]));
   }, []);
 
+  useEffect(() => {
+    apiGet<{ providers: ProviderRow[] }>('/me/search-providers')
+      .then((r) => {
+        setProviders(r.providers);
+        setProviderId((cur) => {
+          const eligible = r.providers.filter(
+            (p) => p.id !== 'firecrawl' && p.status === 'active',
+          );
+          if (eligible.some((p) => p.id === cur)) return cur;
+          return eligible[0]?.id ?? 'remotive';
+        });
+      })
+      .catch(() => setProviders([]));
+  }, []);
+
   async function extractSkills() {
     setExtracting(true);
     setError(null);
+    setExtractProgress('Scoring…');
     try {
-      const stats = await apiPost<SkillExtractionStats>('/admin/jobs/extract-skills?limit=20');
-      setLastExtract(stats);
+      // Loop until a batch scans nothing (all jobs attempted). Capped so a
+      // stuck server can't spin forever; stays user-initiated (no auto-LLM).
+      const MAX_BATCHES = 10;
+      const totals: SkillExtractionStats = { scanned: 0, extracted: 0, skipped: 0, errors: 0 };
+      for (let i = 0; i < MAX_BATCHES; i++) {
+        const stats = await apiPost<SkillExtractionStats>('/admin/jobs/extract-skills?limit=100');
+        totals.scanned += stats.scanned;
+        totals.extracted += stats.extracted;
+        totals.skipped += stats.skipped;
+        totals.errors += stats.errors;
+        setLastExtract({ ...totals });
+        setExtractProgress(
+          `Scored ${totals.extracted} of ${totals.scanned} scanned` +
+            (totals.errors > 0 ? `, ${totals.errors} errors` : '') +
+            '…',
+        );
+        if (stats.scanned === 0) break;
+        // No progress this pass (all remaining were injection-blocked): stop so
+        // we don't re-scan the same tail forever.
+        if (stats.extracted === 0 && stats.errors === 0) break;
+      }
+      setExtractProgress(
+        `Done — ${totals.extracted} scored, ${totals.skipped} skipped, ${totals.errors} errors.`,
+      );
       await refetch();
     } catch (e) {
       setError((e as Error).message);
@@ -112,13 +166,27 @@ export function JobsList() {
     setSyncing(true);
     setError(null);
     try {
-      const stats = await apiPost<SyncStats>('/admin/jobs/sync/remotive');
+      const stats = await apiPost<SyncStats>(`/admin/jobs/sync/${providerId}`);
       setLastSync(stats);
       await refetch();
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setSyncing(false);
+    }
+  }
+
+  async function findJobs() {
+    setFinding(true);
+    setError(null);
+    try {
+      const stats = await apiPost<SyncStats>('/admin/jobs/candidate-search', {});
+      setLastFind(stats);
+      await refetch();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setFinding(false);
     }
   }
 
@@ -133,6 +201,9 @@ export function JobsList() {
 
   const activeSources = new Set(data.jobs.map((j) => j.primarySource));
   const visibleAttributions = adapters.filter((a) => activeSources.has(a.id));
+  const configuredSources = providers.filter(
+    (p) => p.id !== 'firecrawl' && p.status === 'active',
+  );
 
   return (
     <div className="flex flex-col gap-6">
@@ -143,38 +214,88 @@ export function JobsList() {
         <span className="text-[11.5px] text-fg-faint">
           Sorted by match score. Skills come from evidence on your dashboard.
         </span>
-        <Button size="sm" variant="ghost" onClick={sync} disabled={syncing}>
-          {syncing ? (
+        <div className="flex items-center gap-2">
+          <label htmlFor="jobs-source" className="sr-only">
+            Job source
+          </label>
+          <select
+            id="jobs-source"
+            data-testid="jobs-source-select"
+            value={providerId}
+            onChange={(e) => setProviderId(e.target.value)}
+            className="rounded-[var(--radius)] border border-[hsl(var(--border))] bg-[hsl(var(--bg-elev-1))] px-2 py-1.5 text-[12px] text-fg focus:border-accent focus:outline-none"
+          >
+            {configuredSources.length === 0 ? (
+              <option value="">No sources configured</option>
+            ) : (
+              configuredSources.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))
+            )}
+          </select>
+          <Button size="sm" variant="ghost" onClick={sync} disabled={syncing || !providerId}>
+            {syncing ? (
+              <>
+                <ThinkingOrb state="working" size={20} /> Syncing
+              </>
+            ) : (
+              <>
+                <RefreshCw className="h-3.5 w-3.5" /> Sync
+              </>
+            )}
+          </Button>
+        </div>
+        <Button size="sm" variant="ghost" onClick={findJobs} disabled={finding}>
+          {finding ? (
             <>
-              <ThinkingOrb state="working" size={20} /> Syncing
+              <ThinkingOrb state="working" size={20} /> Searching
             </>
           ) : (
             <>
-              <RefreshCw className="h-3.5 w-3.5" /> Sync from Remotive
+              <Search className="h-3.5 w-3.5" /> Find jobs (Firecrawl)
             </>
           )}
         </Button>
-        <Button size="sm" variant="ghost" onClick={extractSkills} disabled={extracting}>
+        <Button
+          size="sm"
+          variant="ghost"
+          data-testid="jobs-score"
+          onClick={extractSkills}
+          disabled={extracting}
+        >
           {extracting ? (
             <>
               <ThinkingOrb state="working" size={20} /> Extracting
             </>
           ) : (
             <>
-              <Sparkles className="h-3.5 w-3.5" /> Extract skills (20)
+              <Sparkles className="h-3.5 w-3.5" /> Score jobs
             </>
           )}
         </Button>
         {lastSync && (
           <span className="text-[12px] text-fg-faint">
-            Last sync: fetched {lastSync.fetched}, {lastSync.normalizedInserted} new,{' '}
-            {lastSync.normalizedUpdated} updated.
+            Last sync ({lastSync.adapter}): fetched {lastSync.fetched},{' '}
+            {lastSync.normalizedInserted} new, {lastSync.normalizedUpdated} updated.
+          </span>
+        )}
+        {lastFind && (
+          <span className="text-[12px] text-fg-faint">
+            Firecrawl search: {lastFind.rawInserted} discovered, {lastFind.normalizedInserted} new.
           </span>
         )}
         {lastExtract && (
           <span className="text-[12px] text-fg-faint">
-            Last extract: {lastExtract.extracted} of {lastExtract.scanned}
+            Last extract: {lastExtract.extracted} of {lastExtract.scanned} scored
+            {lastExtract.skipped > 0 && `, ${lastExtract.skipped} skipped`}
             {lastExtract.errors > 0 && `, ${lastExtract.errors} errors`}.
+          </span>
+        )}
+        {extractProgress && (
+          <span data-testid="jobs-score-progress" className="text-[12px] text-fg-faint">
+            {extractProgress}
           </span>
         )}
         <Link
@@ -188,10 +309,16 @@ export function JobsList() {
       {(() => {
         const r = data.rejected;
         const totalRejected =
-          r.remoteOnly + r.mustHaveMissing + r.hasDealbreaker + r.companyBlacklisted + (r.stale ?? 0);
+          r.remoteOnly +
+          r.mustHaveMissing +
+          r.hasDealbreaker +
+          r.companyBlacklisted +
+          (r.roleMismatch ?? 0) +
+          (r.stale ?? 0);
         if (totalRejected === 0) return null;
         const parts = [
           r.remoteOnly && `${r.remoteOnly} not remote`,
+          (r.roleMismatch ?? 0) && `${r.roleMismatch} off-target role`,
           r.mustHaveMissing && `${r.mustHaveMissing} missing a must-have`,
           r.hasDealbreaker && `${r.hasDealbreaker} hit a dealbreaker`,
           r.companyBlacklisted && `${r.companyBlacklisted} blacklisted company`,
@@ -237,7 +364,7 @@ export function JobsList() {
       {data.jobs.length === 0 ? (
         <EmptyState onSync={sync} syncing={syncing} />
       ) : (
-        <div className="overflow-hidden rounded-[var(--radius)] border border-[hsl(var(--border))]">
+        <div className="overflow-x-auto rounded-[var(--radius)] border border-[hsl(var(--border))]">
           <table className="w-full text-[13px]">
             <thead className="bg-[hsl(var(--bg-elev-1))] text-[11px] uppercase tracking-[0.08em] text-fg-subtle">
               <tr>
@@ -247,14 +374,16 @@ export function JobsList() {
                 <th className="px-4 py-2.5 text-left font-medium">Location</th>
                 <th className="px-4 py-2.5 text-left font-medium">Source</th>
                 <th className="px-4 py-2.5 text-left font-medium">Posted</th>
-                <th className="px-4 py-2.5 text-right font-medium">Actions</th>
+                <th className="sticky right-0 z-10 border-l border-[hsl(var(--border))] bg-[hsl(var(--bg-elev-1))] px-4 py-2.5 text-right font-medium">
+                  Actions
+                </th>
               </tr>
             </thead>
             <tbody>
               {data.jobs.map((j) => (
                 <tr
                   key={j.id}
-                  className="border-t border-[hsl(var(--border))] hover:bg-[hsl(var(--bg-elev-1))]"
+                  className="group border-t border-[hsl(var(--border))] hover:bg-[hsl(var(--bg-elev-1))]"
                 >
                   <td className="whitespace-nowrap px-4 py-2.5">
                     <MatchCell match={j.match} />
@@ -305,19 +434,24 @@ export function JobsList() {
                       </span>
                     )}
                   </td>
-                  <td className="whitespace-nowrap px-4 py-2.5 text-right">
+                  <td className="sticky right-0 z-10 whitespace-nowrap border-l border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-4 py-2.5 text-right group-hover:bg-[hsl(var(--bg-elev-1))]">
                     <div className="inline-flex items-center gap-2">
-                      <TrackButton jobId={j.id} />
-                      <DraftResumeButton jobId={j.id} />
-                      <DraftCoverButton jobId={j.id} />
-                      <a
-                        href={j.canonicalUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-accent hover:underline"
+                      <Link
+                        href={`/jobs/${j.id}`}
+                        data-testid="job-match-report"
+                        aria-label="View job"
+                        title="View"
+                        className="inline-flex items-center rounded border border-[hsl(var(--border))] px-1.5 py-[2px] text-fg-muted hover:border-accent/40 hover:text-accent"
                       >
-                        Open <ArrowUpRight className="h-3.5 w-3.5" />
-                      </a>
+                        <Eye className="h-3.5 w-3.5" />
+                      </Link>
+                      <RowActions
+                        jobId={j.id}
+                        canonicalUrl={j.canonicalUrl}
+                        open={openMenu === j.id}
+                        onOpen={() => setOpenMenu(j.id)}
+                        onClose={() => setOpenMenu(null)}
+                      />
                     </div>
                   </td>
                 </tr>
@@ -326,11 +460,142 @@ export function JobsList() {
           </table>
         </div>
       )}
+
+      {data.jobs.length > 0 && data.total > PAGE_SIZE && (
+        <div className="flex flex-wrap items-center justify-between gap-3 text-[12.5px] text-fg-muted">
+          <span>
+            Showing {offset + 1}–{Math.min(offset + PAGE_SIZE, data.total)} of{' '}
+            {data.total.toLocaleString()}
+          </span>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="ghost"
+              data-testid="jobs-prev"
+              disabled={offset === 0}
+              onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
+            >
+              Prev
+            </Button>
+            <span className="tabular-nums">
+              Page {Math.floor(offset / PAGE_SIZE) + 1} / {Math.ceil(data.total / PAGE_SIZE)}
+            </span>
+            <Button
+              size="sm"
+              variant="ghost"
+              data-testid="jobs-next"
+              disabled={offset + PAGE_SIZE >= data.total}
+              onClick={() => setOffset(offset + PAGE_SIZE)}
+            >
+              Next
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function DraftResumeButton({ jobId }: { jobId: string }) {
+function RowActions({
+  jobId,
+  canonicalUrl,
+  open,
+  onOpen,
+  onClose,
+}: {
+  jobId: string;
+  canonicalUrl: string;
+  open: boolean;
+  onOpen: () => void;
+  onClose: () => void;
+}) {
+  const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+
+  function toggle() {
+    if (open) {
+      onClose();
+      return;
+    }
+    const r = btnRef.current?.getBoundingClientRect();
+    if (r) {
+      const MENU_H = 184; // 4 items + padding; used only to decide open-up vs down
+      const openUp = r.bottom + MENU_H > window.innerHeight;
+      setPos({
+        top: openUp ? Math.max(8, r.top - MENU_H - 6) : r.bottom + 6,
+        right: Math.max(8, window.innerWidth - r.right),
+      });
+    }
+    onOpen();
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    // Any scroll/resize invalidates the anchored position — close rather than float.
+    window.addEventListener('scroll', onClose, true);
+    window.addEventListener('resize', onClose);
+    return () => {
+      window.removeEventListener('scroll', onClose, true);
+      window.removeEventListener('resize', onClose);
+    };
+  }, [open, onClose]);
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="More actions"
+        data-testid="job-actions-menu"
+        onClick={toggle}
+        className={cn(
+          'inline-flex items-center rounded border px-1.5 py-[2px] transition-colors',
+          open
+            ? 'border-accent/40 text-accent'
+            : 'border-[hsl(var(--border))] text-fg-muted hover:border-accent/40 hover:text-accent',
+        )}
+      >
+        <MoreHorizontal className="h-3.5 w-3.5" />
+      </button>
+      {open && pos && (
+        <>
+          {/* click-away catcher */}
+          <button
+            type="button"
+            aria-hidden
+            tabIndex={-1}
+            className="fixed inset-0 z-40 cursor-default"
+            onClick={onClose}
+          />
+          {/* Fixed positioning so the menu escapes the table's overflow clipping. */}
+          <div
+            role="menu"
+            onClick={onClose}
+            style={{ position: 'fixed', top: pos.top, right: pos.right }}
+            className="z-50 flex w-48 flex-col gap-1 rounded-[var(--radius)] border border-[hsl(var(--border))] bg-[hsl(var(--bg-elev-1))] p-1.5 shadow-lg"
+          >
+            <TrackButton jobId={jobId} menu />
+            <DraftResumeButton jobId={jobId} menu />
+            <DraftCoverButton jobId={jobId} menu />
+            <a
+              role="menuitem"
+              href={canonicalUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full rounded px-2.5 py-2 text-left text-[12.5px] text-fg-muted transition-colors hover:bg-[hsl(var(--bg-elev-2))] hover:text-fg"
+            >
+              Open posting
+            </a>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+function DraftResumeButton({ jobId, menu = false }: { jobId: string; menu?: boolean }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -345,6 +610,25 @@ function DraftResumeButton({ jobId }: { jobId: string }) {
       setBusy(false);
     }
   }
+  const label = busy ? 'Drafting…' : err ? 'Retry' : 'Draft resume';
+  if (menu) {
+    return (
+      <button
+        type="button"
+        role="menuitem"
+        onClick={draft}
+        disabled={busy}
+        className={cn(
+          'w-full rounded px-2.5 py-2 text-left text-[12.5px] transition-colors disabled:opacity-50',
+          err
+            ? 'text-[hsl(var(--danger))]'
+            : 'text-fg-muted hover:bg-[hsl(var(--bg-elev-2))] hover:text-fg',
+        )}
+      >
+        {label}
+      </button>
+    );
+  }
   return (
     <span className="inline-flex items-center gap-1">
       <button
@@ -358,13 +642,13 @@ function DraftResumeButton({ jobId }: { jobId: string }) {
         }
       >
         <FileText className="h-3 w-3" />
-        {busy ? 'Drafting' : err ? 'Retry' : 'Draft resume'}
+        {label}
       </button>
     </span>
   );
 }
 
-function TrackButton({ jobId }: { jobId: string }) {
+function TrackButton({ jobId, menu = false }: { jobId: string; menu?: boolean }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -382,6 +666,25 @@ function TrackButton({ jobId }: { jobId: string }) {
       setBusy(false);
     }
   }
+  const label = tracked ? 'Tracking…' : busy ? 'Adding…' : err ? 'Retry' : 'Track';
+  if (menu) {
+    return (
+      <button
+        type="button"
+        role="menuitem"
+        onClick={track}
+        disabled={busy || tracked}
+        className={cn(
+          'w-full rounded px-2.5 py-2 text-left text-[12.5px] transition-colors disabled:opacity-50',
+          err
+            ? 'text-[hsl(var(--danger))]'
+            : 'text-fg-muted hover:bg-[hsl(var(--bg-elev-2))] hover:text-fg',
+        )}
+      >
+        {label}
+      </button>
+    );
+  }
   return (
     <button
       type="button"
@@ -394,12 +697,12 @@ function TrackButton({ jobId }: { jobId: string }) {
       }
     >
       <Target className="h-3 w-3" />
-      {tracked ? 'Tracking' : busy ? 'Adding' : err ? 'Retry' : 'Track'}
+      {label}
     </button>
   );
 }
 
-function DraftCoverButton({ jobId }: { jobId: string }) {
+function DraftCoverButton({ jobId, menu = false }: { jobId: string; menu?: boolean }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -414,6 +717,25 @@ function DraftCoverButton({ jobId }: { jobId: string }) {
       setBusy(false);
     }
   }
+  const label = busy ? 'Drafting…' : err ? 'Retry' : menu ? 'Draft cover letter' : 'Draft cover';
+  if (menu) {
+    return (
+      <button
+        type="button"
+        role="menuitem"
+        onClick={draft}
+        disabled={busy}
+        className={cn(
+          'w-full rounded px-2.5 py-2 text-left text-[12.5px] transition-colors disabled:opacity-50',
+          err
+            ? 'text-[hsl(var(--danger))]'
+            : 'text-fg-muted hover:bg-[hsl(var(--bg-elev-2))] hover:text-fg',
+        )}
+      >
+        {label}
+      </button>
+    );
+  }
   return (
     <button
       type="button"
@@ -426,7 +748,7 @@ function DraftCoverButton({ jobId }: { jobId: string }) {
       }
     >
       <Mail className="h-3 w-3" />
-      {busy ? 'Drafting' : err ? 'Retry' : 'Draft cover'}
+      {label}
     </button>
   );
 }
@@ -434,8 +756,11 @@ function DraftCoverButton({ jobId }: { jobId: string }) {
 function MatchCell({ match }: { match: JobListItem['match'] }) {
   if (match.score === null) {
     return (
-      <span className="font-mono text-[11.5px] text-fg-faint" title="Skill extraction pending">
-        -
+      <span
+        className="inline-flex items-center rounded border border-[hsl(var(--border))] px-1.5 py-[1px] text-[10.5px] text-fg-faint"
+        title="Not scored yet — click 'Score jobs' to extract skills, then this fills in"
+      >
+        Not scored
       </span>
     );
   }

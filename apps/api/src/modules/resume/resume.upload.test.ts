@@ -71,6 +71,7 @@ function buildService() {
     storage as never,
     logger,
     {} as never,
+    {} as never, // job prefs
   );
   return { svc, prisma, storage };
 }

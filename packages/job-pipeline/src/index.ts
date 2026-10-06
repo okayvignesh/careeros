@@ -75,6 +75,8 @@ export {
   AdapterError,
   MalformedResponseError,
   MissingCredentialError,
+  createConfiguredAdapter,
+  type ProviderCredentials,
   type AshbyAdapterOpts,
   type GreenhouseAdapterOpts,
   type LeverAdapterOpts,
@@ -133,6 +135,8 @@ export {
   buildCandidateSearchQueries,
   containsBannedPlatformTerm,
   ATS_SITE_HINTS,
+  PLATFORM_SITE_HINTS,
+  SITE_HINTS,
   BANNED_PLATFORM_TERMS,
   type CandidateSearchProfile,
   type BuildCandidateSearchQueriesOptions,
@@ -186,6 +190,7 @@ export {
   type RequiredSkill,
   type ComputeInput,
 } from './stages/match';
+export { roleTokens, titleMatchesRoles } from './stages/role-relevance';
 // Wire-shape schemas per adapter (C-P3.6a). Used by contract tests + optional
 // pre-parse guards. The `node:fs`-backed snapshot helpers in schemas.ts are
 // intentionally NOT re-exported — they are test-time only.

@@ -20,6 +20,64 @@
 import type { AllowlistEntry, FieldSelectors } from '../allowlist/loader';
 
 /**
+ * EEO / credential guard. `forbidden_selectors` on the allowlist is the
+ * documented promise that voluntary-disclosure inputs (gender, veteran,
+ * disability, SSN, password) are never touched. This makes the promise
+ * enforceable rather than aspirational: a selector is refused when it is
+ * listed verbatim, contains a listed selector, or shares an attribute value
+ * with one (e.g. forbidden `[data-automation-id*=gender]` blocks a field
+ * `[data-automation-id=gender_male]`). Fails closed.
+ */
+export function isForbiddenSelector(selector: string, forbidden: readonly string[]): boolean {
+  const target = normalizeSelector(selector);
+  for (const raw of forbidden) {
+    const f = normalizeSelector(raw);
+    if (!f) continue;
+    if (target === f || target.includes(f)) return true;
+    for (const token of attributeValueTokens(f)) {
+      if (target.includes(token)) return true;
+    }
+  }
+  return false;
+}
+
+function normalizeSelector(s: string): string {
+  return s.replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+/** Attribute *value* tokens from a CSS selector, e.g. `[type=password]` → "password". */
+function attributeValueTokens(selector: string): string[] {
+  const tokens: string[] = [];
+  // Scan `[...]` segments with indexOf and parse each with string ops. A
+  // global regex here is O(n^2) on inputs like `[[[[…` (each start position
+  // rescans to the end), which is js/polynomial-redos; indexOf is linear.
+  let i = 0;
+  for (;;) {
+    const open = selector.indexOf('[', i);
+    if (open === -1) break;
+    const close = selector.indexOf(']', open + 1);
+    if (close === -1) break;
+    const inner = selector.slice(open + 1, close);
+    i = close + 1;
+    const eq = inner.indexOf('=');
+    if (eq === -1) continue;
+    let value = inner.slice(eq + 1).trim();
+    // Strip a surrounding (or stray/unbalanced) quote, mirroring the old
+    // `["']?` around the capture.
+    const first = value[0];
+    if (first === '"' || first === "'") {
+      value = value.slice(1);
+      const last = value[value.length - 1];
+      if (last === '"' || last === "'") value = value.slice(0, -1);
+    }
+    const token = /^([a-z0-9_-]+)/i.exec(value)?.[1]?.toLowerCase();
+    // Skip trivially short values (e.g. `[id=a]`) to avoid over-blocking.
+    if (token && token.length >= 3) tokens.push(token);
+  }
+  return tokens;
+}
+
+/**
  * The subset of Playwright's Page we actually use. Keeping this tiny means
  * the unit test can hand us a fake and we never touch a browser.
  */
@@ -95,6 +153,7 @@ export async function runFormFill(
 
   const filled: string[] = [];
   const missing: string[] = [];
+  const refused: string[] = [];
 
   const fieldOrder: Array<[keyof FieldSelectors, keyof FormFillPayload, 'text' | 'file']> = [
     ['name', 'name', 'text'],
@@ -111,6 +170,11 @@ export async function runFormFill(
     const selector = field_selectors[selectorKey];
     const value = payload[payloadKey];
     if (!selector || value === undefined || value === '') continue;
+    if (isForbiddenSelector(selector, entry.forbidden_selectors)) {
+      refused.push(`${selectorKey}@${selector}`);
+      missing.push(`${selectorKey}@${selector}: forbidden selector (EEO guard) — not filled`);
+      continue;
+    }
     try {
       if (kind === 'file') {
         await withTimeout(page.setInputFiles(selector, value), FILL_TIMEOUT_MS);
@@ -121,6 +185,20 @@ export async function runFormFill(
     } catch (err) {
       missing.push(`${selectorKey}@${selector}: ${(err as Error).message.slice(0, 100)}`);
     }
+  }
+
+  // A forbidden field selector means the allowlist maps a field onto an EEO /
+  // credential control. Refuse the whole run rather than fill or submit it.
+  if (refused.length > 0) {
+    const screenshotPath = await tryScreenshot(page, opts.screenshotPath);
+    const out: FormFillResult = {
+      status: 'selector-broken',
+      mode,
+      missing,
+      filledFields: filled,
+    };
+    if (screenshotPath) out.screenshotPath = screenshotPath;
+    return out;
   }
 
   // If every attempted field missed, the page is selector-stale.
@@ -150,6 +228,18 @@ export async function runFormFill(
       missing: [...missing, 'submit_selector'],
       filledFields: filled,
     };
+  }
+  if (isForbiddenSelector(entry.submit_selector, entry.forbidden_selectors)) {
+    missing.push(`submit_selector@${entry.submit_selector}: forbidden selector (EEO guard) — not clicked`);
+    const screenshotPath = await tryScreenshot(page, opts.screenshotPath);
+    const out: FormFillResult = {
+      status: 'selector-broken',
+      mode,
+      missing,
+      filledFields: filled,
+    };
+    if (screenshotPath) out.screenshotPath = screenshotPath;
+    return out;
   }
 
   try {

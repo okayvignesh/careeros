@@ -204,3 +204,14 @@ export function channelsFor(
 ): ChannelKind[] {
   return prefs.per_event[event] ?? [];
 }
+
+// Outbound MIME construction (Gmail drafts/send). Pure, no deps — see mime.ts.
+export {
+  buildRfc822Message,
+  deterministicMessageId,
+  encodeHeaderText,
+  encodeRawMessage,
+  foldBase64,
+  sanitizeHeaderValue,
+  type OutboundEmail,
+} from './mime';

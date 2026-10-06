@@ -10,37 +10,64 @@ const refs = vi.hoisted(() => {
     createCalls: Array<Record<string, unknown>>;
     embedCalls: string[];
     embedThrow: Error | null;
+    resolved: Record<string, unknown> | null;
+    /** Force the mock provider's vector length (dimension-mismatch tests). */
+    vectorLength: number | null;
   };
-  const ctrl: Ctrl = { createCalls: [], embedCalls: [], embedThrow: null };
+  const ctrl: Ctrl = {
+    createCalls: [],
+    embedCalls: [],
+    embedThrow: null,
+    resolved: null,
+    vectorLength: null,
+  };
   return { ctrl };
 });
 
 vi.mock('@careeros/embeddings', () => {
   const EMBED_DIM = 384;
 
-  function createEmbeddingProvider(opts: Record<string, unknown>) {
-    refs.ctrl.createCalls.push(opts);
+  function loadResolvedEmbeddingConfig() {
+    if (refs.ctrl.resolved) return refs.ctrl.resolved;
+    const mode = process.env.EMBEDDING_MODE ?? 'local';
     return {
-      mode: 'deterministic' as const,
+      mode,
       model: 'test-embedder',
       dim: EMBED_DIM,
+      hasApiKey: false,
+      external: undefined,
+      source: 'env',
+    };
+  }
+
+  function createProviderFromResolved(
+    resolved: { mode: string; dim?: number },
+    opts: Record<string, unknown> = {},
+  ) {
+    refs.ctrl.createCalls.push({ ...resolved, ...opts });
+    const dim = resolved.dim ?? EMBED_DIM;
+    const emitted = refs.ctrl.vectorLength ?? dim;
+    return {
+      mode: resolved.mode,
+      model: 'test-embedder',
+      dim,
       async embed(text: string): Promise<number[]> {
         if (refs.ctrl.embedThrow) throw refs.ctrl.embedThrow;
         refs.ctrl.embedCalls.push(text);
-        const vec = new Array<number>(EMBED_DIM).fill(0);
+        const vec = new Array<number>(emitted).fill(0);
         for (let i = 0; i < text.length; i++) {
-          vec[i % EMBED_DIM] = (vec[i % EMBED_DIM] ?? 0) + text.charCodeAt(i) / 1000;
+          vec[i % emitted] = (vec[i % emitted] ?? 0) + text.charCodeAt(i) / 1000;
         }
         return vec;
       },
     };
   }
 
-  function resolveEmbeddingMode(raw: string | undefined): string {
-    return raw ?? 'local';
-  }
-
-  return { createEmbeddingProvider, resolveEmbeddingMode };
+  return {
+    loadResolvedEmbeddingConfig,
+    createProviderFromResolved,
+    EMBEDDING_API_KEY_PURPOSE: 'embedding.externalApiKey',
+  };
 });
 
 import type { Logger } from 'pino';
@@ -73,6 +100,10 @@ function fakeLogger() {
   return { logger, child };
 }
 
+function fakeConfigRepo() {
+  return { appConfig: { findUnique: async () => null } };
+}
+
 function payload(overrides: Record<string, unknown> = {}) {
   return {
     userId: 'u1',
@@ -89,6 +120,8 @@ function payload(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   refs.ctrl.embedCalls = [];
   refs.ctrl.embedThrow = null;
+  refs.ctrl.resolved = null;
+  refs.ctrl.vectorLength = null;
   process.env.EMBEDDING_MODE = 'deterministic';
 });
 
@@ -99,6 +132,7 @@ describe('handleEmbeddingGenerate provider seam', () => {
 
     const result = await handleEmbeddingGenerate(
       qdrant as never,
+      fakeConfigRepo() as never,
       logger as unknown as Logger,
       payload() as never,
     );
@@ -132,6 +166,7 @@ describe('handleEmbeddingGenerate provider seam', () => {
 
     const result = await handleEmbeddingGenerate(
       qdrant as never,
+      fakeConfigRepo() as never,
       logger as unknown as Logger,
       payload({ text }) as never,
     );
@@ -149,6 +184,7 @@ describe('handleEmbeddingGenerate provider seam', () => {
 
     const result = await handleEmbeddingGenerate(
       qdrant as never,
+      fakeConfigRepo() as never,
       logger as unknown as Logger,
       payload({ collection: 'nope' }) as never,
     );
@@ -164,8 +200,61 @@ describe('handleEmbeddingGenerate provider seam', () => {
     refs.ctrl.embedThrow = new Error('model exploded');
 
     await expect(
-      handleEmbeddingGenerate(qdrant as never, logger as unknown as Logger, payload() as never),
+      handleEmbeddingGenerate(
+        qdrant as never,
+        fakeConfigRepo() as never,
+        logger as unknown as Logger,
+        payload() as never,
+      ),
     ).rejects.toThrow('model exploded');
+    expect(qdrant.upserts).toHaveLength(0);
+  });
+
+  it('uses the DB-resolved external dimension (1536) for the upserted vectors', async () => {
+    const qdrant = fakeQdrant();
+    const { logger } = fakeLogger();
+    refs.ctrl.resolved = {
+      mode: 'external',
+      model: 'text-embedding-3-small',
+      dim: 1536,
+      hasApiKey: true,
+      external: { baseUrl: 'https://api.example.com/v1', apiKey: 'sk', model: 'm', dimensions: 1536 },
+      source: 'app_config',
+    };
+
+    const result = await handleEmbeddingGenerate(
+      qdrant as never,
+      fakeConfigRepo() as never,
+      logger as unknown as Logger,
+      payload() as never,
+    );
+
+    expect(result).toEqual({ chunks: 1, skipped: 0 });
+    expect(qdrant.upserts[0]!.points[0]!.vector).toHaveLength(1536);
+  });
+
+  it('throws when the provider vector does not match the resolved collection dimension', async () => {
+    const qdrant = fakeQdrant();
+    const { logger } = fakeLogger();
+    refs.ctrl.resolved = {
+      mode: 'external',
+      model: 'm',
+      dim: 1536,
+      hasApiKey: true,
+      external: { baseUrl: 'https://api.example.com/v1', apiKey: 'sk', model: 'm', dimensions: 1536 },
+      source: 'app_config',
+    };
+    // Simulate a provider that returns the wrong width for the declared dim.
+    refs.ctrl.vectorLength = 384;
+
+    await expect(
+      handleEmbeddingGenerate(
+        qdrant as never,
+        fakeConfigRepo() as never,
+        logger as unknown as Logger,
+        payload() as never,
+      ),
+    ).rejects.toThrow(/dimension mismatch/i);
     expect(qdrant.upserts).toHaveLength(0);
   });
 });

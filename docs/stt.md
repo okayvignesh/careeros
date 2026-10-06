@@ -80,23 +80,37 @@ Transcripts are personal data. When you log around this client:
   `personal`, and never send it to a model without an explicit per-call opt-in
   for the sensitivity gate.
 
-## What P2 / P6 still need
+## P2 verbal defense (shipped)
 
-The seam is real; the feature is intentionally not wired.
+The P2 spoken-answer path is wired. `apps/api/src/modules/assessments`
+now owns it:
 
-**P2 — verbal defense (`plan/phase-2-assessment-arena.md:97-98`)**
-1. A `verbal_sessions` table (Prisma migration) holding the question, audio
-   object key in MinIO, transcript, and grader verdict (currently blocked on the
-   parallel P2 session).
-2. An upload endpoint that stores audio in MinIO and calls
-   `WhisperClient.transcribe(..., { responseFormat: 'verbose_json' })`.
-3. The `verbal-defense-grader` agent consumes `{ text, segments }` + the
-   question prompt; it already exists — it needs the transcript passed in.
+1. `verbal_sessions` (migration `20261013020000_verbal_sessions`) snapshots the
+   question, the MinIO audio key, the whisper transcript (with segments) and the
+   grader verdict.
+2. `POST /assessments/verbal/sessions/:id/audio` stores the recording in MinIO
+   (`verbal/{userId}/{sessionId}/...`) and calls
+   `WhisperClient.transcribe(..., { responseFormat: 'verbose_json' })`. A blank
+   `WHISPER_URL` records `status: 'unavailable'` (audio still archived) instead
+   of failing the request.
+3. `verbal-defense-grader` (local prompt + agent in the assessments module)
+   consumes the transcript + key points and returns technical-accuracy +
+   communication scores; `gradeVerbalSession` writes the attempt, evidence and
+   XP through the shared outcome ritual.
 
-**P6 — talk-track practice (`plan/phase-6-controlled-execution.md:51`)**
+Full route list: `docs/codebase/INTEGRATIONS.md` / the WS3 report; test coverage
+in `apps/api/src/modules/assessments/assessments.service.verbal.test.ts`.
+
+## P6 talk-track practice (still open)
+
 1. Reuse the same `verbal_sessions` runner from P2 rather than a second client.
 2. Practice UI records audio, transcribes, and feeds the talk-track generator;
    gate on `health().ok` and show a "speech unavailable" state otherwise.
+
+### Known gap
+
+Recordings are stored in MinIO but there is no retention sweep yet; the P2 plan
+calls for auto-delete after 30 days (plan/phase-2-assessment-arena.md:101).
 
 Both consumers instantiate `@careeros/stt`, not raw HTTP, so the server can move
 or change version behind the client. No adapter lives in `apps/web`.

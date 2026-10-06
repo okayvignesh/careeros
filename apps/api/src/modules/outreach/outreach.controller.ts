@@ -14,13 +14,17 @@ import { SessionService } from '../auth/session.service';
 import { OutreachService, type ComposeInput } from './outreach.service';
 
 /**
- * F.5 endpoints.
+ * F.5 endpoints. Every outbound message is gated by the approval queue: the
+ * client composes (draft), requests approval (a pending `outreach_email`
+ * item), the user approves it in the queue, and only then is a Gmail draft
+ * staged. `send` flushes that staged draft.
  *
- *   POST /outreach                    body ComposeInput (returns draft)
- *   GET  /outreach?status=draft       list
- *   POST /outreach/:id/approve        transition draft -> approved
- *   POST /outreach/:id/sent           transition approved -> sent (body { gmailDraftId? })
- *   POST /outreach/:id/discard        soft delete (any state except sent)
+ *   POST /outreach                     body ComposeInput (returns draft)
+ *   GET  /outreach?status=draft        list
+ *   GET  /outreach/:id                 one row
+ *   POST /outreach/:id/approve         enqueue an outreach_email approval
+ *   POST /outreach/:id/send            send the staged Gmail draft
+ *   POST /outreach/:id/discard         soft delete + cancel pending approval
  */
 @Controller('outreach')
 export class OutreachController {
@@ -45,24 +49,25 @@ export class OutreachController {
     return this.outreach.list(userId, status);
   }
 
+  @Get(':id')
+  async get(@Req() req: Request, @Param('id') id: string) {
+    const userId = this.session.requireUserId(req);
+    const row = await this.outreach.getById(userId, id);
+    return row;
+  }
+
   @Post(':id/approve')
   @HttpCode(200)
   async approve(@Req() req: Request, @Param('id') id: string) {
     const userId = this.session.requireUserId(req);
-    await this.outreach.approve(userId, id);
-    return { ok: true };
+    return this.outreach.requestApproval(userId, id);
   }
 
-  @Post(':id/sent')
+  @Post(':id/send')
   @HttpCode(200)
-  async markSent(
-    @Req() req: Request,
-    @Param('id') id: string,
-    @Body() body: { gmailDraftId?: string },
-  ) {
+  async send(@Req() req: Request, @Param('id') id: string) {
     const userId = this.session.requireUserId(req);
-    await this.outreach.markSent(userId, id, body?.gmailDraftId);
-    return { ok: true };
+    return this.outreach.send(userId, id);
   }
 
   @Post(':id/discard')

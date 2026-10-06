@@ -62,9 +62,16 @@ describe('allowlist loader', () => {
 
   it('ships all phase-3.5 domains plus the F.3 generic fallback at the default location', () => {
     const entries = loadAllowlistDir(defaultAllowlistDir());
-    expect([...entries.keys()].sort()).toEqual(
-      ['*', 'ashbyhq.com', 'greenhouse.io', 'indeed.com', 'linkedin.com', 'naukri.com'],
-    );
+    expect([...entries.keys()].sort()).toEqual([
+      '*',
+      'ashbyhq.com',
+      'greenhouse.io',
+      'indeed.com',
+      'lever.co',
+      'linkedin.com',
+      'myworkdayjobs.com',
+      'naukri.com',
+    ]);
     for (const e of entries.values()) {
       expect(e.allowed_paths.length).toBeGreaterThan(0);
       expect(e.forbidden_selectors).toContain('input[type=password]');
@@ -80,5 +87,55 @@ describe('allowlist loader', () => {
     const greenhouse = entries.get('greenhouse.io');
     expect(greenhouse?.field_selectors?.resume_upload).toBeDefined();
     expect(greenhouse?.submit_selector).toBeDefined();
+  });
+
+  it('parses the step-level `submit` control (previously stripped by Zod)', () => {
+    const workday = loadAllowlistFile(
+      join(defaultAllowlistDir(), 'workday.yaml'),
+    );
+    expect(workday.apply_flow?.steps.at(-1)?.submit).toBe(
+      'button[data-automation-id=bottom-navigation-submit-button]',
+    );
+    const indeed = loadAllowlistFile(join(defaultAllowlistDir(), 'indeed.yaml'));
+    expect(indeed.apply_flow?.steps.at(-1)?.submit).toBe('button[type=submit]');
+    // Flow-level submit still parses for single-submit funnels.
+    const linkedin = loadAllowlistFile(join(defaultAllowlistDir(), 'linkedin.yaml'));
+    expect(linkedin.apply_flow?.submit).toContain('Submit application');
+  });
+
+  it('fails loudly on unknown keys (strict schema) instead of silently dropping them', () => {
+    const path = join(dir, 'typo.yaml');
+    writeFileSync(
+      path,
+      [
+        'domain: typo.com',
+        'allowed_paths:',
+        '  - /',
+        'forbidden_selectors: []',
+        'required_headers: []',
+        'apply_flwo:',
+        '  entry: "#x"',
+      ].join('\n'),
+    );
+    expect(() => loadAllowlistFile(path)).toThrow();
+  });
+
+  it('fails loudly on an unknown key inside a step', () => {
+    const path = join(dir, 'step-typo.yaml');
+    writeFileSync(
+      path,
+      [
+        'domain: step.com',
+        'allowed_paths:',
+        '  - /',
+        'forbidden_selectors: []',
+        'required_headers: []',
+        'apply_flow:',
+        '  steps:',
+        '    - name: review',
+        '      submitt: "#submit"',
+      ].join('\n'),
+    );
+    expect(() => loadAllowlistFile(path)).toThrow();
   });
 });

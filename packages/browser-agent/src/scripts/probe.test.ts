@@ -54,6 +54,28 @@ describe('collectProbeSelectors', () => {
     };
     expect(collectProbeSelectors(stub)).toEqual([]);
   });
+
+  it('includes apply_flow entry/advance/submit/success selectors', () => {
+    const entry: AllowlistEntry = {
+      domain: 'flow.com',
+      allowed_paths: ['/'],
+      forbidden_selectors: [],
+      required_headers: [],
+      field_selectors: { name: 'input[name=name]' },
+      apply_flow: {
+        entry: 'button.apply',
+        steps: [{ name: 'one', advance: ['button.next', 'button.continue'] }, { name: 'two' }],
+        submit: 'button.submit-final',
+        success: 'div.done',
+      },
+    };
+    const sels = collectProbeSelectors(entry);
+    expect(sels).toContain('button.apply');
+    expect(sels).toContain('button.next');
+    expect(sels).toContain('button.continue');
+    expect(sels).toContain('button.submit-final');
+    expect(sels).toContain('div.done');
+  });
 });
 
 describe('probeEntry', () => {

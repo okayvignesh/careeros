@@ -60,7 +60,8 @@
       "lodash": "^4.18.0",
       "deepmerge-ts": "^8.0.0",
       "cheerio>undici": "^7.29.1",
-      "@qdrant/js-client-rest>undici": "^7.29.1"
+      "@qdrant/js-client-rest>undici": "^7.29.1",
+    "source-map-js": ">=1.2.2"
     },
     "auditConfig": {
       "ignoreGhsas": [

@@ -1,7 +1,22 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, Param, Post, Query, Req } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  ParseFilePipeBuilder,
+  Post,
+  Query,
+  Req,
+  UploadedFile,
+  UseInterceptors,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import type { Request } from 'express';
 import { SessionService } from '../auth/session.service';
 import { AssessmentsService } from './assessments.service';
+import { VERBAL_AUDIO_MAX_BYTES } from './verbal-audio.store';
 
 @Controller('assessments')
 export class AssessmentsController {
@@ -30,7 +45,11 @@ export class AssessmentsController {
     if (!['easy', 'medium', 'hard'].includes(difficulty)) {
       throw new BadRequestException('difficulty must be easy | medium | hard');
     }
-    const question = await this.assessments.generateKnowledgeQuestion(userId, body.skillId, difficulty);
+    const question = await this.assessments.generateKnowledgeQuestion(
+      userId,
+      body.skillId,
+      difficulty,
+    );
     if (!question) {
       throw new BadRequestException(
         'Could not generate a question. Configure an AI provider, ensure LLM calls are not paused, and try again.',
@@ -379,5 +398,83 @@ export class AssessmentsController {
     const attempt = await this.assessments.getAttempt(userId, id);
     if (!attempt) throw new BadRequestException('Attempt not found');
     return attempt;
+  }
+
+  // --- verbal defense (P2 C-P2.5) -------------------------------------------
+
+  @Get('verbal/next')
+  async nextVerbal(@Query('skillId') skillId: string | undefined, @Req() req: Request) {
+    const userId = this.session.requireUserId(req);
+    return this.assessments.nextVerbalPrompt(userId, skillId || undefined);
+  }
+
+  @Post('verbal/sessions')
+  @HttpCode(201)
+  async startVerbalSession(
+    @Body()
+    body: {
+      questionId?: string;
+      prompt?: string;
+      keyPoints?: string[];
+      skillIds?: string[];
+      difficulty?: 'easy' | 'medium' | 'hard';
+      skillId?: string;
+    },
+    @Req() req: Request,
+  ) {
+    const userId = this.session.requireUserId(req);
+    return this.assessments.startVerbalSession(userId, body ?? {});
+  }
+
+  @Get('verbal/sessions')
+  async listVerbalSessions(@Query('take') take: string | undefined, @Req() req: Request) {
+    const userId = this.session.requireUserId(req);
+    const parsed = take ? Number(take) : 20;
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      throw new BadRequestException('take must be a positive number');
+    }
+    return this.assessments.listVerbalSessions(userId, parsed);
+  }
+
+  @Get('verbal/sessions/:id')
+  async getVerbalSession(@Param('id') id: string, @Req() req: Request) {
+    const userId = this.session.requireUserId(req);
+    return this.assessments.getVerbalSession(userId, id);
+  }
+
+  @Post('verbal/sessions/:id/audio')
+  @HttpCode(200)
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: VERBAL_AUDIO_MAX_BYTES } }))
+  async uploadVerbalAudio(
+    @Param('id') id: string,
+    @UploadedFile(
+      new ParseFilePipeBuilder()
+        .addFileTypeValidator({ fileType: /audio\// })
+        .addMaxSizeValidator({ maxSize: VERBAL_AUDIO_MAX_BYTES })
+        .build({ fileIsRequired: true }),
+    )
+    file: Express.Multer.File,
+    @Req() req: Request,
+  ) {
+    const userId = this.session.requireUserId(req);
+    return this.assessments.attachVerbalAudio(userId, id, {
+      buffer: file.buffer,
+      mimetype: file.mimetype,
+      size: file.size,
+    });
+  }
+
+  @Post('verbal/sessions/:id/grade')
+  @HttpCode(200)
+  async gradeVerbalSession(
+    @Param('id') id: string,
+    @Body() body: { transcript?: string; durationMs?: number },
+    @Req() req: Request,
+  ) {
+    const userId = this.session.requireUserId(req);
+    const opts: { transcript?: string; durationMs?: number } = {};
+    if (typeof body?.transcript === 'string') opts.transcript = body.transcript;
+    if (typeof body?.durationMs === 'number') opts.durationMs = body.durationMs;
+    return this.assessments.gradeVerbalSession(userId, id, opts);
   }
 }

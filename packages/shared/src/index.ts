@@ -3,6 +3,7 @@ export * from './constants';
 export { redact } from './redact';
 export { retry, type RetryOptions } from './retry';
 export * from './knowledge-rules';
+export * from './provider-config';
 export * from './queues';
 export * from './xp';
 export * from './assessment';

@@ -14,14 +14,19 @@ import { createHash } from 'node:crypto';
 import type { Logger } from 'pino';
 import {
   createEmbeddingProvider,
+  createProviderFromResolved,
+  loadResolvedEmbeddingConfig,
   resolveEmbeddingMode,
+  type EmbeddingConfigRepo,
   type EmbeddingLogger,
   type EmbeddingProvider,
+  type EnsureCollectionOptions,
   type QdrantStore,
 } from '@careeros/embeddings';
 import type { CorpusAdapter, CorpusItem } from './types';
 import { adapters as defaultAdapters } from './registry';
 import { DEFAULT_DUPLICATE_THRESHOLD } from './dedupe';
+import { decryptEmbeddingApiKey } from '../embedding-job.js';
 
 export const QUEUE_CORPUS_REFRESH = 'corpus-refresh';
 export const JOB_CORPUS_REFRESH = 'corpus-refresh';
@@ -76,7 +81,11 @@ export interface CorpusQuestionRepo {
 
 /** Narrow Qdrant surface — the refresh worker only searches + upserts. */
 export interface CorpusQdrant {
-  ensureCollection(name: string, dim: number): Promise<void>;
+  ensureCollection(
+    name: string,
+    dim: number,
+    opts?: EnsureCollectionOptions,
+  ): Promise<unknown>;
   upsert(
     collection: string,
     points: Array<{ id: string; vector: number[]; payload?: Record<string, unknown> }>,
@@ -108,6 +117,8 @@ export interface RefreshOptions {
   threshold?: number;
   /** Override the process-wide embedder (tests). Defaults to the singleton. */
   provider?: EmbeddingProvider;
+  /** Embedding dimension the corpus collection must use. Defaults to `provider.dim`. */
+  dim?: number;
 }
 
 /**
@@ -141,8 +152,12 @@ export async function refreshCorpus(
   const adapters = opts.adapters ?? defaultAdapters;
   const threshold = opts.threshold ?? DEFAULT_DUPLICATE_THRESHOLD;
   const embed = opts.provider ?? getEmbeddingProvider(logger);
+  const dim = opts.dim ?? embed.dim ?? CORPUS_COLLECTION_DIM;
 
-  await qdrant.ensureCollection(CORPUS_COLLECTION, CORPUS_COLLECTION_DIM);
+  await qdrant.ensureCollection(CORPUS_COLLECTION, dim, {
+    recreateOnMismatch: true,
+    logger,
+  });
 
   const perAdapter: AdapterSummary[] = [];
   const totals = { fetched: 0, dedupedHash: 0, dedupedEmbed: 0, inserted: 0 };
@@ -238,13 +253,24 @@ async function ingestOne(
 }
 
 /**
- * Job handler wired into BullMQ. Cast `QdrantStore` to `CorpusQdrant` — the
- * public method signatures line up, and this keeps tests free of Qdrant.
+ * Job handler wired into BullMQ. Resolves the effective embedding config from
+ * `app_config` (settings UI) so the corpus collection is built at the same
+ * dimension the stored/query vectors use, then casts `QdrantStore` to
+ * `CorpusQdrant` — the public method signatures line up, keeping tests free of Qdrant.
  */
 export async function handleCorpusRefresh(
-  prisma: CorpusQuestionRepo,
+  prisma: CorpusQuestionRepo & EmbeddingConfigRepo,
   qdrant: QdrantStore,
   logger: Pick<Logger, 'info' | 'warn' | 'error'>,
 ): Promise<RefreshResult> {
-  return refreshCorpus(prisma, qdrant as unknown as CorpusQdrant, logger);
+  const resolved = await loadResolvedEmbeddingConfig(prisma, {
+    envMode: process.env.EMBEDDING_MODE,
+    decryptApiKey: decryptEmbeddingApiKey,
+    logger,
+  });
+  const provider = createProviderFromResolved(resolved, { logger });
+  return refreshCorpus(prisma, qdrant as unknown as CorpusQdrant, logger, {
+    provider,
+    dim: resolved.dim,
+  });
 }

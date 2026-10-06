@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, type VerbalSession } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import {
   gradeAgainstRubric,
@@ -29,9 +29,24 @@ import {
   type RubricGradeResponse,
   type TaskKind,
 } from '@careeros/shared';
-import { DeepSeekProvider, renderPrompt, wrapUntrusted, type AIProvider, type Sensitivity } from '@careeros/ai';
+import {
+  DeepSeekProvider,
+  renderPrompt,
+  wrapUntrusted,
+  type AIProvider,
+  type Sensitivity,
+} from '@careeros/ai';
 import { runSandboxed, type LanguageId, type SandboxResult } from '@careeros/sandbox';
 import { decrypt, loadMasterKey } from '@careeros/secrets';
+import { SttUnavailableError, WhisperClient } from '@careeros/stt';
+import {
+  UnsupportedAudioTypeError,
+  VerbalAudioStore,
+  VERBAL_AUDIO_MAX_BYTES,
+  audioExtension,
+} from './verbal-audio.store';
+import { VerbalDefenseGraderAgent, gradeVerbalDefense } from './agents/verbal-defense-grader.agent';
+import type { VerbalDefenseGrade } from './prompts/verbal-defense-grader';
 import { PrismaService } from '../../prisma/prisma.service';
 import { syncSkillState } from '@careeros/aggregator';
 import { UsageService } from '../usage/usage.service';
@@ -139,6 +154,39 @@ export interface SystemDesignTask {
   dimensions: Array<{ id: string; name: string }>;
 }
 
+export interface VerbalPrompt {
+  id: string;
+  prompt: string;
+  skillIds: string[];
+  difficulty: string;
+}
+
+export type VerbalSessionStatus = 'created' | 'transcribed' | 'graded' | 'failed' | 'unavailable';
+
+export interface VerbalSessionView {
+  id: string;
+  questionId: string | null;
+  prompt: string;
+  skillIds: string[];
+  difficulty: string;
+  status: VerbalSessionStatus;
+  audioKey: string | null;
+  audioMime: string | null;
+  /** Presigned GET URL for the recording, when stored (5 min TTL). */
+  audioUrl?: string;
+  language: string | null;
+  transcript: string | null;
+  segments: Array<{ id: number; start: number; end: number; text: string }> | null;
+  score: number | null;
+  reasoning: string | null;
+  attemptId: string | null;
+  durationMs: number | null;
+  error: string | null;
+  createdAt: string;
+  transcribedAt: string | null;
+  gradedAt: string | null;
+}
+
 export interface AttemptResult {
   attemptId: string;
   score: number;
@@ -181,6 +229,14 @@ export class AssessmentsService {
   protected debuggingGrader = new DebuggingGraderAgent();
   protected mockInterviewGrader = new MockInterviewGraderAgent();
   protected systemDesignGrader = new SystemDesignGraderAgent();
+  protected verbalDefenseGrader = new VerbalDefenseGraderAgent();
+
+  // Verbal audio + transcription seams. Same `field, not constructor arg`
+  // reasoning as runSandbox: every assessments test constructs this service.
+  // Tests overwrite these with stubs so the grading path runs without MinIO or
+  // a live whisper.cpp server.
+  protected audioStore = new VerbalAudioStore();
+  protected whisper: Pick<WhisperClient, 'transcribe'> = new WhisperClient();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -223,7 +279,12 @@ export class AssessmentsService {
       select: { questionId: true },
     });
     const excludeIds = recent.map((r) => r.questionId).filter((id): id is string => !!id);
-    const where: { kind: string; flagged: boolean; id?: { notIn: string[] }; skillIds?: { has: string } } = {
+    const where: {
+      kind: string;
+      flagged: boolean;
+      id?: { notIn: string[] };
+      skillIds?: { has: string };
+    } = {
       kind: 'knowledge',
       flagged: false,
     };
@@ -419,7 +480,10 @@ export class AssessmentsService {
    * Daily XP totals over the last N days. Used by the Progression screen chart.
    * Fills empty days with 0 so the chart doesn't visually skip.
    */
-  async getXpTimeseries(userId: string, days: number): Promise<Array<{ date: string; xp: number }>> {
+  async getXpTimeseries(
+    userId: string,
+    days: number,
+  ): Promise<Array<{ date: string; xp: number }>> {
     const clamped = Math.max(1, Math.min(days, 90));
     const from = new Date(Date.now() - clamped * 86_400_000);
     from.setUTCHours(0, 0, 0, 0);
@@ -482,7 +546,12 @@ export class AssessmentsService {
       select: { questionId: true },
     });
     const excludeIds = recent.map((r) => r.questionId).filter((id): id is string => !!id);
-    const where: { kind: string; flagged: boolean; id?: { notIn: string[] }; skillIds?: { has: string } } = {
+    const where: {
+      kind: string;
+      flagged: boolean;
+      id?: { notIn: string[] };
+      skillIds?: { has: string };
+    } = {
       kind: 'code-review',
       flagged: false,
     };
@@ -595,7 +664,9 @@ export class AssessmentsService {
         defectCount: row.keyPoints.length,
       };
     } catch (err) {
-      this.logger.warn(`code-review-generator failed for skill=${skillId}: ${(err as Error).message}`);
+      this.logger.warn(
+        `code-review-generator failed for skill=${skillId}: ${(err as Error).message}`,
+      );
       return null;
     }
   }
@@ -612,7 +683,12 @@ export class AssessmentsService {
       throw new NotFoundException('Task not found');
     }
 
-    const grading = await this.gradeReviewWithLlmOrFallback(userId, input.findings, q.prompt, q.keyPoints);
+    const grading = await this.gradeReviewWithLlmOrFallback(
+      userId,
+      input.findings,
+      q.prompt,
+      q.keyPoints,
+    );
 
     return this.recordAttemptOutcome({
       userId,
@@ -656,7 +732,12 @@ export class AssessmentsService {
       select: { questionId: true },
     });
     const excludeIds = recent.map((r) => r.questionId).filter((id): id is string => !!id);
-    const where: { kind: string; flagged: boolean; id?: { notIn: string[] }; skillIds?: { has: string } } = {
+    const where: {
+      kind: string;
+      flagged: boolean;
+      id?: { notIn: string[] };
+      skillIds?: { has: string };
+    } = {
       kind: 'system-design',
       flagged: false,
     };
@@ -765,7 +846,9 @@ export class AssessmentsService {
         dimensions: SYSTEM_DESIGN_RUBRIC.dimensions.map((d) => ({ id: d.id, name: d.name })),
       };
     } catch (err) {
-      this.logger.warn(`system-design-generator failed for skill=${skillId}: ${(err as Error).message}`);
+      this.logger.warn(
+        `system-design-generator failed for skill=${skillId}: ${(err as Error).message}`,
+      );
       return null;
     }
   }
@@ -781,15 +864,25 @@ export class AssessmentsService {
     if (!q || q.kind !== 'system-design') {
       throw new NotFoundException('Task not found');
     }
-    const constraints = safeJson<{ constraints?: string[] }>(q.answerHint ?? '{}')?.constraints ?? [];
+    const constraints =
+      safeJson<{ constraints?: string[] }>(q.answerHint ?? '{}')?.constraints ?? [];
     const version = rubricHash(SYSTEM_DESIGN_RUBRIC);
 
-    const grading = await this.gradeSystemDesignWithLlmOrFallback(userId, input.design, q.prompt, constraints);
+    const grading = await this.gradeSystemDesignWithLlmOrFallback(
+      userId,
+      input.design,
+      q.prompt,
+      constraints,
+    );
 
     // AttemptResult carries hits/misses; repurpose them to show which dimensions
     // hit level >=4 (hits) vs. <=2 (misses). Result UI surfaces this as-is.
-    const hits = grading.dimensions.filter((d) => d.score >= 4).map((d) => `${d.dimensionId}: ${d.score}/5`);
-    const misses = grading.dimensions.filter((d) => d.score <= 2).map((d) => `${d.dimensionId}: ${d.score}/5`);
+    const hits = grading.dimensions
+      .filter((d) => d.score >= 4)
+      .map((d) => `${d.dimensionId}: ${d.score}/5`);
+    const misses = grading.dimensions
+      .filter((d) => d.score <= 2)
+      .map((d) => `${d.dimensionId}: ${d.score}/5`);
 
     // Score bound to the rubric version present at grade time — persists on
     // gradingJson so historical attempts can be replayed against their rubric.
@@ -873,7 +966,9 @@ export class AssessmentsService {
       )) as T;
       return Object.assign(result, { grader: 'llm' as const });
     } catch (err) {
-      this.logger.warn(`LLM grader ${cfg.promptId} failed, using rule fallback: ${(err as Error).message}`);
+      this.logger.warn(
+        `LLM grader ${cfg.promptId} failed, using rule fallback: ${(err as Error).message}`,
+      );
       return withFallback();
     }
   }
@@ -924,7 +1019,9 @@ export class AssessmentsService {
       const result = await this.usage.runWithUserLimit(userId, () => cfg.callLlm(provider));
       return Object.assign(result, { grader: 'llm' as const });
     } catch (err) {
-      this.logger.warn(`grader agent ${cfg.label} failed, using rule fallback: ${(err as Error).message}`);
+      this.logger.warn(
+        `grader agent ${cfg.label} failed, using rule fallback: ${(err as Error).message}`,
+      );
       return withFallback();
     }
   }
@@ -958,7 +1055,8 @@ export class AssessmentsService {
           rubric: rubricRendered,
           design: wrapped.content,
         }),
-      fallback: () => gradeAgainstRubric(design, SYSTEM_DESIGN_RUBRIC) as unknown as RubricGradeResponse,
+      fallback: () =>
+        gradeAgainstRubric(design, SYSTEM_DESIGN_RUBRIC) as unknown as RubricGradeResponse,
     });
     // Coerce integer schema level back into the RubricLevel union.
     const dimensions: RubricGrade['dimensions'] = raw.dimensions.map((d) => ({
@@ -975,13 +1073,19 @@ export class AssessmentsService {
    * in `keyPoints[0]`, `{language, description, hint}` JSON in `answerHint`.
    */
   async nextDebuggingTask(userId: string, skillId?: string): Promise<DebuggingTask> {
+    await this.ensureDebuggingSeed();
     const cooldownStart = new Date(Date.now() - 14 * 86_400_000);
     const recent = await this.prisma.attempt.findMany({
       where: { userId, kind: 'debugging', createdAt: { gte: cooldownStart } },
       select: { questionId: true },
     });
     const excludeIds = recent.map((r) => r.questionId).filter((id): id is string => !!id);
-    const where: { kind: string; flagged: boolean; id?: { notIn: string[] }; skillIds?: { has: string } } = {
+    const where: {
+      kind: string;
+      flagged: boolean;
+      id?: { notIn: string[] };
+      skillIds?: { has: string };
+    } = {
       kind: 'debugging',
       flagged: false,
     };
@@ -1005,7 +1109,9 @@ export class AssessmentsService {
         : await this.prisma.question.findMany({ where: { kind: 'debugging', flagged: false } });
     if (pool.length === 0) throw new NotFoundException('No debugging tasks available');
     const pick = pool[Math.floor(Math.random() * pool.length)]!;
-    const meta = safeJson<{ language?: string; description?: string; hint?: string }>(pick.answerHint ?? '{}');
+    const meta = safeJson<{ language?: string; description?: string; hint?: string }>(
+      pick.answerHint ?? '{}',
+    );
     return {
       id: pick.id,
       brokenCode: pick.prompt,
@@ -1091,8 +1197,37 @@ export class AssessmentsService {
         difficulty: row.difficulty,
       };
     } catch (err) {
-      this.logger.warn(`debugging-task-generator failed for skill=${skillId}: ${(err as Error).message}`);
+      this.logger.warn(
+        `debugging-task-generator failed for skill=${skillId}: ${(err as Error).message}`,
+      );
       return null;
+    }
+  }
+
+  /** Hand-seeded debugging tasks so `nextDebuggingTask` works before any LLM provider is wired. */
+  private async ensureDebuggingSeed(): Promise<void> {
+    for (const seed of DEBUGGING_SEED) {
+      const promptHash = hashPrompt(seed.brokenCode);
+      await this.prisma.question.upsert({
+        where: { promptHash },
+        create: {
+          kind: 'debugging',
+          skillIds: seed.skillIds,
+          difficulty: seed.difficulty,
+          prompt: seed.brokenCode,
+          keyPoints: [seed.rootCause],
+          answerHint: JSON.stringify({
+            language: seed.language,
+            description: seed.description,
+            hint: seed.hint,
+          }),
+          // Explicit (column default is false): keeps the seeded row visible to
+          // the `flagged: false` pool query in the next-task test's Prisma fake.
+          flagged: false,
+          promptHash,
+        },
+        update: {},
+      });
     }
   }
 
@@ -1111,14 +1246,22 @@ export class AssessmentsService {
     const description = meta?.description ?? '';
     const rootCause = q.keyPoints[0] ?? '';
 
-    const grading = await this.gradeDebuggingWithLlmOrFallback(userId, input.fix, q.prompt, rootCause, description);
+    const grading = await this.gradeDebuggingWithLlmOrFallback(
+      userId,
+      input.fix,
+      q.prompt,
+      rootCause,
+      description,
+    );
 
     // Reuse AttemptResult hits/misses to surface the two component scores.
     const hits: string[] = [];
     const misses: string[] = [];
-    if (grading.correctness >= 0.7) hits.push(`correctness ${(grading.correctness * 100).toFixed(0)}%`);
+    if (grading.correctness >= 0.7)
+      hits.push(`correctness ${(grading.correctness * 100).toFixed(0)}%`);
     else misses.push(`correctness ${(grading.correctness * 100).toFixed(0)}%`);
-    if (grading.minimality >= 0.7) hits.push(`minimality ${(grading.minimality * 100).toFixed(0)}%`);
+    if (grading.minimality >= 0.7)
+      hits.push(`minimality ${(grading.minimality * 100).toFixed(0)}%`);
     else misses.push(`minimality ${(grading.minimality * 100).toFixed(0)}%`);
 
     return this.recordAttemptOutcome({
@@ -1182,7 +1325,12 @@ export class AssessmentsService {
       select: { questionId: true },
     });
     const excludeIds = recent.map((r) => r.questionId).filter((id): id is string => !!id);
-    const where: { kind: string; flagged: boolean; id?: { notIn: string[] }; skillIds?: { has: string } } = {
+    const where: {
+      kind: string;
+      flagged: boolean;
+      id?: { notIn: string[] };
+      skillIds?: { has: string };
+    } = {
       kind: 'mock-interview',
       flagged: false,
     };
@@ -1203,11 +1351,15 @@ export class AssessmentsService {
     const pool =
       eligible.length > 0
         ? eligible
-        : await this.prisma.question.findMany({ where: { kind: 'mock-interview', flagged: false } });
+        : await this.prisma.question.findMany({
+            where: { kind: 'mock-interview', flagged: false },
+          });
     if (pool.length === 0) throw new NotFoundException('No mock-interview tasks available');
     const pick = pool[Math.floor(Math.random() * pool.length)]!;
     const meta =
-      safeJson<{ scenario?: string; questions?: MockInterviewQuestion[] }>(pick.answerHint ?? '{}') ?? {};
+      safeJson<{ scenario?: string; questions?: MockInterviewQuestion[] }>(
+        pick.answerHint ?? '{}',
+      ) ?? {};
     return {
       id: pick.id,
       scenario: meta.scenario ?? '',
@@ -1263,7 +1415,9 @@ export class AssessmentsService {
         }),
       )) as GeneratedMockInterview;
 
-      const promptHash = hashPrompt(result.scenario + result.questions.map((q) => q.prompt).join('|'));
+      const promptHash = hashPrompt(
+        result.scenario + result.questions.map((q) => q.prompt).join('|'),
+      );
       const row = await this.prisma.question.upsert({
         where: { promptHash },
         create: {
@@ -1285,7 +1439,9 @@ export class AssessmentsService {
         difficulty: row.difficulty,
       };
     } catch (err) {
-      this.logger.warn(`mock-interview-generator failed for skill=${skillId}: ${(err as Error).message}`);
+      this.logger.warn(
+        `mock-interview-generator failed for skill=${skillId}: ${(err as Error).message}`,
+      );
       return null;
     }
   }
@@ -1302,18 +1458,28 @@ export class AssessmentsService {
       throw new NotFoundException('Task not found');
     }
     const meta =
-      safeJson<{ scenario?: string; questions?: MockInterviewQuestion[] }>(q.answerHint ?? '{}') ?? {};
+      safeJson<{ scenario?: string; questions?: MockInterviewQuestion[] }>(q.answerHint ?? '{}') ??
+      {};
     const questions = meta.questions ?? [];
     if (questions.length !== 3) {
       throw new BadRequestException('Task is malformed: expected 3 questions');
     }
     const scenario = meta.scenario ?? '';
 
-    const grading = await this.gradeMockInterviewWithLlmOrFallback(userId, input.answers, scenario, questions);
+    const grading = await this.gradeMockInterviewWithLlmOrFallback(
+      userId,
+      input.answers,
+      scenario,
+      questions,
+    );
 
     // Reuse AttemptResult hits/misses to surface per-question pass/fail summary.
-    const hits = grading.questions.filter((qg) => qg.score >= 0.7).map((qg) => `Q${qg.index + 1}: ${(qg.score * 100).toFixed(0)}%`);
-    const misses = grading.questions.filter((qg) => qg.score < 0.7).map((qg) => `Q${qg.index + 1}: ${(qg.score * 100).toFixed(0)}%`);
+    const hits = grading.questions
+      .filter((qg) => qg.score >= 0.7)
+      .map((qg) => `Q${qg.index + 1}: ${(qg.score * 100).toFixed(0)}%`);
+    const misses = grading.questions
+      .filter((qg) => qg.score < 0.7)
+      .map((qg) => `Q${qg.index + 1}: ${(qg.score * 100).toFixed(0)}%`);
 
     return this.recordAttemptOutcome({
       userId,
@@ -1338,6 +1504,348 @@ export class AssessmentsService {
     });
   }
 
+  // ---------------------------------------------------------------------------
+  // Verbal defense (P2 C-P2.5): spoken answer -> whisper.cpp transcript -> LLM
+  // grader. Audio is stored in MinIO; the client owns the mic capture.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Pick a verbal prompt the user hasn't answered in the cooldown window.
+   * Hand-seeded today (like KNOWLEDGE_SEED); the prompt generator can replace
+   * the seed once verbal evals land.
+   */
+  async nextVerbalPrompt(userId: string, skillId?: string): Promise<VerbalPrompt> {
+    await this.ensureVerbalSeed();
+    const cooldownStart = new Date(Date.now() - 14 * 86_400_000);
+    const recent = await this.prisma.attempt.findMany({
+      where: { userId, kind: 'verbal-defense', createdAt: { gte: cooldownStart } },
+      select: { questionId: true },
+    });
+    const excludeIds = recent.map((r) => r.questionId).filter((id): id is string => !!id);
+    const where: {
+      kind: string;
+      flagged: boolean;
+      id?: { notIn: string[] };
+      skillIds?: { has: string };
+    } = {
+      kind: 'verbal-defense',
+      flagged: false,
+    };
+    if (excludeIds.length > 0) where.id = { notIn: excludeIds };
+    if (skillId) where.skillIds = { has: skillId };
+    const eligible = await this.prisma.question.findMany({ where });
+    const pool =
+      eligible.length > 0
+        ? eligible
+        : await this.prisma.question.findMany({
+            where: { kind: 'verbal-defense', flagged: false },
+          });
+    if (pool.length === 0) throw new NotFoundException('No verbal-defense prompts available');
+    const pick = pool[Math.floor(Math.random() * pool.length)]!;
+    return {
+      id: pick.id,
+      prompt: pick.prompt,
+      skillIds: pick.skillIds,
+      difficulty: pick.difficulty,
+    };
+  }
+
+  /**
+   * Open a verbal session. Supply a bank `questionId`, an ad-hoc `prompt`
+   * (+ optional `keyPoints`), or neither to draw the next seeded prompt. An
+   * ad-hoc prompt is upserted into `question_bank` so the resulting `Attempt`
+   * always carries a `questionId`.
+   */
+  async startVerbalSession(
+    userId: string,
+    input: {
+      questionId?: string;
+      prompt?: string;
+      keyPoints?: string[];
+      skillIds?: string[];
+      difficulty?: 'easy' | 'medium' | 'hard';
+      skillId?: string;
+    },
+  ): Promise<VerbalSessionView> {
+    let questionId: string;
+    let prompt: string;
+    let skillIds: string[];
+    let difficulty: string;
+
+    if (input.questionId) {
+      const q = await this.prisma.question.findUnique({ where: { id: input.questionId } });
+      if (!q || q.kind !== 'verbal-defense') throw new NotFoundException('Verbal prompt not found');
+      questionId = q.id;
+      prompt = q.prompt;
+      skillIds = q.skillIds;
+      difficulty = q.difficulty;
+    } else if (input.prompt && input.prompt.trim().length > 0) {
+      prompt = input.prompt.trim();
+      skillIds = input.skillIds ?? [];
+      difficulty = input.difficulty ?? 'medium';
+      const promptHash = hashPrompt(prompt);
+      const row = await this.prisma.question.upsert({
+        where: { promptHash },
+        create: {
+          kind: 'verbal-defense',
+          skillIds,
+          difficulty,
+          prompt,
+          keyPoints: (input.keyPoints ?? []).slice(0, 12),
+          promptHash,
+        },
+        update: {},
+      });
+      questionId = row.id;
+    } else {
+      const next = await this.nextVerbalPrompt(userId, input.skillId);
+      questionId = next.id;
+      prompt = next.prompt;
+      skillIds = next.skillIds;
+      difficulty = next.difficulty;
+    }
+
+    const row = await this.prisma.verbalSession.create({
+      data: { userId, questionId, prompt, skillIds, difficulty, status: 'created' },
+    });
+    return this.toVerbalView(row);
+  }
+
+  /**
+   * Store a recording in MinIO and transcribe it with whisper.cpp. An
+   * unconfigured speech profile is reported as `status: 'unavailable'` (the
+   * audio is still archived); a configured-but-failed call as `'failed'`.
+   * Never throws on transcription failure — the session records the reason.
+   */
+  async attachVerbalAudio(
+    userId: string,
+    sessionId: string,
+    file: { buffer: Buffer; mimetype: string; size: number },
+  ): Promise<VerbalSessionView> {
+    const session = await this.prisma.verbalSession.findFirst({ where: { id: sessionId, userId } });
+    if (!session) throw new NotFoundException('Verbal session not found');
+    if (file.size > VERBAL_AUDIO_MAX_BYTES) {
+      throw new BadRequestException(`audio exceeds ${VERBAL_AUDIO_MAX_BYTES} bytes`);
+    }
+    let key: string;
+    try {
+      audioExtension(file.mimetype); // reject unsupported types before uploading
+      key = await this.audioStore.put(userId, sessionId, file.buffer, file.mimetype);
+    } catch (err) {
+      if (err instanceof UnsupportedAudioTypeError) throw new BadRequestException(err.message);
+      throw err;
+    }
+
+    try {
+      const transcript = await this.whisper.transcribe(file.buffer, {
+        responseFormat: 'verbose_json',
+      });
+      const updated = await this.prisma.verbalSession.update({
+        where: { id: sessionId },
+        data: {
+          audioKey: key,
+          audioMime: file.mimetype,
+          status: 'transcribed',
+          transcript: transcript.text,
+          transcriptJson: transcript as unknown as Prisma.InputJsonValue,
+          ...(transcript.language ? { language: transcript.language } : {}),
+          transcribedAt: new Date(),
+          error: null,
+        },
+      });
+      return this.toVerbalView(updated);
+    } catch (err) {
+      const unavailable = err instanceof SttUnavailableError;
+      const updated = await this.prisma.verbalSession.update({
+        where: { id: sessionId },
+        data: {
+          audioKey: key,
+          audioMime: file.mimetype,
+          status: unavailable ? 'unavailable' : 'failed',
+          error: (err as Error).message,
+        },
+      });
+      return this.toVerbalView(updated);
+    }
+  }
+
+  /**
+   * Grade the (stored or supplied) transcript, write an attempt + evidence +
+   * XP through the shared outcome ritual, and mark the session graded.
+   */
+  async gradeVerbalSession(
+    userId: string,
+    sessionId: string,
+    opts: { transcript?: string; durationMs?: number } = {},
+  ): Promise<AttemptResult> {
+    const session = await this.prisma.verbalSession.findFirst({ where: { id: sessionId, userId } });
+    if (!session) throw new NotFoundException('Verbal session not found');
+    const questionId = session.questionId;
+    if (!questionId) throw new BadRequestException('Verbal session has no question to grade');
+    const transcript = (opts.transcript ?? session.transcript ?? '').trim();
+    if (transcript.length === 0) {
+      throw new BadRequestException('No transcript available to grade; upload audio first');
+    }
+
+    const question = await this.prisma.question.findUnique({
+      where: { id: questionId },
+      select: { keyPoints: true },
+    });
+    const keyPoints = question?.keyPoints ?? [];
+    const grading = await this.gradeVerbalWithLlmOrFallback(
+      userId,
+      transcript,
+      session.prompt,
+      keyPoints,
+    );
+
+    const pct = (n: number) => `${(n * 100).toFixed(0)}%`;
+    const result = await this.recordAttemptOutcome({
+      userId,
+      attemptKind: 'verbal-defense',
+      questionId,
+      score: grading.score,
+      reasoning: grading.reasoning,
+      answerJson: { sessionId, transcript },
+      gradingJson: {
+        technicalAccuracy: grading.technicalAccuracy,
+        communication: grading.communication,
+        hits: grading.hits,
+        misses: grading.misses,
+        grader: grading.grader,
+      },
+      ...(opts.durationMs != null ? { durationMs: opts.durationMs } : {}),
+      skillIds: session.skillIds,
+      evidenceSourceRef: (attemptId) => ({
+        kind: 'attempt',
+        id: attemptId,
+        verbalSessionId: sessionId,
+      }),
+      evidenceDetail: {
+        sessionId,
+        hits: grading.hits,
+        misses: grading.misses,
+        technicalAccuracy: grading.technicalAccuracy,
+        communication: grading.communication,
+      },
+      resultHits: [
+        `technical ${pct(grading.technicalAccuracy)}`,
+        `communication ${pct(grading.communication)}`,
+        ...grading.hits,
+      ],
+      resultMisses: grading.misses,
+    });
+
+    await this.prisma.verbalSession.update({
+      where: { id: sessionId },
+      data: {
+        status: 'graded',
+        score: grading.score.toFixed(3),
+        reasoning: grading.reasoning,
+        gradingJson: {
+          technicalAccuracy: grading.technicalAccuracy,
+          communication: grading.communication,
+          hits: grading.hits,
+          misses: grading.misses,
+          grader: grading.grader,
+        } as unknown as Prisma.InputJsonValue,
+        attemptId: result.attemptId,
+        ...(opts.durationMs != null ? { durationMs: opts.durationMs } : {}),
+        gradedAt: new Date(),
+        error: null,
+      },
+    });
+    return result;
+  }
+
+  async getVerbalSession(userId: string, id: string): Promise<VerbalSessionView> {
+    const row = await this.prisma.verbalSession.findFirst({ where: { id, userId } });
+    if (!row) throw new NotFoundException('Verbal session not found');
+    return this.toVerbalView(row);
+  }
+
+  async listVerbalSessions(userId: string, take = 20): Promise<VerbalSessionView[]> {
+    const rows = await this.prisma.verbalSession.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      take: Math.max(1, Math.min(take, 100)),
+    });
+    return Promise.all(rows.map((r) => this.toVerbalView(r)));
+  }
+
+  private async gradeVerbalWithLlmOrFallback(
+    userId: string,
+    transcript: string,
+    prompt: string,
+    keyPoints: string[],
+  ): Promise<VerbalDefenseGrade & { grader: 'llm' | 'rule' }> {
+    const wrapped = wrapUntrusted(transcript, 'user-input');
+    return this.runGraderAgentOrFallback<VerbalDefenseGrade>(userId, {
+      label: this.verbalDefenseGrader.id,
+      sensitivity: 'personal',
+      callLlm: (provider) =>
+        this.verbalDefenseGrader.grade(provider, {
+          prompt,
+          keyPoints: keyPoints.length > 0 ? keyPoints.map((k) => `- ${k}`).join('\n') : '- (none)',
+          transcript: wrapped.content,
+        }),
+      fallback: () => gradeVerbalDefense(transcript, keyPoints),
+    });
+  }
+
+  private async ensureVerbalSeed(): Promise<void> {
+    for (const seed of VERBAL_SEED) {
+      const promptHash = hashPrompt(seed.prompt);
+      await this.prisma.question.upsert({
+        where: { promptHash },
+        create: {
+          kind: 'verbal-defense',
+          skillIds: seed.skillIds,
+          difficulty: seed.difficulty,
+          prompt: seed.prompt,
+          keyPoints: seed.keyPoints,
+          promptHash,
+        },
+        update: {},
+      });
+    }
+  }
+
+  private async toVerbalView(row: VerbalSession): Promise<VerbalSessionView> {
+    const tj = (row.transcriptJson ?? null) as {
+      segments?: Array<{ id: number; start: number; end: number; text: string }>;
+    } | null;
+    const view: VerbalSessionView = {
+      id: row.id,
+      questionId: row.questionId,
+      prompt: row.prompt,
+      skillIds: row.skillIds,
+      difficulty: row.difficulty,
+      status: row.status as VerbalSessionStatus,
+      audioKey: row.audioKey,
+      audioMime: row.audioMime,
+      language: row.language,
+      transcript: row.transcript,
+      segments: Array.isArray(tj?.segments) ? tj!.segments! : null,
+      score: row.score === null ? null : Number(row.score),
+      reasoning: row.reasoning,
+      attemptId: row.attemptId,
+      durationMs: row.durationMs,
+      error: row.error,
+      createdAt: row.createdAt.toISOString(),
+      transcribedAt: row.transcribedAt ? row.transcribedAt.toISOString() : null,
+      gradedAt: row.gradedAt ? row.gradedAt.toISOString() : null,
+    };
+    if (row.audioKey) {
+      try {
+        view.audioUrl = await this.audioStore.presign(row.userId, row.audioKey);
+      } catch {
+        // MinIO unavailable: the metadata is still useful without a play URL.
+      }
+    }
+    return view;
+  }
+
   /**
    * Pick a build task the user hasn't seen in the cooldown window. Reuses
    * `question` with kind='build': `description` in `prompt`, hidden `tests`
@@ -1353,7 +1861,12 @@ export class AssessmentsService {
       select: { questionId: true },
     });
     const excludeIds = recent.map((r) => r.questionId).filter((id): id is string => !!id);
-    const where: { kind: string; flagged: boolean; id?: { notIn: string[] }; skillIds?: { has: string } } = {
+    const where: {
+      kind: string;
+      flagged: boolean;
+      id?: { notIn: string[] };
+      skillIds?: { has: string };
+    } = {
       kind: 'build',
       flagged: false,
     };
@@ -1377,12 +1890,13 @@ export class AssessmentsService {
         : await this.prisma.question.findMany({ where: { kind: 'build', flagged: false } });
     if (pool.length === 0) throw new NotFoundException('No build tasks available');
     const pick = pool[Math.floor(Math.random() * pool.length)]!;
-    const meta = safeJson<{
-      language?: LanguageId;
-      title?: string;
-      starter?: string;
-      timeoutMs?: number;
-    }>(pick.answerHint ?? '{}') ?? {};
+    const meta =
+      safeJson<{
+        language?: LanguageId;
+        title?: string;
+        starter?: string;
+        timeoutMs?: number;
+      }>(pick.answerHint ?? '{}') ?? {};
     return {
       id: pick.id,
       title: meta.title ?? 'Build task',
@@ -1470,7 +1984,9 @@ export class AssessmentsService {
         difficulty: row.difficulty,
       };
     } catch (err) {
-      this.logger.warn(`build-task-generator failed for skill=${skillId}: ${(err as Error).message}`);
+      this.logger.warn(
+        `build-task-generator failed for skill=${skillId}: ${(err as Error).message}`,
+      );
       return null;
     }
   }
@@ -1495,12 +2011,13 @@ export class AssessmentsService {
     if (!q || q.kind !== 'build') {
       throw new NotFoundException('Task not found');
     }
-    const meta = safeJson<{
-      language?: LanguageId;
-      title?: string;
-      starter?: string;
-      timeoutMs?: number;
-    }>(q.answerHint ?? '{}') ?? {};
+    const meta =
+      safeJson<{
+        language?: LanguageId;
+        title?: string;
+        starter?: string;
+        timeoutMs?: number;
+      }>(q.answerHint ?? '{}') ?? {};
     const language = meta.language ?? 'node';
     const starter = meta.starter ?? '';
     const tests = q.keyPoints[0] ?? '';
@@ -1597,14 +2114,16 @@ export class AssessmentsService {
         data: { status: 'expired' },
       });
     }
-    const stillActive = active && !this.bossExpired(active.startedAt, active.durationS) ? active : null;
+    const stillActive =
+      active && !this.bossExpired(active.startedAt, active.durationS) ? active : null;
 
     const passed = await this.prisma.bossBattle.findMany({
       where: { userId, status: 'passed' },
       select: { milestone: true },
     });
     const passedSet = new Set(passed.map((p) => p.milestone));
-    const nextMilestone = BOSS_MILESTONES.find((m) => currentLevel >= m && !passedSet.has(m)) ?? null;
+    const nextMilestone =
+      BOSS_MILESTONES.find((m) => currentLevel >= m && !passedSet.has(m)) ?? null;
 
     return {
       milestone: nextMilestone,
@@ -1628,7 +2147,9 @@ export class AssessmentsService {
     }
     const eligible = await this.getEligibleBossMilestone(userId);
     if (eligible.currentLevel < milestone) {
-      throw new BadRequestException(`Need level ${milestone}, currently at ${eligible.currentLevel}`);
+      throw new BadRequestException(
+        `Need level ${milestone}, currently at ${eligible.currentLevel}`,
+      );
     }
     if (eligible.activeBossId) {
       throw new BadRequestException(`A boss battle is already active (${eligible.activeBossId})`);
@@ -1671,7 +2192,14 @@ export class AssessmentsService {
           questionIds: questions.map((q) => q.id),
         },
       });
-      return this.serializeBoss(row.id, row.startedAt, row.durationS, row.status as BossBattleTask['status'], milestone, questions);
+      return this.serializeBoss(
+        row.id,
+        row.startedAt,
+        row.durationS,
+        row.status as BossBattleTask['status'],
+        milestone,
+        questions,
+      );
     } catch (err) {
       if ((err as { code?: string }).code === 'P2002') {
         throw new BadRequestException('A boss battle is already active');
@@ -1687,12 +2215,21 @@ export class AssessmentsService {
       await this.prisma.bossBattle.update({ where: { id: row.id }, data: { status: 'expired' } });
       row.status = 'expired';
     }
-    const questions = await this.prisma.question.findMany({ where: { id: { in: row.questionIds } } });
+    const questions = await this.prisma.question.findMany({
+      where: { id: { in: row.questionIds } },
+    });
     const orderedQs = row.questionIds
       .map((qid) => questions.find((q) => q.id === qid))
       .filter((q): q is (typeof questions)[number] => !!q)
       .map((q) => ({ id: q.id, prompt: q.prompt, skillIds: q.skillIds, difficulty: q.difficulty }));
-    return this.serializeBoss(row.id, row.startedAt, row.durationS, row.status as BossBattleTask['status'], row.milestone, orderedQs);
+    return this.serializeBoss(
+      row.id,
+      row.startedAt,
+      row.durationS,
+      row.status as BossBattleTask['status'],
+      row.milestone,
+      orderedQs,
+    );
   }
 
   /**
@@ -1727,7 +2264,9 @@ export class AssessmentsService {
       throw new BadRequestException(`Expected ${row.questionIds.length} answers`);
     }
 
-    const questions = await this.prisma.question.findMany({ where: { id: { in: row.questionIds } } });
+    const questions = await this.prisma.question.findMany({
+      where: { id: { in: row.questionIds } },
+    });
     const attemptIds: string[] = [];
     const perQuestionScores: number[] = [];
     const allSkills = new Set<string>();
@@ -1738,7 +2277,12 @@ export class AssessmentsService {
       if (!q) continue;
       for (const s of q.skillIds) allSkills.add(s);
 
-      const grading = await this.gradeWithLlmOrFallback(userId, answers[i] ?? '', q.prompt, q.keyPoints);
+      const grading = await this.gradeWithLlmOrFallback(
+        userId,
+        answers[i] ?? '',
+        q.prompt,
+        q.keyPoints,
+      );
       // Per-question attempt + evidence, but XP/remediation are settled once for
       // the encounter below (award:false, reconcile:false).
       const recorded = await this.recordAttemptOutcome({
@@ -1748,10 +2292,20 @@ export class AssessmentsService {
         score: grading.score,
         reasoning: grading.reasoning,
         answerJson: { answer: answers[i], bossBattleId: id },
-        gradingJson: { hits: grading.hits, misses: grading.misses, grader: grading.grader, boss: true },
+        gradingJson: {
+          hits: grading.hits,
+          misses: grading.misses,
+          grader: grading.grader,
+          boss: true,
+        },
         skillIds: q.skillIds,
         evidenceSourceRef: (attemptId) => ({ kind: 'attempt', id: attemptId, bossBattleId: id }),
-        evidenceDetail: { questionId: q.id, hits: grading.hits, misses: grading.misses, boss: true },
+        evidenceDetail: {
+          questionId: q.id,
+          hits: grading.hits,
+          misses: grading.misses,
+          boss: true,
+        },
         reconcile: false,
         award: false,
         resultHits: [],
@@ -1761,7 +2315,8 @@ export class AssessmentsService {
       perQuestionScores.push(grading.score);
     }
 
-    const overall = perQuestionScores.reduce((a, s) => a + s, 0) / Math.max(1, perQuestionScores.length);
+    const overall =
+      perQuestionScores.reduce((a, s) => a + s, 0) / Math.max(1, perQuestionScores.length);
     const bossStatus: 'passed' | 'failed' = overall >= 0.7 ? 'passed' : 'failed';
 
     // Multi-skill combo: deterministic parse off the per-question scores +
@@ -1782,8 +2337,7 @@ export class AssessmentsService {
     });
 
     const xpBase = xpFor('boss-battle', overall);
-    const xpAwarded =
-      bossStatus === 'passed' ? Math.round(xpBase * combo.comboMultiplier) : xpBase;
+    const xpAwarded = bossStatus === 'passed' ? Math.round(xpBase * combo.comboMultiplier) : xpBase;
     await this.prisma.xpEvent.create({
       data: {
         userId,
@@ -1968,7 +2522,12 @@ export class AssessmentsService {
     });
     const allSkillIds = Array.from(new Set(questions.flatMap((q) => q.skillIds)));
     if (allSkillIds.length === 0) {
-      return { comboCategory: null, relatedSkillsDemonstrated: [], combo: false, comboMultiplier: 1 };
+      return {
+        comboCategory: null,
+        relatedSkillsDemonstrated: [],
+        combo: false,
+        comboMultiplier: 1,
+      };
     }
     const skillRows = await this.prisma.skill.findMany({
       where: { id: { in: allSkillIds } },
@@ -2065,7 +2624,10 @@ export class AssessmentsService {
     diff: string,
     defects: string[],
   ): Promise<CodeReviewGrade & { grader: 'llm' | 'rule' }> {
-    const wrappedFindings = wrapUntrusted(findings.map((f, i) => `${i + 1}. ${f}`).join('\n'), 'user-input');
+    const wrappedFindings = wrapUntrusted(
+      findings.map((f, i) => `${i + 1}. ${f}`).join('\n'),
+      'user-input',
+    );
     return this.runLlmGraderOrFallback<CodeReviewGrade>(userId, {
       promptId: 'code-review-grader',
       vars: {
@@ -2123,7 +2685,9 @@ export class AssessmentsService {
           userId,
           skillId,
           reason: `${decision.reason} on ${skillName}`,
-          sourceAttemptIds: decision.triggeringAttempts.slice(0, 5).map((_, i) => recent[i]?.id ?? ''),
+          sourceAttemptIds: decision.triggeringAttempts
+            .slice(0, 5)
+            .map((_, i) => recent[i]?.id ?? ''),
         },
       });
     } catch (err) {
@@ -2151,7 +2715,8 @@ export class AssessmentsService {
       where: { id, userId, status: 'open' },
       data: { status: 'closed', closedAt: new Date() },
     });
-    if (result.count === 0) throw new NotFoundException('Remediation task not found or already closed');
+    if (result.count === 0)
+      throw new NotFoundException('Remediation task not found or already closed');
   }
 
   /**
@@ -2475,6 +3040,166 @@ const KNOWLEDGE_SEED: Array<{
   },
 ];
 
+// ponytail: 6 hand-seeded debugging tasks (mirrors KNOWLEDGE_SEED) so the
+// debugging runner is usable before any LLM provider is wired. `brokenCode` is
+// the prompt, `rootCause` the grader's match target (keyPoints[0]), and the
+// `{language, description, hint}` JSON goes in answerHint — same row shape as
+// `generateDebuggingTask` writes.
+const DEBUGGING_SEED: Array<{
+  skillIds: string[];
+  difficulty: string;
+  language: string;
+  description: string;
+  hint: string;
+  rootCause: string;
+  brokenCode: string;
+}> = [
+  {
+    skillIds: ['typescript'],
+    difficulty: 'easy',
+    language: 'typescript',
+    description:
+      'chunk(items, size) should split an array into consecutive sub-arrays of at most `size` items and never include a trailing empty chunk. It currently returns an extra empty array when the length is an exact multiple of size.',
+    hint: 'Look at the loop stop condition.',
+    rootCause:
+      'The loop condition is `i <= items.length`, so it runs one extra iteration and appends an empty slice whenever the length is an exact multiple of size. It should be `i < items.length`.',
+    brokenCode: `export function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i <= items.length; i += size) {
+    out.push(items.slice(i, i + size));
+  }
+  return out;
+}`,
+  },
+  {
+    skillIds: ['javascript'],
+    difficulty: 'medium',
+    language: 'javascript',
+    description:
+      'saveAll(records) should save every record and resolve only after all saves finish, returning the number saved. It currently returns 0 because the saves run after it resolves.',
+    hint: 'forEach does not wait for the promise your async callback returns.',
+    rootCause:
+      'Array.prototype.forEach ignores the promise returned by an async callback, so the function returns before any save completes and the counter is still 0. Use for...of with await, or await Promise.all(records.map(...)).',
+    brokenCode: `async function saveAll(records) {
+  let saved = 0;
+  records.forEach(async (record) => {
+    await db.save(record);
+    saved += 1;
+  });
+  return saved;
+}`,
+  },
+  {
+    skillIds: ['node-js'],
+    difficulty: 'easy',
+    language: 'javascript',
+    description:
+      'The POST /items handler should read the JSON array the client sent and respond with its length. It currently throws a parse error for every valid JSON body.',
+    hint: 'What type is req.body after express.json() has run?',
+    rootCause:
+      'The express.json() middleware already parsed the body into an array/object, so calling JSON.parse(req.body) throws. Read req.body directly.',
+    brokenCode: `app.post('/items', (req, res) => {
+  const items = JSON.parse(req.body);
+  res.json({ count: items.length });
+});`,
+  },
+  {
+    skillIds: ['python'],
+    difficulty: 'medium',
+    language: 'python',
+    description:
+      'add_tag(tag) should return a list containing only the tag, and add_tag(tag, tags) should append to the list passed in. Repeated add_tag("x") calls currently keep growing the same shared list.',
+    hint: 'When is the default value [] evaluated?',
+    rootCause:
+      'The default list is created once when the function is defined and shared across calls, so tags accumulate between unrelated calls. Default to None and create a new list inside the function.',
+    brokenCode: `def add_tag(tag, tags=[]):
+    tags.append(tag)
+    return tags`,
+  },
+  {
+    skillIds: ['postgres'],
+    difficulty: 'medium',
+    language: 'sql',
+    description:
+      'The query should return each customer with the number of orders they placed. It currently over-counts whenever a single order has more than one line item.',
+    hint: 'One order has many order_items; what does that do to the row count?',
+    rootCause:
+      'Joining order_items fans each order out into one row per line item, so COUNT(o.id) counts line items, not orders. Use COUNT(DISTINCT o.id) or aggregate order_items separately.',
+    brokenCode: `SELECT c.id,
+       c.name,
+       COUNT(o.id) AS order_count
+FROM customers c
+JOIN orders o      ON o.customer_id = c.id
+JOIN order_items i ON i.order_id = o.id
+GROUP BY c.id, c.name;`,
+  },
+  {
+    skillIds: ['react'],
+    difficulty: 'medium',
+    language: 'tsx',
+    description:
+      'Ticker should show a number that increases by one every second. It currently jumps from 0 to 1 and then stops increasing.',
+    hint: 'The effect runs once, so which count does the interval callback close over?',
+    rootCause:
+      'The effect has an empty dependency array, so the interval callback closes over the initial count (0) and always sets 1. Use the functional update setCount((c) => c + 1).',
+    brokenCode: `function Ticker() {
+  const [count, setCount] = useState(0);
+
+  useEffect(() => {
+    const id = setInterval(() => setCount(count + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  return <span>{count}</span>;
+}`,
+  },
+];
+
+// ponytail: hand-seeded verbal prompts so the spoken-answer path is runnable
+// before a verbal question-generator + evals land. `keyPoints` are the grader's
+// match targets (same role as KNOWLEDGE_SEED.keyPoints).
+const VERBAL_SEED: Array<{
+  skillIds: string[];
+  difficulty: string;
+  prompt: string;
+  keyPoints: string[];
+}> = [
+  {
+    skillIds: ['react'],
+    difficulty: 'easy',
+    prompt:
+      'In 60-90 seconds, explain how React reconciles a list of items between renders and why keys matter.',
+    keyPoints: ['virtual DOM', 'diff', 'keys', 'identity'],
+  },
+  {
+    skillIds: ['postgres'],
+    difficulty: 'medium',
+    prompt: 'Talk me through how you would diagnose a slow query in Postgres, from symptom to fix.',
+    keyPoints: ['EXPLAIN ANALYZE', 'index', 'sequential scan', 'statistics'],
+  },
+  {
+    skillIds: ['node-js'],
+    difficulty: 'medium',
+    prompt:
+      'Describe how the Node.js event loop handles a CPU-heavy task and what you would do about it.',
+    keyPoints: ['single threaded', 'event loop', 'worker threads', 'blocking'],
+  },
+  {
+    skillIds: ['system-design'],
+    difficulty: 'hard',
+    prompt:
+      'Whiteboard verbally: design a URL shortener that handles 10k writes/sec and describe the storage + cache trade-offs.',
+    keyPoints: ['hashing', 'collision', 'cache', 'read replica'],
+  },
+  {
+    skillIds: ['behavioral'],
+    difficulty: 'easy',
+    prompt:
+      'Tell me about a technical disagreement you had with a teammate. What was your role and what was the outcome?',
+    keyPoints: ['situation', 'own role', 'action', 'outcome'],
+  },
+];
+
 // ponytail: 2 hand-seeded build tasks per language so the consumer wire ships
 // without blocking on a build-task eval set. Replaced by `build-task-generator`
 // once operators have provider credentials wired. Test harness contract: each
@@ -2496,7 +3221,8 @@ const BUILD_SEED: Array<{
     title: 'Implement sum(a, b)',
     description:
       'Export a function `sum(a, b)` that returns the arithmetic sum of two numbers. Submit the full function; the harness will exercise it with three cases.',
-    starter: '// Edit below. Keep the name `sum` so the test harness can find it.\nfunction sum(a, b) {\n  // your code\n}\n',
+    starter:
+      '// Edit below. Keep the name `sum` so the test harness can find it.\nfunction sum(a, b) {\n  // your code\n}\n',
     tests: [
       "const assert = (cond, name) => console.log((cond ? 'PASS ' : 'FAIL ') + name);",
       "assert(sum(1, 2) === 3, 'adds positives');",
@@ -2512,7 +3238,7 @@ const BUILD_SEED: Array<{
     title: 'Implement reverse_words(s)',
     description:
       "Define `reverse_words(s)` that returns the input string with the order of whitespace-separated words reversed. Single spaces between words; `reverse_words('a b c') == 'c b a'`.",
-    starter: "def reverse_words(s):\n    # your code\n    return s\n",
+    starter: 'def reverse_words(s):\n    # your code\n    return s\n',
     tests: [
       'def _assert(cond, name): print(("PASS " if cond else "FAIL ") + name)',
       "_assert(reverse_words('a b c') == 'c b a', 'three words')",

@@ -1,0 +1,42 @@
+domain: myworkdayjobs.com
+allowed_paths:
+  - /
+  - /en-US/
+  - /en-US/*/apply
+forbidden_selectors:
+  - "input[type=password]"
+  - "input[data-automation-id*=ssn]"
+  - "input[data-automation-id*=socialSecurity]"
+  - "input[data-automation-id*=disability]"
+  - "input[data-automation-id*=veteran]"
+  - "input[data-automation-id*=gender]"
+  - "input[data-automation-id*=ethnicity]"
+required_headers:
+  - user-agent
+# F.3 workday-apply: multi-step funnel using Workday's stable
+# `data-automation-id` attributes. Voluntary-disclosure (EEO) fields are in
+# forbidden_selectors and never touched.
+field_selectors:
+  name: "input[data-automation-id=legalNameSection_firstName]"
+  email: "input[data-automation-id=email]"
+  phone: "input[data-automation-id=phone-number]"
+  resume_upload: "input[data-automation-id=file-upload-input]"
+apply_flow:
+  entry: "a[data-automation-id=adventureButton]"
+  steps:
+    - name: my-information
+      advance:
+        - "button[data-automation-id=bottom-navigation-next-button]"
+    - name: my-experience
+      advance:
+        - "button[data-automation-id=bottom-navigation-next-button]"
+    - name: application-questions
+      advance:
+        - "button[data-automation-id=bottom-navigation-next-button]"
+    - name: review
+      submit: "button[data-automation-id=bottom-navigation-submit-button]"
+  success: "div[data-automation-id=applicationSubmitted]"
+submit_selector: "button[data-automation-id=bottom-navigation-submit-button]"
+success_signal: "div[data-automation-id=applicationSubmitted]"
+pacing_overrides:
+  per_min: 4

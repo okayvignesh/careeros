@@ -97,6 +97,7 @@ function makeService(prismaMock: unknown, adapter: unknown) {
     {} as never,
     {} as never,
     {} as never,
+    { resolve: async () => ({ values: {}, secrets: {} }) } as never,
   );
   // Replace the adapter registry with a single-adapter under our control.
   (svc as unknown as { adapters: Record<string, unknown> }).adapters = {
@@ -254,6 +255,7 @@ function makeListService(prismaMock: unknown, prefsMock: unknown) {
     {} as never,
     prefsMock as never,
     {} as never,
+    { resolve: async () => ({ values: {}, secrets: {} }) } as never,
   );
 }
 
@@ -268,7 +270,7 @@ describe('JobsService.list — pagination query count (C-P3.8c)', () => {
   };
   const USER_ID = '00000000-0000-0000-0000-000000000001';
 
-  it('1000-job pool: 50 per page fires constant 4 queries (findMany, count, skills, prefs)', async () => {
+  it('1000-job pool: 50 per page fires constant 2 queries (findMany, skills)', async () => {
     const m = makeListPrismaMock(1000);
     const svc = makeListService(m.prisma, prefsStub);
 
@@ -276,18 +278,20 @@ describe('JobsService.list — pagination query count (C-P3.8c)', () => {
 
     expect(out.jobs.length).toBeGreaterThan(0);
     expect(out.jobs.length).toBeLessThanOrEqual(50);
+    // Total = the count that passes the filter (computed in-memory), so paging
+    // matches what the user can actually browse.
     expect(out.total).toBe(1000);
 
-    // Prisma call inventory: exactly 3 Prisma calls (findMany + count +
+    // Prisma call inventory: exactly 2 Prisma calls (normalizedJob.findMany +
     // candidateSkillState.findMany). Prefs is via the stubbed
-    // JobPreferencesService, not Prisma-direct.
+    // JobPreferencesService, not Prisma-direct. No `count` query — total is the
+    // filtered+scored length (global, so pagination is correct).
     expect(m.calls.filter((c) => c === 'normalizedJob.findMany').length).toBe(1);
-    expect(m.calls.filter((c) => c === 'normalizedJob.count').length).toBe(1);
     expect(m.calls.filter((c) => c === 'candidateSkillState.findMany').length).toBe(1);
-    expect(m.calls.length).toBe(3);
+    expect(m.calls.length).toBe(2);
     // MUTATION SMOKE: swap `computeMatchResult` (pure) for a per-row
     // `this.prisma.<x>.findMany` inside the map → calls.length jumps to
-    // 3 + limit and this assertion fails. Move the candidateSkillState
+    // 2 + limit and this assertion fails. Move the candidateSkillState
     // fetch INSIDE the filter loop → the count jumps from 1 to page-size.
   });
 
@@ -295,7 +299,7 @@ describe('JobsService.list — pagination query count (C-P3.8c)', () => {
     const m = makeListPrismaMock(1000);
     const svc = makeListService(m.prisma, prefsStub);
     await svc.list({ userId: USER_ID, limit: 50, offset: 200 });
-    expect(m.calls.length).toBe(3);
+    expect(m.calls.length).toBe(2);
     // MUTATION SMOKE: naive "one findMany per offset step" mutation would
     // scale with offset; this pins it constant.
   });
@@ -305,6 +309,44 @@ describe('JobsService.list — pagination query count (C-P3.8c)', () => {
     const svc = makeListService(m.prisma, prefsStub);
     await svc.list({ userId: USER_ID, limit: 50, offset: 0 });
     expect(m.prisma.candidateSkillState.findMany).toHaveBeenCalledTimes(1);
+  });
+});
+
+// D: A populates candidate_skill_state from the resume (via evidence); the list
+// scorer must then use it. This pins resume-derived skill → non-null match.
+describe('JobsService.list — resume-derived skill influences match (D)', () => {
+  const prefsStub = {
+    get: async () => ({
+      remoteOnly: false,
+      mustHaveSkills: [] as string[],
+      dealbreakerSkills: [] as string[],
+      companyBlacklist: [] as string[],
+    }),
+  };
+  const USER_ID = '00000000-0000-0000-0000-000000000009';
+
+  it('scores a job against candidate_skill_state populated from the resume', async () => {
+    const job = { ...normalizedJobRow(0), skillIds: ['typescript'] };
+    const prisma = {
+      normalizedJob: {
+        findMany: vi.fn(async () => [job]),
+        count: vi.fn(async () => 1),
+      },
+      candidateSkillState: {
+        findMany: vi.fn(async () => [
+          { skillId: 'typescript', proficiency: 80, recencyDays: 5 },
+        ]),
+      },
+    };
+    const svc = makeListService(prisma, prefsStub);
+
+    const out = await svc.list({ userId: USER_ID, limit: 50, offset: 0 });
+
+    expect(out.jobs[0]!.match.total).toBe(1);
+    expect(out.jobs[0]!.match.matched).toBe(1);
+    expect(out.jobs[0]!.match.score).toBeGreaterThan(0);
+    // MUTATION SMOKE: drop `candidate_skill_state` from the list read (or stop
+    // A writing it) and the skill is "missing" → matched=0, score=0.
   });
 });
 
@@ -371,7 +413,15 @@ class TestJobsService extends JobsService {
   constructor(prisma: unknown) {
     // Override runWithUserLimit passthrough via usage stub.
     const usage = { runWithUserLimit: async <T>(_u: string, fn: () => Promise<T>) => fn() };
-    super(prisma as never, usage as never, {} as never, {} as never, {} as never, {} as never);
+    super(
+      prisma as never,
+      usage as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      { resolve: async () => ({ values: {}, secrets: {} }) } as never,
+    );
     // tryLoadProvider is private — cast in a stub provider whose chatStructured
     // increments a counter so we can assert it was NEVER called for blocked JDs.
     const self = this;
@@ -434,5 +484,27 @@ describe('JobsService injection defence (C-P3.7a)', () => {
     // MUTATION SMOKE: remove the extractSkillsForJob InjectionBlockedError
     // catch → the caller gets a 500 (InjectionBlockedError leaks) instead of
     // a 400, and no audit row is written.
+  });
+});
+
+// C: the extractor may return catalogue *names*; resolve id-or-name so those
+// jobs are scored instead of silently landing with an empty skill list.
+describe('JobsService.extractSkillsBatch — accepts catalogue names (C)', () => {
+  it('resolves LLM-returned names to ids and drops unknowns', async () => {
+    const jobs = [jobRow(0, CLEAN_JD)];
+    const m = makeExtractPrismaMock(jobs);
+    const svc = new TestJobsService(m.prisma);
+    (svc as unknown as { tryLoadProvider: () => Promise<unknown> }).tryLoadProvider = async () => ({
+      chatStructured: async () => ({ skillIds: ['TypeScript', 'Kubernetes'] }),
+    });
+
+    const stats = await svc.extractSkillsBatch('user-a', 10);
+
+    expect(stats.extracted).toBe(1);
+    // Catalogue is [{id:'typescript',name:'TypeScript'},{id:'postgres',...}]:
+    // "TypeScript" → typescript, "Kubernetes" unresolved → dropped.
+    expect(m.updates[0]!.skillIds).toEqual(['typescript']);
+    // MUTATION SMOKE: restore the `knownIds.has(id)` filter → [] because the
+    // model returned the display name, not the id.
   });
 });

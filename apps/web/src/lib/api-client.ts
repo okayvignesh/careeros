@@ -28,6 +28,17 @@ export function readCsrfTokenFromCookie(cookieHeader: string): string | null {
   return null;
 }
 
+/** Non-2xx response. Carries the status so callers can distinguish 404 from a real failure. */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
 async function request<T>(
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   path: string,
@@ -54,7 +65,7 @@ async function request<T>(
   const data = text ? (JSON.parse(text) as unknown) : null;
   if (!res.ok) {
     const msg = (data as { message?: string } | null)?.message ?? `${method} ${path} → ${res.status}`;
-    throw new Error(msg);
+    throw new ApiError(msg, res.status);
   }
   return data as T;
 }

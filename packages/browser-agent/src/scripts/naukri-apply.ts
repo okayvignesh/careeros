@@ -1,28 +1,35 @@
 /**
- * F.3 naukri-apply: STUB.
+ * F.3 naukri-apply: best-effort Naukri apply.
  *
- * Naukri's apply flow is a server-rendered form that mutates between visits;
- * reliable selectors need region-specific captures (naukri.com and
- * naukrigulf.com differ).
+ * Naukri's apply flow is a jQuery-era server-rendered form (`#apply-button` →
+ * a chat-style questionnaire on some listings → submit). Steps live in
+ * `allowlist/naukri.yaml`. Naukri also serves region variants
+ * (`naukrigulf.com`); those get their own entry once a fixture is captured —
+ * this script only runs the `naukri.com` entry.
  *
- * ponytail: stub, selectors not yet captured; wire when a user hits this
- * ATS, upgrade path is capture per-region fixture, add region router in
- * field_selectors (nested yaml key per domain variant).
+ * Honest limitation: listings that switch to the "chat" apply assistant
+ * present free-text questions this flow cannot answer; the run returns
+ * `selector-broken` and the user completes in their browser.
  */
 
 import type { AllowlistEntry } from '../allowlist/loader';
+import { runApplyFlow } from './apply-flow';
 import type { FormFillMode, FormFillPage, FormFillPayload, FormFillResult } from './form-fill';
 
 export async function runNaukriApply(
-  _page: FormFillPage,
+  page: FormFillPage,
   entry: AllowlistEntry,
-  _payload: FormFillPayload,
+  payload: FormFillPayload,
   mode: FormFillMode,
+  opts: { screenshotPath?: string } = {},
 ): Promise<FormFillResult> {
-  return {
-    status: 'selector-broken',
-    mode,
-    missing: ['naukri-apply: regional form variants not yet captured'],
-    filledFields: [],
-  };
+  if (entry.domain !== 'naukri.com') {
+    return {
+      status: 'error',
+      mode,
+      error: `runNaukriApply expected naukri.com entry, got ${entry.domain}`,
+      filledFields: [],
+    };
+  }
+  return runApplyFlow(page, entry, payload, mode, entry.apply_flow ?? undefined, opts);
 }

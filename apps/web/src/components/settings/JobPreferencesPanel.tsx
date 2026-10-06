@@ -1,10 +1,11 @@
 'use client';
 
 import { useEffect, useState, type FormEvent } from 'react';
-import { Save } from 'lucide-react';
+import { Save, Sparkles } from 'lucide-react';
 import { ThinkingOrb } from 'thinking-orbs';
 import { Button } from '@careeros/ui';
-import { apiGet, apiPut } from '@/lib/api-client';
+import { apiGet, apiPost, apiPut } from '@/lib/api-client';
+import { SkillMultiSelect } from '@/components/settings/SkillMultiSelect';
 
 interface JobPreferences {
   targetRoles: string[];
@@ -26,7 +27,11 @@ export function JobPreferencesPanel() {
   const [prefs, setPrefs] = useState<JobPreferences | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
+  // Bumping this remounts the form so the comma/space-preserving CsvInputs pick
+  // up arrays that changed underneath them (e.g. a "Suggest from resume" fill).
+  const [formVersion, setFormVersion] = useState(0);
 
   useEffect(() => {
     apiGet<JobPreferences>('/me/job-preferences')
@@ -53,6 +58,22 @@ export function JobPreferencesPanel() {
     }
   }
 
+  async function suggestFromResume() {
+    setSuggesting(true);
+    setError(null);
+    try {
+      // Server merges with onlyFillEmpty, so this never clobbers typed values.
+      const next = await apiPost<JobPreferences>('/me/job-preferences/derive-from-resume');
+      setPrefs(next);
+      setSavedAt(next.updatedAt);
+      setFormVersion((v) => v + 1);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSuggesting(false);
+    }
+  }
+
   if (error && !prefs) {
     return (
       <div className="rounded-[var(--radius)] border border-danger/30 bg-danger/10 px-3.5 py-2.5 text-[13px] text-danger">
@@ -66,7 +87,7 @@ export function JobPreferencesPanel() {
     setPrefs({ ...prefs, [k]: v });
 
   return (
-    <form onSubmit={onSubmit} className="flex flex-col gap-6">
+    <form key={formVersion} onSubmit={onSubmit} className="flex flex-col gap-6">
       <Field label="Target roles" hint="Comma-separated. Free text for now; a role classifier lands with the analysis slice.">
         <CsvInput value={prefs.targetRoles} onChange={(v) => set('targetRoles', v)} placeholder="Senior Backend Engineer, Staff SRE" />
       </Field>
@@ -142,12 +163,22 @@ export function JobPreferencesPanel() {
         </div>
       </Field>
 
-      <Field label="Must-have skills" hint="Skill IDs from your catalogue. Job must have all of these.">
-        <CsvInput value={prefs.mustHaveSkills} onChange={(v) => set('mustHaveSkills', v)} placeholder="ts, react, aws" />
+      <Field label="Must-have skills" hint="Pick from your skill catalogue, or add a custom term. Job must have at least one of these.">
+        <SkillMultiSelect
+          value={prefs.mustHaveSkills}
+          onChange={(v) => set('mustHaveSkills', v)}
+          placeholder="Search skills…"
+          testId="prefs-must-have"
+        />
       </Field>
 
-      <Field label="Dealbreaker skills" hint="Skill IDs. Any hit excludes the job.">
-        <CsvInput value={prefs.dealbreakerSkills} onChange={(v) => set('dealbreakerSkills', v)} placeholder="cobol, java" />
+      <Field label="Dealbreaker skills" hint="Pick from your skill catalogue, or add a custom term. Any hit excludes the job.">
+        <SkillMultiSelect
+          value={prefs.dealbreakerSkills}
+          onChange={(v) => set('dealbreakerSkills', v)}
+          placeholder="Search skills…"
+          testId="prefs-dealbreaker"
+        />
       </Field>
 
       <Field label="Company blacklist" hint="Case-insensitive company names.">
@@ -161,7 +192,7 @@ export function JobPreferencesPanel() {
       )}
 
       <div className="flex items-center gap-4">
-        <Button type="submit" disabled={saving}>
+        <Button type="submit" disabled={saving || suggesting}>
           {saving ? (
             <>
               <ThinkingOrb state="working" size={20} /> Saving
@@ -169,6 +200,23 @@ export function JobPreferencesPanel() {
           ) : (
             <>
               Save preferences <Save className="h-4 w-4" />
+            </>
+          )}
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          data-testid="job-prefs-suggest-from-resume"
+          onClick={suggestFromResume}
+          disabled={suggesting || saving}
+        >
+          {suggesting ? (
+            <>
+              <ThinkingOrb state="working" size={20} /> Reading resume
+            </>
+          ) : (
+            <>
+              Suggest from resume <Sparkles className="h-4 w-4" />
             </>
           )}
         </Button>

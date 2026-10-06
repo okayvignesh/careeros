@@ -65,6 +65,7 @@ function makeService(prisma: unknown, prefsOver: Record<string, unknown> = {}) {
     {} as never,
     prefs as never,
     {} as never,
+    { resolve: async () => ({ values: {}, secrets: {} }) } as never,
   );
 }
 

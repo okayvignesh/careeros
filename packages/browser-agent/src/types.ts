@@ -15,6 +15,8 @@ export const AGENT_TASK_KINDS = [
   'indeed-discover',
   'ashby-apply',
   'greenhouse-apply',
+  'lever-apply',
+  'workday-apply',
   'linkedin-easy-apply',
   'indeed-easy-apply',
   'naukri-apply',
@@ -44,7 +46,10 @@ export type AgentResultStatus = z.infer<typeof AgentResultStatus>;
 export const EvidenceBundle = z.object({
   screenshotShas: z.array(z.string().regex(/^[a-f0-9]{64}$/i)),
   harShas: z.array(z.string().regex(/^[a-f0-9]{64}$/i)),
-  domSnapshotSha: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
+  domSnapshotSha: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/i)
+    .optional(),
   urlsVisited: z.array(z.string().url()),
 });
 export type EvidenceBundle = z.infer<typeof EvidenceBundle>;

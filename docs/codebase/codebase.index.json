@@ -3,8 +3,8 @@
   "kind": "codebase-knowledge-index",
   "project": "Career OS",
   "repository": "okayvignesh/careeros",
-  "commit": "d31dead",
-  "generatedAt": "2026-10-03",
+  "commit": "ca74dc5",
+  "generatedAt": "2026-10-04",
   "summary": "Self-hosted, provider-agnostic Personal AI Career Operating System. pnpm/Turborepo monorepo (Next.js 16 web, NestJS 10 API, BullMQ workers, Electron desktop agent, Expo mobile); Postgres is the system of record, LLMs are not. AGPL-3.0-or-later.",
   "entrypoints": {},
   "readingOrder": [
@@ -42,9 +42,9 @@
         "Coverage and confidence",
         "Open questions"
       ],
-      "words": 1249,
-      "bytes": 9775,
-      "approxTokens": 2444,
+      "words": 1569,
+      "bytes": 12925,
+      "approxTokens": 3231,
       "path": "docs/codebase/README.md"
     },
     {
@@ -60,9 +60,9 @@
         "Where to look",
         "Top risks to keep in mind"
       ],
-      "words": 1049,
-      "bytes": 8115,
-      "approxTokens": 2029,
+      "words": 1191,
+      "bytes": 9451,
+      "approxTokens": 2363,
       "path": "docs/codebase/AI_CONTEXT.md"
     },
     {
@@ -72,9 +72,9 @@
         "Core Sections (Required)",
         "Extended Sections"
       ],
-      "words": 1697,
-      "bytes": 15839,
-      "approxTokens": 3960,
+      "words": 1812,
+      "bytes": 16984,
+      "approxTokens": 4246,
       "path": "docs/codebase/STACK.md"
     },
     {
@@ -84,9 +84,9 @@
         "Core Sections (Required)",
         "Extended Sections"
       ],
-      "words": 1250,
-      "bytes": 11748,
-      "approxTokens": 2937,
+      "words": 1345,
+      "bytes": 12983,
+      "approxTokens": 3246,
       "path": "docs/codebase/STRUCTURE.md"
     },
     {
@@ -96,9 +96,9 @@
         "Core Sections (Required)",
         "Extended Sections"
       ],
-      "words": 1561,
-      "bytes": 14040,
-      "approxTokens": 3510,
+      "words": 1843,
+      "bytes": 16766,
+      "approxTokens": 4192,
       "path": "docs/codebase/ARCHITECTURE.md"
     },
     {
@@ -108,9 +108,9 @@
         "Core Sections (Required)",
         "Extended Sections"
       ],
-      "words": 1024,
-      "bytes": 9045,
-      "approxTokens": 2261,
+      "words": 1034,
+      "bytes": 9108,
+      "approxTokens": 2277,
       "path": "docs/codebase/CONVENTIONS.md"
     },
     {
@@ -120,9 +120,9 @@
         "Core Sections (Required)",
         "Extended Sections"
       ],
-      "words": 1555,
-      "bytes": 14117,
-      "approxTokens": 3529,
+      "words": 1805,
+      "bytes": 16893,
+      "approxTokens": 4223,
       "path": "docs/codebase/INTEGRATIONS.md"
     },
     {
@@ -132,9 +132,9 @@
         "Core Sections (Required)",
         "Extended Sections"
       ],
-      "words": 1097,
-      "bytes": 9004,
-      "approxTokens": 2251,
+      "words": 1157,
+      "bytes": 9838,
+      "approxTokens": 2460,
       "path": "docs/codebase/TESTING.md"
     },
     {
@@ -143,9 +143,9 @@
       "topics": [
         "Core Sections (Required)"
       ],
-      "words": 2458,
-      "bytes": 20962,
-      "approxTokens": 5241,
+      "words": 2793,
+      "bytes": 24618,
+      "approxTokens": 6154,
       "path": "docs/codebase/CONCERNS.md"
     }
   ],
@@ -273,7 +273,7 @@
   ],
   "signals": {
     "mermaidDiagrams": 6,
-    "totalApproxTokens": 28162
+    "totalApproxTokens": 32392
   },
   "usage": "Load this file first to discover the knowledge base, then read documents in readingOrder or by topic. Every non-trivial claim cites committed file paths; [TODO] = unknown from source, [ASK USER] = needs team intent. Docs are Markdown by design so any AI/agent can read them."
 }

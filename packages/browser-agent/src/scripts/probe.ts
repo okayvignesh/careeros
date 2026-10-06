@@ -49,6 +49,18 @@ export function collectProbeSelectors(entry: AllowlistEntry): string[] {
   }
   if (entry.submit_selector) out.push(entry.submit_selector);
   if (entry.success_signal) out.push(entry.success_signal);
+  // Multi-step flows: probe the opener, every step's advance control, the
+  // terminal submit and the success marker too, so a broken modal is caught
+  // by the weekly health cron, not only the flat selectors.
+  const flow = entry.apply_flow;
+  if (flow) {
+    if (flow.entry) out.push(flow.entry);
+    for (const step of flow.steps) {
+      for (const selector of step.advance ?? []) out.push(selector);
+    }
+    if (flow.submit && !out.includes(flow.submit)) out.push(flow.submit);
+    if (flow.success && !out.includes(flow.success)) out.push(flow.success);
+  }
   return out;
 }
 
@@ -102,5 +114,8 @@ export function probeEntry(entry: AllowlistEntry, domSnapshot: string): ProbeRes
  * a comma inside an attribute value.
  */
 function splitSelectorGroup(group: string): string[] {
-  return group.split(',').map((s) => s.trim()).filter(Boolean);
+  return group
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
 }

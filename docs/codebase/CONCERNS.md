@@ -1,6 +1,6 @@
 ---
-commit: d31dead
-generated: 2026-10-03
+commit: ca74dc5
+generated: 2026-10-04
 scope: risks, technical debt, security and open questions
 ---
 
@@ -15,7 +15,7 @@ Prioritised from the scan output, config, and source inspection. Severities are 
 | Severity | Concern | Evidence | Impact | Suggested action |
 |----------|---------|----------|--------|------------------|
 | High | **No global session guard; auth is enforced per-controller via `SessionService.requireUserId`** | `apps/api/src/modules/auth/auth.module.ts` (only `ThrottlerGuard` is global), 60+ call sites | One missed call = unauthenticated data access; multi-tenant readiness is weaker than schema suggests | Add a global auth guard (allowlist public routes) before multi-user lands |
-| Medium | **The `verbal_sessions` table and its P2/P6 consumers are still missing** | `plan/phase-2-assessment-arena.md:97-98`, `plan/phase-6-controlled-execution.md:51`; the whisper.cpp service and `@careeros/stt` client now exist, but no table/endpoint/grader wiring does | Verbal/multi-turn interview cannot persist or grade a spoken answer | Add `verbal_sessions` + MinIO audio upload + grader wiring; see `docs/stt.md` §"What P2 / P6 still need" |
+| Low | **Verbal recordings have no retention sweep** | `apps/api/src/modules/assessments/verbal-audio.store.ts`; `plan/phase-2-assessment-arena.md:101` calls for auto-delete after 30 days | Audio accumulates in MinIO indefinitely | Add a periodic prune over `verbal_sessions.audioKey` older than the retention window (P6 consumer work) |
 | Medium | **`AppConfig` global keys not user-scoped** (multitenant TODOs) | `apps/api/src/modules/usage/usage.controller.ts:96,116,137`; `usage.service.ts:122` | Multi-user flip changes another user's config | Scope by `userId` before multi-user |
 | Medium | **Live Docker egress smoke not run**: `scripts/smoke/egress.sh` exists but is not in CI and has not been executed against the full stack | `scripts/smoke/egress.sh`; `plan/CLEANUP_TASKS.md` progress log | The egress-bypass fix is unit/static-verified but not yet proven end-to-end | Run the smoke on a host with Docker and record the result |
 | Medium | **Prompt evals are thin and unregistered**: 2 `*.eval.ts` files; the daily workflow exists but the runner registration is deferred | `packages/ai/src/evals/`, `.github/workflows/nightly-evals.yml` | LLM regressions may ship unnoticed | Register the eval runner; grow skill-extract cases toward the blueprint target (`packages/ai/src/evals/skill-extract.ts:4`) |
@@ -61,6 +61,19 @@ Prioritised from the scan output, config, and source inspection. Severities are 
 | AI-safety logs missing (hallucination/injection ledger surface) | `LlmCall` (`llm_calls`) per-call audit with `js-tiktoken` pre-flight tokens + `LlmInjectionLog` (`llm_injection_log`) for wrap/scan hits; bounded drop-loudly queue | `apps/api/src/common/{llm-audit.ts,injection-log.ts,injection-audit.module.ts}`, `packages/ai/src/tokenize.ts`, `apps/api/prisma/schema.prisma` |
 | Master-key rotation flow unproven | Pure idempotent `rotateMasterKey` + `MasterKeyRotationService` + re-auth-gated `POST /me/security/rotate-key`, with unit tests | `packages/secrets/src/rotation.ts`, `apps/api/src/modules/me/master-key-rotation.service.ts` |
 
+### 1d) Resolved during `feat/remaining-work` (2026-10-04, `ca74dc5`)
+
+| Former concern | Fix landed | Evidence |
+|----------------|-----------|----------|
+| Web backlog routes orphaned / fetch-on-mount drift | 17 new routes + feature components (`settings/{security,data,notifications,backup,job-sources}`, inbox, daily-brief, outreach, quests, jobs detail + verification, interview-prep, dossier, repository-analysis, verbal), a keyboard-trapped `Dialog`, and nav wiring in `AppNav.tsx`; new panels use `useApi` and co-located tests | `apps/web/src/app/(app)/`, `apps/web/src/components/`, `apps/web/src/components/AppNav.tsx`, `apps/web/e2e/backlog-routes.spec.ts` |
+| Gmail inbound-only; no outbound drafts/sends/replies | `GmailOutboundService` + `GmailAuthService` (shared refresh-token client), pure RFC 822 builder in `@careeros/messaging`; routes `POST /integrations/gmail/drafts|send`; `gmail.compose` scope | `apps/api/src/modules/gmail/{gmail.outbound.service.ts,gmail.auth.ts}`, `packages/messaging/src/mime.ts` |
+| Slack slash/interactive handlers were placeholders; no event dispatch | Real `SlackCommandsService` (DB-backed `/quiz` `/jobs` `/brief` `/approve` `/review` `/pause` `/resume`), `SlackEventsService` (`app_mention`/DM), `SlackInteractiveService` (assessment/job/approval/brief actions), `SlackContextService` user binding; webhooks rate-limited | `apps/api/src/modules/slack/` |
+| Outreach had no approval lifecycle / no queue | `OutreachService` implements `ApprovalsWorker` (approve → staged Gmail draft → scheduled send), `outreach-send` queue + idempotent worker; `GET /outreach/:id`, `POST /:id/send` replace the stub `/:id/sent` | `apps/api/src/modules/outreach/`, `apps/worker/src/outreach-send.worker.ts` |
+| `external` embeddings seam had no adapter; query/worker dims could diverge from the collection | OpenAI-compatible adapter (`external.ts`) + `config.ts` resolver (`app_config` beats `EMBEDDING_MODE`), sealed API key, required/declared dimension, `QdrantStore` recreate-on-mismatch, worker/API/search share it | `packages/embeddings/src/{external,config,qdrant}.ts`, `apps/worker/src/embedding-job.ts`, `apps/api/src/modules/search/search.service.ts` |
+| Agent form-fill was single-page only; selector drift could fill EEO fields | Declarative multi-step `apply_flow` engine + LinkedIn/Indeed/Naukri/Workday/Lever allowlist flows, strict YAML schemas, `forbidden_selectors` EEO/credential guard, selector-broken reporting | `packages/browser-agent/src/scripts/{apply-flow,form-fill}.ts`, `packages/browser-agent/allowlist/` |
+| P2 verbal sessions missing (see 1c predecessor note) | `VerbalSession` model + migration, MinIO audio store (25 MB cap, owner-scoped keys), whisper transcription (`unavailable` when unconfigured), `verbal-defense-grader` agent, routes + web runner | `apps/api/prisma/migrations/20261013020000_verbal_sessions/`, `apps/api/src/modules/assessments/` |
+| No repository evidence projection; no visible session management | `GET /repository-analysis` (read-projection of immutable GitHub evidence) + web view; `GET /auth/sessions`, `DELETE /auth/sessions/:id`, `POST /auth/sessions/revoke-others` with audit + `RateLimitSessions` | `apps/api/src/modules/repository-analysis/`, `apps/api/src/modules/auth/session.controller.ts` |
+
 ### 2) Technical Debt
 
 | Debt item | Why it exists | Where | Risk if ignored | Suggested fix |
@@ -94,7 +107,7 @@ Prioritised from the scan output, config, and source inspection. Severities are 
 |---------|----------|-----------------|-------------|-----------------------|
 | N+1 in job sync | `plan/PLAN.md:69` | Not yet measured at scale | Slow ingestion as sources grow | Batch writes; query-count test |
 | Match-score pagination pool ceiling | `plan/PLAN.md:69` | Not yet measured | Degraded match feed with many jobs | Keyset pagination |
-| Embedding provider fallback | `packages/embeddings/src/provider.ts`, `apps/worker/src/embedding-job.ts` | Real `bge-small-en` by default; offline degrades to deterministic | Pre-provider-switch vectors are hash-similar and need re-embedding | Enable local mode + re-embed legacy vectors; add a quality eval |
+| Embedding provider switch / dimension change | `packages/embeddings/src/{provider,external,config}.ts`, `apps/worker/src/embedding-job.ts` | Real `bge-small-en` by default; `external` requires a saved config and never degrades; a dimension change drops + recreates the collection | Dropping a collection discards all stored vectors until re-embed completes; pre-switch vectors are stale | Re-embed legacy vectors after a switch; add a quality eval |
 | Global in-process LLM concurrency limit `p-limit(2)` per user | `apps/api/src/modules/usage/usage.service.ts:76-110` | Queueing under burst | Multi-replica needs shared limit | Move to Redis-backed limiter |
 | Qdrant/Redis/MinIO single-instance | `infra/docker/docker-compose.yml` | N/A single-user | No HA; acceptable for self-host | Document as operator concern |
 
@@ -103,7 +116,7 @@ Prioritised from the scan output, config, and source inspection. Severities are 
 | Area | Why fragile | Churn signal | Safe change strategy |
 |------|-------------|-------------|----------------------|
 | `apps/api/src/app.module.ts` | Every new module touches it; ordering matters | 18 commits / 90d (scan) | Add modules surgically; run boot test |
-| `apps/api/prisma/schema.prisma` | 56 models (40 migrations); migrations must be forward-safe | 19 commits / 90d | Named, idempotent, additive migrations; review |
+| `apps/api/prisma/schema.prisma` | 57 models (41 migrations); migrations must be forward-safe | 19 commits / 90d | Named, idempotent, additive migrations; review |
 | `packages/ai/src/index.ts` + prompt registry | Prompt/provider contract churn | 13 commits / 90d | Bump prompt versions; run evals |
 | `pnpm-lock.yaml` | Dependency churn across 19 workspaces (4 apps + 15 packages) | 21 commits / 90d | Renovate + `pnpm install --frozen-lockfile` |
 | `apps/api/package.json` | Repeated dependency adds | 14 commits / 90d | Keep versions aligned with worker |
@@ -130,5 +143,5 @@ Prioritised from the scan output, config, and source inspection. Severities are 
 - Version alignment: `apps/api/package.json`, `apps/worker/package.json`, `packages/aggregator/package.json` (Prisma 6.x); remaining React-major divergence in `packages/resume-render/package.json`
 - Config reality: `.eslintrc.cjs:10-18` (dormant root chain), `apps/web/eslint.config.mjs` (active eslint 9, `set-state-in-effect: error`), `apps/web/package.json`
 - Security/safety gaps: `plan/security.md`, `plan/ai-safety.md`, `plan/DEFERRED.md`, `docs/job-sources.md`, `plan/phase-7-mobile.md`
-- Resolved-item fixes: `plan/CLEANUP_TASKS.md` progress log (Waves 1-14) plus Waves A–C (`34d312a`, `d31dead`); `apps/api/src/main.ts`, `infra/docker/docker-compose.yml`, `infra/nginx/`, `packages/shared/src/net/proxy-dispatcher.ts`, `packages/embeddings/src/provider.ts`, `packages/ai/src/providers/`, `apps/api/src/common/{llm-audit,injection-log}.ts`, `packages/secrets/src/rotation.ts`, `apps/web/src/lib/use-api.ts`
+- Resolved-item fixes: `plan/CLEANUP_TASKS.md` progress log (Waves 1-14) plus Waves A–C (`34d312a`, `d31dead`) and `feat/remaining-work` (`ca74dc5`); `apps/api/src/main.ts`, `infra/docker/docker-compose.yml`, `infra/nginx/`, `packages/shared/src/net/proxy-dispatcher.ts`, `packages/embeddings/src/{provider,external,config}.ts`, `packages/ai/src/providers/`, `apps/api/src/common/{llm-audit,injection-log}.ts`, `packages/secrets/src/rotation.ts`, `apps/web/src/lib/use-api.ts`, `apps/api/src/modules/{outreach,slack,gmail,repository-analysis,assessments,auth}/`, `apps/worker/src/outreach-send.worker.ts`, `packages/browser-agent/src/scripts/apply-flow.ts`
 - High-churn: `docs/codebase/.codebase-scan.txt` (GIT RECENT COMMITS, HIGH-CHURN FILES)

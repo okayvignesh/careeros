@@ -68,14 +68,21 @@ vi.mock('@careeros/embeddings', () => {
       if (refs.ctrl.ensureThrow) throw refs.ctrl.ensureThrow;
       if (!refs.ctrl.storage.has(name)) refs.ctrl.storage.set(name, []);
     }
-    async upsert(collection: string, points: Array<{ id: string | number; vector: number[]; payload?: Record<string, unknown> }>): Promise<void> {
+    async upsert(
+      collection: string,
+      points: Array<{ id: string | number; vector: number[]; payload?: Record<string, unknown> }>,
+    ): Promise<void> {
       refs.ctrl.upsertCalls.push({ collection, points });
       if (refs.ctrl.upsertThrow) throw refs.ctrl.upsertThrow;
       const bucket = refs.ctrl.storage.get(collection) ?? [];
       for (const p of points) bucket.push(p);
       refs.ctrl.storage.set(collection, bucket);
     }
-    async search(collection: string, vector: number[], limit = 5): Promise<Array<{ id: string | number; score: number; payload?: Record<string, unknown> }>> {
+    async search(
+      collection: string,
+      vector: number[],
+      limit = 5,
+    ): Promise<Array<{ id: string | number; score: number; payload?: Record<string, unknown> }>> {
       refs.ctrl.searchCalls.push({ collection, vector, limit });
       if (refs.ctrl.searchOverride !== null) return refs.ctrl.searchOverride;
       const bucket = refs.ctrl.storage.get(collection) ?? [];
@@ -83,7 +90,10 @@ vi.mock('@careeros/embeddings', () => {
       const hits = bucket
         .filter((p) => p.vector.length === vector.length && p.vector[0] === vector[0])
         .map((p) => {
-          const hit: { id: string | number; score: number; payload?: Record<string, unknown> } = { id: p.id, score: 1.0 };
+          const hit: { id: string | number; score: number; payload?: Record<string, unknown> } = {
+            id: p.id,
+            score: 1.0,
+          };
           if (p.payload) hit.payload = p.payload;
           return hit;
         });
@@ -114,18 +124,38 @@ vi.mock('@careeros/embeddings', () => {
     return 'deterministic';
   }
 
-  return { QdrantStore, embedDeterministic, EMBED_DIM, createEmbeddingProvider, resolveEmbeddingMode };
+  function validateExternalEmbeddingConfig(cfg: {
+    baseUrl?: string;
+    apiKey?: string;
+    model?: string;
+  }): void {
+    if (!cfg.baseUrl) throw new Error('external embeddings: baseUrl is required');
+    if (!cfg.apiKey) throw new Error('external embeddings: apiKey is required');
+    if (!cfg.model) throw new Error('external embeddings: model is required');
+  }
+
+  return {
+    QdrantStore,
+    embedDeterministic,
+    EMBED_DIM,
+    createEmbeddingProvider,
+    resolveEmbeddingMode,
+    validateExternalEmbeddingConfig,
+    EMBEDDING_API_KEY_PURPOSE: 'embedding.externalApiKey',
+  };
 });
 
 // Import AFTER vi.mock so the field initializer picks up the fake QdrantStore.
 import { EmbeddingsService, type EmbeddingConfig } from './embeddings.service';
 
 // Minimal Prisma double: only appConfig.upsert/findUnique are used.
-function makePrisma() {
+function makePrisma(saved: EmbeddingConfig | null = null) {
   return {
     appConfig: {
       upsert: vi.fn(async (_args: unknown) => ({})),
-      findUnique: vi.fn(async (_args: unknown) => null as { value: unknown } | null),
+      findUnique: vi.fn(
+        async (_args: unknown) => (saved ? { value: saved } : null) as { value: unknown } | null,
+      ),
     },
   };
 }
@@ -315,25 +345,44 @@ describe('EmbeddingsService.test failure paths (B-8)', () => {
 });
 
 describe('EmbeddingsService.saveConfig / getConfig (B-8 coverage)', () => {
-  it('upserts the config under key=embedding with the raw cfg as value', async () => {
+  it('seals the external API key before persisting it and requires dimensions', async () => {
     const prisma = makePrisma();
     const svc = new EmbeddingsService(prisma as never);
-    const cfg: EmbeddingConfig = { mode: 'external', model: 'bge-small', externalBaseUrl: 'https://x.example', externalApiKey: 'k' };
+    const cfg: EmbeddingConfig = {
+      mode: 'external',
+      model: 'text-embedding-3-small',
+      externalBaseUrl: 'https://x.example/v1',
+      externalApiKey: 'sk-plaintext',
+      dimensions: 1536,
+    };
     await svc.saveConfig(cfg);
     expect(prisma.appConfig.upsert).toHaveBeenCalledTimes(1);
     const arg = prisma.appConfig.upsert.mock.calls[0]![0] as {
       where: { key: string };
-      create: { key: string; value: unknown };
-      update: { value: unknown };
+      create: { key: string; value: EmbeddingConfig };
+      update: { value: EmbeddingConfig };
     };
     expect(arg.where).toEqual({ key: 'embedding' });
-    expect(arg.create).toEqual({ key: 'embedding', value: cfg });
-    expect(arg.update).toEqual({ value: cfg });
-    // mutation smoke: changing the where.key to anything else would break the
-    // upsert semantics and fail toEqual here.
+    const stored = arg.create.value;
+    expect(stored.mode).toBe('external');
+    // Never persisted in the clear.
+    expect(stored.externalApiKey).not.toBe('sk-plaintext');
+    expect(stored.externalApiKey).toMatch(/^enc:v1:/);
   });
 
-  it('returns null when no row exists, or the value cast when it does', async () => {
+  it('rejects external mode without dimensions', async () => {
+    const svc = new EmbeddingsService(makePrisma() as never);
+    await expect(
+      svc.saveConfig({
+        mode: 'external',
+        model: 'm',
+        externalBaseUrl: 'https://x.example/v1',
+        externalApiKey: 'k',
+      }),
+    ).rejects.toThrow(/dimensions/);
+  });
+
+  it('returns null when no row exists, and the decrypted value when it does', async () => {
     const prisma = makePrisma();
     prisma.appConfig.findUnique.mockResolvedValueOnce(null);
     const svc = new EmbeddingsService(prisma as never);
@@ -342,7 +391,44 @@ describe('EmbeddingsService.saveConfig / getConfig (B-8 coverage)', () => {
     const cfg: EmbeddingConfig = { mode: 'local', model: 'stub' };
     prisma.appConfig.findUnique.mockResolvedValueOnce({ value: cfg });
     expect(await svc.getConfig()).toEqual(cfg);
-    // mutation smoke: dropping the ?? null coalesce would surface `undefined`
-    // for the missing-row path and fail toBeNull().
+  });
+
+  it('never returns the plaintext API key from getEffectiveConfig (hasApiKey instead)', async () => {
+    const prisma = makePrisma({
+      mode: 'external',
+      model: 'text-embedding-3-small',
+      externalBaseUrl: 'https://x.example/v1',
+      externalApiKey: 'sk-plaintext',
+      dimensions: 1536,
+    });
+    const svc = new EmbeddingsService(prisma as never);
+    const effective = await svc.getEffectiveConfig();
+    expect(effective).toEqual({
+      mode: 'external',
+      model: 'text-embedding-3-small',
+      externalBaseUrl: 'https://x.example/v1',
+      dimensions: 1536,
+      hasApiKey: true,
+    });
+    expect(JSON.stringify(effective)).not.toContain('sk-plaintext');
+  });
+
+  it('migrates a legacy plaintext key to a sealed one on read', async () => {
+    const prisma = makePrisma({
+      mode: 'external',
+      model: 'm',
+      externalBaseUrl: 'https://x.example/v1',
+      externalApiKey: 'legacy-plaintext',
+      dimensions: 3,
+    });
+    const svc = new EmbeddingsService(prisma as never);
+    const cfg = await svc.getConfig();
+    expect(cfg?.externalApiKey).toBe('legacy-plaintext');
+    // The read wrote a sealed copy back.
+    expect(prisma.appConfig.upsert).toHaveBeenCalled();
+    const arg = prisma.appConfig.upsert.mock.calls.at(-1)![0] as {
+      update: { value: EmbeddingConfig };
+    };
+    expect(arg.update.value.externalApiKey).toMatch(/^enc:v1:/);
   });
 });

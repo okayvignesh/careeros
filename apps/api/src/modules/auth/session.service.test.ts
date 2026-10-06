@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { UnauthorizedException } from '@nestjs/common';
+import { NotFoundException, UnauthorizedException } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { seal } from '@careeros/auth';
 import {
@@ -7,6 +7,8 @@ import {
   SessionService,
   csrfTokensMatch,
   deriveCsrfToken,
+  describeUserAgent,
+  maskIp,
 } from './session.service';
 
 const SECRET = process.env.SESSION_SECRET =
@@ -148,6 +150,112 @@ describe('SessionService (A-H3 + A-M1)', () => {
     // MUTATION-SMOKE: move the SECRET read back to module-scope (`const SECRET
     // = process.env.SESSION_SECRET!`) and this test fails because the ! masks
     // the missing env.
+  });
+});
+
+type SessionRow = {
+  id: string;
+  userId: string;
+  issuedAt: Date;
+  expiresAt: Date;
+  ip: string | null;
+  userAgent: string | null;
+};
+
+/** Minimal in-memory active_sessions table that actually enforces the where
+ * clauses (`userId`, `id`, `id.not`) — so the scoping test can prove one user
+ * cannot see or delete another's rows. */
+function fakeSessionTable(seed: SessionRow[]) {
+  const rows = [...seed];
+  const matches = (r: SessionRow, where: { userId: string; id?: string | { not: string } }) => {
+    if (r.userId !== where.userId) return false;
+    if (where.id === undefined) return true;
+    if (typeof where.id === 'string') return r.id === where.id;
+    return r.id !== where.id.not;
+  };
+  return {
+    rows,
+    activeSession: {
+      findMany: async ({ where }: { where: { userId: string } }) =>
+        rows
+          .filter((r) => r.userId === where.userId)
+          .sort((a, b) => b.issuedAt.getTime() - a.issuedAt.getTime()),
+      deleteMany: async ({ where }: { where: { userId: string; id?: string | { not: string } } }) => {
+        const before = rows.length;
+        const kept = rows.filter((r) => !matches(r, where));
+        rows.length = 0;
+        rows.push(...kept);
+        return { count: before - rows.length };
+      },
+    },
+  };
+}
+
+function newSessionService(prisma: unknown) {
+  return new SessionService(prisma as never);
+}
+
+describe('SessionService active-session management (A-H3)', () => {
+  const older = new Date('2026-01-01T00:00:00Z');
+  const newer = new Date('2026-01-02T00:00:00Z');
+  const seed: SessionRow[] = [
+    { id: 's-older', userId: 'user-1', issuedAt: older, expiresAt: newer, ip: '203.0.113.7', userAgent: 'Mozilla/5.0 (Macintosh) Chrome/120 Safari/537.36' },
+    { id: 's-newer', userId: 'user-1', issuedAt: newer, expiresAt: newer, ip: '2001:db8::1', userAgent: 'Mozilla/5.0 (Windows NT 10.0) Firefox/121' },
+    { id: 's-foreign', userId: 'user-2', issuedAt: newer, expiresAt: newer, ip: '198.51.100.9', userAgent: null },
+  ];
+
+  it('listForUser returns only the caller rows, newest first, with masked IP + label', async () => {
+    const svc = newSessionService(fakeSessionTable(seed));
+    const list = await svc.listForUser('user-1', 's-older');
+    expect(list.map((s) => s.id)).toEqual(['s-newer', 's-older']);
+    expect(list[0]?.current).toBe(false);
+    expect(list[1]?.current).toBe(true);
+    expect(list[0]?.label).toBe('Firefox on Windows');
+    expect(list[0]?.ipMasked).toBe('2001:db8:****');
+    expect(list[1]?.ipMasked).toBe('203.0.113.x');
+    // Never leaks the foreign row.
+    expect(list.some((s) => s.id === 's-foreign')).toBe(false);
+  });
+
+  it('revokeForUser deletes only the caller own session', async () => {
+    const table = fakeSessionTable(seed);
+    const svc = newSessionService(table);
+    await svc.revokeForUser('user-1', 's-older');
+    expect(table.rows.map((r) => r.id).sort()).toEqual(['s-foreign', 's-newer']);
+    // MUTATION-SMOKE: drop `userId` from the where clause and s-foreign is
+    // deletable by user-1 — the cross-account test below catches that.
+  });
+
+  it("rejects revoking another user's session with 404 and leaves it intact", async () => {
+    const table = fakeSessionTable(seed);
+    const svc = newSessionService(table);
+    await expect(svc.revokeForUser('user-1', 's-foreign')).rejects.toBeInstanceOf(NotFoundException);
+    expect(table.rows.some((r) => r.id === 's-foreign')).toBe(true);
+  });
+
+  it('revokeOthersForUser keeps the current session and only touches the caller', async () => {
+    const table = fakeSessionTable(seed);
+    const svc = newSessionService(table);
+    const revoked = await svc.revokeOthersForUser('user-1', 's-newer');
+    expect(revoked).toBe(1);
+    expect(table.rows.map((r) => r.id).sort()).toEqual(['s-foreign', 's-newer']);
+  });
+});
+
+describe('session display helpers (no raw IP / UA leaves the API)', () => {
+  it('describeUserAgent pairs browser + OS and never echoes unknown strings', () => {
+    expect(describeUserAgent('Mozilla/5.0 (Windows NT 10.0) Edg/120 Chrome/120 Safari/537')).toBe('Edge on Windows');
+    expect(describeUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15) Safari/605')).toBe('Safari on macOS');
+    expect(describeUserAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 17_0) Safari/604')).toBe('Safari on iOS');
+    expect(describeUserAgent(null)).toBe('Unknown device');
+    // A non-browser UA falls back to a placeholder, not the raw header.
+    expect(describeUserAgent('curl/8.4.0')).toBe('Unknown device');
+  });
+
+  it('maskIp masks the host portion and passes null through', () => {
+    expect(maskIp('203.0.113.7')).toBe('203.0.113.x');
+    expect(maskIp('2001:db8::1')).toBe('2001:db8:****');
+    expect(maskIp(null)).toBeNull();
   });
 });
 

@@ -289,7 +289,6 @@ export function ArenaOverview() {
           </div>
         </div>
         <PendingRow label="Coding runner" scheduled="slice 11+ (Docker sandbox + Monaco)" />
-        <PendingRow label="Verbal defense" scheduled="slice 12+ (whisper.cpp)" />
       </section>
 
       <section className="flex flex-col gap-3">

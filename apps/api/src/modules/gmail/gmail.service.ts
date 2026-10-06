@@ -31,13 +31,22 @@ import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { Queue, type ConnectionOptions } from 'bullmq';
 import { google } from 'googleapis';
-import type { OAuth2Client } from 'google-auth-library';
-import { encrypt, decrypt, loadMasterKey } from '@careeros/secrets';
+import { encrypt } from '@careeros/secrets';
 import { PrismaService } from '../../prisma/prisma.service';
 import { verifyPubSubJwt, PubSubJwtError } from './gmail.jwt-verify';
+import {
+  GmailAuthService,
+  KEY,
+  GMAIL_TOKEN_PURPOSE as PURPOSE,
+  readGmailEnv,
+  requireGmailEnv,
+  type GmailEnv,
+} from './gmail.auth';
+import { GmailOutboundService } from './gmail.outbound.service';
 
-const KEY = loadMasterKey();
-const PURPOSE = 'integration:gmail:oauth';
+// Kept so existing importers (email-ingest) keep resolving from this module.
+export { readGmailEnv };
+export type { GmailEnv };
 
 // One shared queue instance for the api process. Wave E.6 owns the worker
 // side of this queue; keeping the name in one place so E.6 can import it.
@@ -47,39 +56,6 @@ export const QUEUE_EMAIL_PROCESSING = 'email-processing';
 // live 7 days; running the cron daily with a 24h window guarantees at-least-
 // one renewal attempt before expiry.
 const RENEWAL_WINDOW_MS = 24 * 60 * 60 * 1000;
-
-// Only ask for the read scope. Wave E plan §Gmail integration - Setup.
-const OAUTH_SCOPES = ['https://www.googleapis.com/auth/gmail.readonly'];
-
-export interface GmailEnv {
-  clientId: string;
-  clientSecret: string;
-  redirectUri: string;
-  topicName: string; /// projects/<gcp>/topics/<topic>
-  pushAudience: string; /// exact `aud` Google will sign - the push URL
-}
-
-export function readGmailEnv(): GmailEnv | null {
-  const clientId = process.env.GMAIL_OAUTH_CLIENT_ID;
-  const clientSecret = process.env.GMAIL_OAUTH_CLIENT_SECRET;
-  const redirectUri = process.env.GMAIL_OAUTH_REDIRECT_URI;
-  const topicName = process.env.GMAIL_PUBSUB_TOPIC;
-  const pushAudience = process.env.GMAIL_PUBSUB_AUDIENCE;
-  if (!clientId || !clientSecret || !redirectUri || !topicName || !pushAudience) {
-    return null;
-  }
-  return { clientId, clientSecret, redirectUri, topicName, pushAudience };
-}
-
-function requireEnv(): GmailEnv {
-  const env = readGmailEnv();
-  if (!env) {
-    throw new BadRequestException(
-      'Gmail integration is not configured. Set GMAIL_OAUTH_CLIENT_ID, GMAIL_OAUTH_CLIENT_SECRET, GMAIL_OAUTH_REDIRECT_URI, GMAIL_PUBSUB_TOPIC, GMAIL_PUBSUB_AUDIENCE.',
-    );
-  }
-  return env;
-}
 
 /**
  * Pub/Sub push envelope (Google spec). `message.data` is base64 JSON that
@@ -168,7 +144,11 @@ export class GmailService {
   private readonly logger = new Logger(GmailService.name);
   private readonly queue: Queue;
 
-  constructor(private readonly prisma: PrismaService) {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auth: GmailAuthService,
+    private readonly outbound: GmailOutboundService,
+  ) {
     const connection: ConnectionOptions = {
       url: process.env.REDIS_URL ?? 'redis://redis:6379',
     };
@@ -185,15 +165,8 @@ export class GmailService {
 
   /** Build the Google OAuth consent URL. */
   startOAuth(userId: string): { url: string } {
-    const env = requireEnv();
-    const client = this.oauthClient(env);
-    const url = client.generateAuthUrl({
-      access_type: 'offline', /// required to get refresh_token
-      prompt: 'consent', /// force refresh_token even if the user has consented before
-      scope: OAUTH_SCOPES,
-      state: userId, /// controller re-checks state matches the session on callback
-    });
-    return { url };
+    const env = requireGmailEnv();
+    return { url: this.auth.consentUrl(env, userId) };
   }
 
   /**
@@ -202,8 +175,8 @@ export class GmailService {
    * that started the flow.
    */
   async finishOAuth(userId: string, code: string): Promise<{ historyId: string; expiration: Date }> {
-    const env = requireEnv();
-    const client = this.oauthClient(env);
+    const env = requireGmailEnv();
+    const client = this.auth.clientForEnv(env);
     const { tokens } = await client.getToken(code);
     if (!tokens.refresh_token) {
       throw new BadRequestException(
@@ -241,8 +214,8 @@ export class GmailService {
    * persist the resulting historyId + expiration.
    */
   async startWatch(userId: string): Promise<{ historyId: string; expiration: Date }> {
-    const env = requireEnv();
-    const client = await this.userOAuthClient(userId, env);
+    const env = requireGmailEnv();
+    const client = await this.auth.userClient(userId, env);
     const gmail = google.gmail({ version: 'v1', auth: client });
     const res = await gmail.users.watch({
       userId: 'me',
@@ -291,7 +264,7 @@ export class GmailService {
     authorizationHeader: string | undefined,
     envelope: PubSubEnvelope,
   ): Promise<{ processed: number; skipped: number }> {
-    const env = requireEnv();
+    const env = requireGmailEnv();
     try {
       await verifyPubSubJwt(authorizationHeader, env.pushAudience);
     } catch (err) {
@@ -319,7 +292,7 @@ export class GmailService {
       return { processed: 0, skipped: 0 };
     }
 
-    const client = await this.userOAuthClient(user.id, env);
+    const client = await this.auth.userClient(user.id, env);
     const gmail = google.gmail({ version: 'v1', auth: client });
     const resp = await gmail.users.history.list({
       userId: 'me',
@@ -342,6 +315,11 @@ export class GmailService {
             receivedAt: m.internalDate ? new Date(m.internalDate) : new Date(),
           },
         });
+        // F.5 reply linking: if this message belongs to a Gmail thread we
+        // opened for an outreach message, record the reply on that row.
+        if (m.threadId) {
+          await this.linkOutreachReply(user.id, m.threadId, m.messageId);
+        }
         await this.queue.add(
           'parse',
           { userId: user.id, messageId: m.messageId, threadId: m.threadId },
@@ -414,7 +392,7 @@ export class GmailService {
     const env = readGmailEnv();
     if (env) {
       try {
-        const client = await this.userOAuthClient(userId, env);
+        const client = await this.auth.userClient(userId, env);
         const gmail = google.gmail({ version: 'v1', auth: client });
         await gmail.users.stop({ userId: 'me' });
       } catch (err) {
@@ -424,7 +402,7 @@ export class GmailService {
         );
       }
       try {
-        const client = await this.userOAuthClient(userId, env);
+        const client = await this.auth.userClient(userId, env);
         await client.revokeCredentials();
       } catch (err) {
         this.logger.warn(
@@ -453,27 +431,6 @@ export class GmailService {
 
   // ---- privates ----------------------------------------------------------
 
-  private oauthClient(env: GmailEnv): OAuth2Client {
-    return new google.auth.OAuth2(env.clientId, env.clientSecret, env.redirectUri);
-  }
-
-  private async userOAuthClient(userId: string, env: GmailEnv): Promise<OAuth2Client> {
-    const integration = await this.prisma.integration.findUnique({
-      where: { userId_kind: { userId, kind: 'gmail' } },
-    });
-    if (!integration || integration.status !== 'connected' || !integration.tokenSecretId) {
-      throw new BadRequestException('Gmail not connected');
-    }
-    const secret = await this.prisma.encryptedSecret.findUnique({
-      where: { id: integration.tokenSecretId },
-    });
-    if (!secret) throw new BadRequestException('Gmail token secret missing');
-    const refreshToken = decrypt(secret.ciphertext, KEY, PURPOSE);
-    const client = this.oauthClient(env);
-    client.setCredentials({ refresh_token: refreshToken });
-    return client;
-  }
-
   private async loadSeenMessageIds(userId: string): Promise<Set<string>> {
     // ponytail: 500-row cap. If a single push ever yields more than 500 new
     // messages for a user the dedupe set will miss the tail, but the unique
@@ -486,6 +443,35 @@ export class GmailService {
       take: 500,
     });
     return new Set(rows.map((r) => r.messageId));
+  }
+
+  /**
+   * If `threadId` was opened for an outreach message, stamp the first reply
+   * onto that row (`replyMessageId`) and audit it. Best-effort: a Redis outage
+   * just means no auto-link, never a dropped email.
+   */
+  private async linkOutreachReply(
+    userId: string,
+    threadId: string,
+    messageId: string,
+  ): Promise<void> {
+    try {
+      const outreachId = await this.outbound.resolveOutreachThread(threadId);
+      if (!outreachId) return;
+      const updated = await this.prisma.outreachMessage.updateMany({
+        where: { id: outreachId, userId, replyMessageId: null },
+        data: { replyMessageId: messageId },
+      });
+      if (updated.count > 0) {
+        await this.recordAudit(userId, 'outreach.reply.received', {
+          outreachMessageId: outreachId,
+          threadId,
+          messageId,
+        });
+      }
+    } catch (err) {
+      this.logger.warn(`outreach reply link failed: ${(err as Error).message}`);
+    }
   }
 
   private async recordAudit(

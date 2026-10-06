@@ -1,9 +1,24 @@
-export { QdrantStore, type PayloadFilter, type Match } from './qdrant';
+export {
+  QdrantStore,
+  type PayloadFilter,
+  type Match,
+  type EnsureCollectionOutcome,
+  type EnsureCollectionLogger,
+  type EnsureCollectionOptions,
+} from './qdrant';
 export { embedDeterministic, EMBED_DIM } from './local';
+export {
+  ExternalEmbeddingError,
+  OpenAICompatibleEmbeddingProvider,
+  createExternalEmbeddingProvider,
+  validateExternalEmbeddingConfig,
+  type ExternalEmbeddingConfig,
+} from './external';
 export {
   BgeSmallEmbedder,
   DeterministicEmbedder,
   FallbackEmbeddingProvider,
+  EmbeddingConfigError,
   createEmbeddingProvider,
   resolveEmbeddingMode,
   __resetEmbeddingPipelineCache,
@@ -15,3 +30,16 @@ export {
   type BgeSmallOptions,
   type CreateEmbeddingProviderOptions,
 } from './provider';
+export {
+  EMBEDDING_CONFIG_KEY,
+  EMBEDDING_API_KEY_PURPOSE,
+  StoredEmbeddingConfigSchema,
+  normalizeEmbeddingConfig,
+  resolveEmbeddingConfig,
+  loadResolvedEmbeddingConfig,
+  createProviderFromResolved,
+  type StoredEmbeddingConfig,
+  type EmbeddingConfigRepo,
+  type ResolvedEmbeddingConfig,
+  type ResolveEmbeddingConfigOptions,
+} from './config';
