@@ -93,7 +93,8 @@ describe('JobPreferencesService.deriveFromResume', () => {
     expect(out.targetRoles).toEqual(['Senior Backend Engineer', 'Backend Engineer']);
     expect(out.locations).toEqual(['Bengaluru', 'India']);
     expect(out.seniority).toEqual(['senior']);
-    expect(out.mustHaveSkills).toEqual(['ts', 'react']);
+    // Must-have is an exclusive filter — never auto-derived from the resume.
+    expect(out.mustHaveSkills).toEqual([]);
     // Comp band + blacklist + dealbreakers stay empty for the user to fill.
     expect(out.compMin ?? null).toBeNull();
     expect(out.companyBlacklist).toEqual([]);
@@ -128,7 +129,7 @@ describe('JobPreferencesService.deriveFromResume', () => {
     expect(out.targetRoles).toEqual(['Staff Platform Engineer']); // untouched
     expect(out.locations).toEqual(['Bengaluru', 'India']); // was empty → filled
     expect(out.seniority).toEqual(['senior']);
-    expect(out.mustHaveSkills).toEqual(['ts']);
+    expect(out.mustHaveSkills).toEqual([]); // never derived
     expect(out.compMin).toBe(150000);
     expect(out.currency).toBe('EUR');
     expect(out.remoteOnly).toBe(true);
@@ -136,5 +137,47 @@ describe('JobPreferencesService.deriveFromResume', () => {
     expect(out.companyBlacklist).toEqual(['Acme']);
     // MUTATION SMOKE: drop the onlyFillEmpty guard in pickFill and targetRoles
     // flips to the derived ['Senior Backend Engineer', 'Backend Engineer'].
+  });
+
+  it('clears a must-have set that exactly matches the demonstrated skills (auto-added)', async () => {
+    const existing = {
+      targetRoles: ['Backend Engineer'],
+      locations: ['Bengaluru'],
+      remoteOnly: false,
+      currency: 'USD',
+      seniority: ['senior'],
+      mustHaveSkills: ['ts', 'react'],
+      dealbreakerSkills: [],
+      companyBlacklist: [],
+      updatedAt: new Date('2026-01-01T00:00:00Z'),
+    };
+    const prisma = makePrisma({
+      facts: FACTS,
+      skills: [{ skillId: 'ts' }, { skillId: 'react' }],
+      existing,
+    });
+    const out = await new JobPreferencesService(prisma as never).deriveFromResume('user-a');
+    expect(out.mustHaveSkills).toEqual([]);
+  });
+
+  it('preserves a user-chosen must-have set that differs from the demonstrated skills', async () => {
+    const existing = {
+      targetRoles: ['Backend Engineer'],
+      locations: ['Bengaluru'],
+      remoteOnly: false,
+      currency: 'USD',
+      seniority: ['senior'],
+      mustHaveSkills: ['postgres'],
+      dealbreakerSkills: [],
+      companyBlacklist: [],
+      updatedAt: new Date('2026-01-01T00:00:00Z'),
+    };
+    const prisma = makePrisma({
+      facts: FACTS,
+      skills: [{ skillId: 'ts' }, { skillId: 'react' }],
+      existing,
+    });
+    const out = await new JobPreferencesService(prisma as never).deriveFromResume('user-a');
+    expect(out.mustHaveSkills).toEqual(['postgres']);
   });
 });

@@ -137,18 +137,25 @@ export class JobPreferencesService {
       targetRoles: inferTargetRoles(employmentTitles, headline),
       locations: deriveLocations(locationParts.join(', ')),
       seniority: inferSeniority([...employmentTitles, headline]),
-      // IDs, not display names: the schema + relevance filter + match scorer all
-      // compare catalogue ids against `job.skillIds`; the Firecrawl query
-      // builder resolves these ids to human-readable names at search time.
-      mustHaveSkills: skillStates.map((s) => s.skillId),
     };
+
+    // Must-have skills is an explicit, EXCLUSIVE filter ("job must have ALL of
+    // these"), so it is never auto-derived: filling it with the candidate's own
+    // skills filters out every job. Self-heal a set that exactly matches their
+    // demonstrated skills (i.e. one an earlier version wrongly auto-added).
+    const derivedSkillIds = skillStates.map((s) => s.skillId);
+    const autoAddedMustHave =
+      current.mustHaveSkills.length > 0 &&
+      current.mustHaveSkills.length === derivedSkillIds.length &&
+      current.mustHaveSkills.every((s) => derivedSkillIds.includes(s));
+    const mustHaveSkills = autoAddedMustHave ? [] : current.mustHaveSkills;
 
     const merged: JobPreferencesDto = {
       ...current,
       targetRoles: pickFill(current.targetRoles, derived.targetRoles, onlyFillEmpty),
       locations: pickFill(current.locations, derived.locations, onlyFillEmpty),
       seniority: pickFill(current.seniority, derived.seniority, onlyFillEmpty),
-      mustHaveSkills: pickFill(current.mustHaveSkills, derived.mustHaveSkills, onlyFillEmpty),
+      mustHaveSkills,
     };
 
     return this.upsert(userId, {
