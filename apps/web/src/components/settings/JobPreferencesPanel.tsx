@@ -163,7 +163,7 @@ export function JobPreferencesPanel() {
         </div>
       </Field>
 
-      <Field label="Must-have skills" hint="Pick from your skill catalogue, or add a custom term. Job must have all of these.">
+      <Field label="Must-have skills" hint="Pick from your skill catalogue, or add a custom term. Job must have at least one of these.">
         <SkillMultiSelect
           value={prefs.mustHaveSkills}
           onChange={(v) => set('mustHaveSkills', v)}

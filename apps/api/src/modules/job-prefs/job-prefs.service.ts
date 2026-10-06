@@ -139,10 +139,10 @@ export class JobPreferencesService {
       seniority: inferSeniority([...employmentTitles, headline]),
     };
 
-    // Must-have skills is an explicit, EXCLUSIVE filter ("job must have ALL of
+    // Must-have skills is an explicit OR filter ("job must have at least one of
     // these"), so it is never auto-derived: filling it with the candidate's own
-    // skills filters out every job. Self-heal a set that exactly matches their
-    // demonstrated skills (i.e. one an earlier version wrongly auto-added).
+    // skills would hide every job that lacks them. Self-heal a set that exactly
+    // matches their demonstrated skills (i.e. one an earlier version added).
     const derivedSkillIds = skillStates.map((s) => s.skillId);
     const autoAddedMustHave =
       current.mustHaveSkills.length > 0 &&

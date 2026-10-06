@@ -270,7 +270,7 @@ describe('JobsService.list — pagination query count (C-P3.8c)', () => {
   };
   const USER_ID = '00000000-0000-0000-0000-000000000001';
 
-  it('1000-job pool: 50 per page fires constant 4 queries (findMany, count, skills, prefs)', async () => {
+  it('1000-job pool: 50 per page fires constant 2 queries (findMany, skills)', async () => {
     const m = makeListPrismaMock(1000);
     const svc = makeListService(m.prisma, prefsStub);
 
@@ -278,18 +278,20 @@ describe('JobsService.list — pagination query count (C-P3.8c)', () => {
 
     expect(out.jobs.length).toBeGreaterThan(0);
     expect(out.jobs.length).toBeLessThanOrEqual(50);
+    // Total = the count that passes the filter (computed in-memory), so paging
+    // matches what the user can actually browse.
     expect(out.total).toBe(1000);
 
-    // Prisma call inventory: exactly 3 Prisma calls (findMany + count +
+    // Prisma call inventory: exactly 2 Prisma calls (normalizedJob.findMany +
     // candidateSkillState.findMany). Prefs is via the stubbed
-    // JobPreferencesService, not Prisma-direct.
+    // JobPreferencesService, not Prisma-direct. No `count` query — total is the
+    // filtered+scored length (global, so pagination is correct).
     expect(m.calls.filter((c) => c === 'normalizedJob.findMany').length).toBe(1);
-    expect(m.calls.filter((c) => c === 'normalizedJob.count').length).toBe(1);
     expect(m.calls.filter((c) => c === 'candidateSkillState.findMany').length).toBe(1);
-    expect(m.calls.length).toBe(3);
+    expect(m.calls.length).toBe(2);
     // MUTATION SMOKE: swap `computeMatchResult` (pure) for a per-row
     // `this.prisma.<x>.findMany` inside the map → calls.length jumps to
-    // 3 + limit and this assertion fails. Move the candidateSkillState
+    // 2 + limit and this assertion fails. Move the candidateSkillState
     // fetch INSIDE the filter loop → the count jumps from 1 to page-size.
   });
 
@@ -297,7 +299,7 @@ describe('JobsService.list — pagination query count (C-P3.8c)', () => {
     const m = makeListPrismaMock(1000);
     const svc = makeListService(m.prisma, prefsStub);
     await svc.list({ userId: USER_ID, limit: 50, offset: 200 });
-    expect(m.calls.length).toBe(3);
+    expect(m.calls.length).toBe(2);
     // MUTATION SMOKE: naive "one findMany per offset step" mutation would
     // scale with offset; this pins it constant.
   });

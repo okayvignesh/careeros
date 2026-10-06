@@ -67,8 +67,10 @@ export function relevance(
   for (const d of prefs.dealbreakerSkills) {
     if (jobSkills.has(d)) return { relevant: false, reason: 'has-dealbreaker' };
   }
-  for (const m of prefs.mustHaveSkills) {
-    if (!jobSkills.has(m)) return { relevant: false, reason: 'must-have-missing' };
+  // Must-have is an OR: the job must contain AT LEAST ONE of the listed skills.
+  // (An AND of the candidate's own skills excluded everything; see job-prefs.)
+  if (prefs.mustHaveSkills.length > 0 && !prefs.mustHaveSkills.some((m) => jobSkills.has(m))) {
+    return { relevant: false, reason: 'must-have-missing' };
   }
 
   return { relevant: true };

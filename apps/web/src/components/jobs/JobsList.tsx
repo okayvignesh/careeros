@@ -74,6 +74,8 @@ interface ProviderRow {
   authNote: string;
 }
 
+const PAGE_SIZE = 50;
+
 export function JobsList() {
   const router = useRouter();
   const search = useSearchParams();
@@ -82,6 +84,7 @@ export function JobsList() {
   const [providers, setProviders] = useState<ProviderRow[]>([]);
   const [providerId, setProviderId] = useState('remotive');
   const [openMenu, setOpenMenu] = useState<string | null>(null);
+  const [offset, setOffset] = useState(0);
   const [syncing, setSyncing] = useState(false);
   const [finding, setFinding] = useState(false);
   const [extracting, setExtracting] = useState(false);
@@ -91,11 +94,10 @@ export function JobsList() {
   const [extractProgress, setExtractProgress] = useState<string | null>(null);
 
   const load = useCallback(() => {
-    const url = skillFilter
-      ? `/jobs?limit=50&skill=${encodeURIComponent(skillFilter)}`
-      : '/jobs?limit=50';
+    const base = `/jobs?limit=${PAGE_SIZE}&offset=${offset}`;
+    const url = skillFilter ? `${base}&skill=${encodeURIComponent(skillFilter)}` : base;
     return apiGet<ListResponse>(url);
-  }, [skillFilter]);
+  }, [skillFilter, offset]);
   const { data, error, setError, refetch } = useApi(load);
 
   useEffect(() => {
@@ -456,6 +458,38 @@ export function JobsList() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {data.jobs.length > 0 && data.total > PAGE_SIZE && (
+        <div className="flex flex-wrap items-center justify-between gap-3 text-[12.5px] text-fg-muted">
+          <span>
+            Showing {offset + 1}–{Math.min(offset + PAGE_SIZE, data.total)} of{' '}
+            {data.total.toLocaleString()}
+          </span>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="ghost"
+              data-testid="jobs-prev"
+              disabled={offset === 0}
+              onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
+            >
+              Prev
+            </Button>
+            <span className="tabular-nums">
+              Page {Math.floor(offset / PAGE_SIZE) + 1} / {Math.ceil(data.total / PAGE_SIZE)}
+            </span>
+            <Button
+              size="sm"
+              variant="ghost"
+              data-testid="jobs-next"
+              disabled={offset + PAGE_SIZE >= data.total}
+              onClick={() => setOffset(offset + PAGE_SIZE)}
+            >
+              Next
+            </Button>
+          </div>
         </div>
       )}
     </div>

@@ -82,6 +82,13 @@ export interface RejectStats {
  */
 const FRESHNESS_DAYS = 45;
 const AGING_DAYS = 14;
+/**
+ * Max rows loaded per list request. The relevance filter + match sort run
+ * in-memory over the whole eligible pool, then we slice the page — so paging is
+ * globally correct (page N sorts the same set as page 1). ponytail: fine up to
+ * ~2k jobs; materialize per-user match rows when the pool outgrows this.
+ */
+const LIST_SCAN_CAP = 2000;
 
 @Injectable()
 export class JobsService {
@@ -400,17 +407,12 @@ export class JobsService {
     // Same set and same canonical scorer as MatcherService.scoreJob, so the
     // list score and the detail score cannot diverge for one job/candidate.
     // One batched read per request — constant regardless of page size.
-    const [rows, total, skillStates, prefs] = await Promise.all([
+    const [rows, skillStates, prefs] = await Promise.all([
       this.prisma.normalizedJob.findMany({
         where,
         orderBy: [{ sourcePostedAt: { sort: 'desc', nulls: 'last' } }, { firstSeenAt: 'desc' }],
-        // Over-fetch so we can score-then-sort client-side in this method; DB
-        // can't sort by a computed match without materializing per-user scores.
-        // ponytail: acceptable up to ~2k jobs and offset < ~1k; precompute +
-        // `user_job_match` lands when either ceiling is hit.
-        take: Math.max(limit, limit + offset) * 2,
+        take: LIST_SCAN_CAP,
       }),
-      this.prisma.normalizedJob.count({ where }),
       this.prisma.candidateSkillState.findMany({
         where: { userId: params.userId },
         select: { skillId: true, proficiency: true, recencyDays: true },
@@ -499,6 +501,9 @@ export class JobsService {
       return bs - as;
     });
     const paged = scored.slice(offset, offset + limit);
+    // Total is the count of jobs that actually pass the filter (not the raw DB
+    // count), so the UI page count matches what the user can browse.
+    const total = scored.length;
 
     return {
       total,
