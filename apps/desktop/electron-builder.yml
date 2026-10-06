@@ -21,6 +21,7 @@ directories:
   output: release
 files:
   - dist/**/*
+  - assets/**/*
   - package.json
   - '!**/*.map'
   - '!**/*.test.*'
