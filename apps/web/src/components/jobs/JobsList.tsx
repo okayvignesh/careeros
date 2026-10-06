@@ -1,11 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ArrowUpRight, FileText, Mail, MoreHorizontal, RefreshCw, Search, Sliders, Sparkles, Target, X } from 'lucide-react';
+import { Eye, FileText, Mail, MoreHorizontal, RefreshCw, Search, Sliders, Sparkles, Target, X } from 'lucide-react';
 import { ThinkingOrb } from 'thinking-orbs';
-import { Button } from '@careeros/ui';
+import { Button, cn } from '@careeros/ui';
 import { apiGet, apiPost } from '@/lib/api-client';
 import { useApi } from '@/lib/use-api';
 
@@ -400,9 +400,11 @@ export function JobsList() {
                       <Link
                         href={`/jobs/${j.id}`}
                         data-testid="job-match-report"
-                        className="inline-flex items-center gap-1 rounded border border-[hsl(var(--border))] px-2 py-[2px] text-[11.5px] text-fg-muted hover:border-accent/40 hover:text-accent"
+                        aria-label="View job"
+                        title="View"
+                        className="inline-flex items-center rounded border border-[hsl(var(--border))] px-1.5 py-[2px] text-fg-muted hover:border-accent/40 hover:text-accent"
                       >
-                        View
+                        <Eye className="h-3.5 w-3.5" />
                       </Link>
                       <RowActions jobId={j.id} canonicalUrl={j.canonicalUrl} />
                     </div>
@@ -419,54 +421,82 @@ export function JobsList() {
 
 function RowActions({ jobId, canonicalUrl }: { jobId: string; canonicalUrl: string }) {
   const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+
+  function toggle() {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    const r = btnRef.current?.getBoundingClientRect();
+    if (r) setPos({ top: r.bottom + 6, right: Math.max(8, window.innerWidth - r.right) });
+    setOpen(true);
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    // Any scroll/resize invalidates the anchored position — close rather than float.
+    const close = () => setOpen(false);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    return () => {
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+    };
+  }, [open]);
+
   return (
-    <div className="relative">
+    <>
       <button
+        ref={btnRef}
         type="button"
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label="More actions"
         data-testid="job-actions-menu"
-        onClick={() => setOpen((o) => !o)}
+        onClick={toggle}
         className="inline-flex items-center rounded border border-[hsl(var(--border))] px-1.5 py-[2px] text-fg-muted hover:border-accent/40 hover:text-accent"
       >
         <MoreHorizontal className="h-3.5 w-3.5" />
       </button>
-      {open && (
+      {open && pos && (
         <>
           {/* click-away catcher */}
           <button
             type="button"
             aria-hidden
             tabIndex={-1}
-            className="fixed inset-0 z-10 cursor-default"
+            className="fixed inset-0 z-40 cursor-default"
             onClick={() => setOpen(false)}
           />
+          {/* Fixed positioning so the menu escapes the table's overflow clipping. */}
           <div
             role="menu"
             onClick={() => setOpen(false)}
-            className="absolute right-0 z-20 mt-1 flex w-44 flex-col gap-0.5 rounded-[var(--radius)] border border-[hsl(var(--border))] bg-[hsl(var(--bg-elev-1))] p-1 shadow-lg"
+            style={{ position: 'fixed', top: pos.top, right: pos.right }}
+            className="z-50 flex w-48 flex-col gap-1 rounded-[var(--radius)] border border-[hsl(var(--border))] bg-[hsl(var(--bg-elev-1))] p-1.5 shadow-lg"
           >
-            <TrackButton jobId={jobId} />
-            <DraftResumeButton jobId={jobId} />
-            <DraftCoverButton jobId={jobId} />
+            <TrackButton jobId={jobId} menu />
+            <DraftResumeButton jobId={jobId} menu />
+            <DraftCoverButton jobId={jobId} menu />
             <a
               role="menuitem"
               href={canonicalUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 rounded px-2 py-1 text-[12px] text-fg-muted hover:bg-[hsl(var(--bg-elev-2))] hover:text-fg"
+              className="w-full rounded px-2.5 py-2 text-left text-[12.5px] text-fg-muted transition-colors hover:bg-[hsl(var(--bg-elev-2))] hover:text-fg"
             >
-              <ArrowUpRight className="h-3.5 w-3.5" /> Open posting
+              Open posting
             </a>
           </div>
         </>
       )}
-    </div>
+    </>
   );
 }
 
-function DraftResumeButton({ jobId }: { jobId: string }) {
+function DraftResumeButton({ jobId, menu = false }: { jobId: string; menu?: boolean }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -481,6 +511,25 @@ function DraftResumeButton({ jobId }: { jobId: string }) {
       setBusy(false);
     }
   }
+  const label = busy ? 'Drafting…' : err ? 'Retry' : 'Draft resume';
+  if (menu) {
+    return (
+      <button
+        type="button"
+        role="menuitem"
+        onClick={draft}
+        disabled={busy}
+        className={cn(
+          'w-full rounded px-2.5 py-2 text-left text-[12.5px] transition-colors disabled:opacity-50',
+          err
+            ? 'text-[hsl(var(--danger))]'
+            : 'text-fg-muted hover:bg-[hsl(var(--bg-elev-2))] hover:text-fg',
+        )}
+      >
+        {label}
+      </button>
+    );
+  }
   return (
     <span className="inline-flex items-center gap-1">
       <button
@@ -494,13 +543,13 @@ function DraftResumeButton({ jobId }: { jobId: string }) {
         }
       >
         <FileText className="h-3 w-3" />
-        {busy ? 'Drafting' : err ? 'Retry' : 'Draft resume'}
+        {label}
       </button>
     </span>
   );
 }
 
-function TrackButton({ jobId }: { jobId: string }) {
+function TrackButton({ jobId, menu = false }: { jobId: string; menu?: boolean }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -518,6 +567,25 @@ function TrackButton({ jobId }: { jobId: string }) {
       setBusy(false);
     }
   }
+  const label = tracked ? 'Tracking…' : busy ? 'Adding…' : err ? 'Retry' : 'Track';
+  if (menu) {
+    return (
+      <button
+        type="button"
+        role="menuitem"
+        onClick={track}
+        disabled={busy || tracked}
+        className={cn(
+          'w-full rounded px-2.5 py-2 text-left text-[12.5px] transition-colors disabled:opacity-50',
+          err
+            ? 'text-[hsl(var(--danger))]'
+            : 'text-fg-muted hover:bg-[hsl(var(--bg-elev-2))] hover:text-fg',
+        )}
+      >
+        {label}
+      </button>
+    );
+  }
   return (
     <button
       type="button"
@@ -530,12 +598,12 @@ function TrackButton({ jobId }: { jobId: string }) {
       }
     >
       <Target className="h-3 w-3" />
-      {tracked ? 'Tracking' : busy ? 'Adding' : err ? 'Retry' : 'Track'}
+      {label}
     </button>
   );
 }
 
-function DraftCoverButton({ jobId }: { jobId: string }) {
+function DraftCoverButton({ jobId, menu = false }: { jobId: string; menu?: boolean }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -550,6 +618,25 @@ function DraftCoverButton({ jobId }: { jobId: string }) {
       setBusy(false);
     }
   }
+  const label = busy ? 'Drafting…' : err ? 'Retry' : menu ? 'Draft cover letter' : 'Draft cover';
+  if (menu) {
+    return (
+      <button
+        type="button"
+        role="menuitem"
+        onClick={draft}
+        disabled={busy}
+        className={cn(
+          'w-full rounded px-2.5 py-2 text-left text-[12.5px] transition-colors disabled:opacity-50',
+          err
+            ? 'text-[hsl(var(--danger))]'
+            : 'text-fg-muted hover:bg-[hsl(var(--bg-elev-2))] hover:text-fg',
+        )}
+      >
+        {label}
+      </button>
+    );
+  }
   return (
     <button
       type="button"
@@ -562,7 +649,7 @@ function DraftCoverButton({ jobId }: { jobId: string }) {
       }
     >
       <Mail className="h-3 w-3" />
-      {busy ? 'Drafting' : err ? 'Retry' : 'Draft cover'}
+      {label}
     </button>
   );
 }
