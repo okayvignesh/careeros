@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -111,18 +111,28 @@ const groups = [
 export function AppNav() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const groupRefs = useRef(new Map<string, HTMLDivElement>());
 
   function toggle(label: string) {
+    const willExpand = collapsed.has(label);
     setCollapsed((prev) => {
       const next = new Set(prev);
       if (next.has(label)) next.delete(label);
       else next.add(label);
       return next;
     });
+    if (willExpand) {
+      // Bring the newly-expanded section into view so the user sees the whole
+      // group without scrolling. `nearest` only moves when it would otherwise
+      // be cut off, aligning its bottom to the scroll container's bottom.
+      requestAnimationFrame(() => {
+        groupRefs.current.get(label)?.scrollIntoView({ block: 'nearest' });
+      });
+    }
   }
 
   return (
-    <nav className="flex flex-1 flex-col gap-4 text-[13px]">
+    <nav className="-mr-1 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1 text-[13px]">
       <div className="flex items-center justify-end gap-1 px-1">
         <button
           type="button"
@@ -148,7 +158,14 @@ export function AppNav() {
       {groups.map((g) => {
         const isCollapsed = collapsed.has(g.label);
         return (
-          <div key={g.label} className="flex flex-col gap-1.5">
+          <div
+            key={g.label}
+            ref={(el) => {
+              if (el) groupRefs.current.set(g.label, el);
+              else groupRefs.current.delete(g.label);
+            }}
+            className="flex flex-col gap-1.5"
+          >
             <button
               type="button"
               onClick={() => toggle(g.label)}
