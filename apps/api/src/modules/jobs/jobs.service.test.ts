@@ -310,6 +310,44 @@ describe('JobsService.list — pagination query count (C-P3.8c)', () => {
   });
 });
 
+// D: A populates candidate_skill_state from the resume (via evidence); the list
+// scorer must then use it. This pins resume-derived skill → non-null match.
+describe('JobsService.list — resume-derived skill influences match (D)', () => {
+  const prefsStub = {
+    get: async () => ({
+      remoteOnly: false,
+      mustHaveSkills: [] as string[],
+      dealbreakerSkills: [] as string[],
+      companyBlacklist: [] as string[],
+    }),
+  };
+  const USER_ID = '00000000-0000-0000-0000-000000000009';
+
+  it('scores a job against candidate_skill_state populated from the resume', async () => {
+    const job = { ...normalizedJobRow(0), skillIds: ['typescript'] };
+    const prisma = {
+      normalizedJob: {
+        findMany: vi.fn(async () => [job]),
+        count: vi.fn(async () => 1),
+      },
+      candidateSkillState: {
+        findMany: vi.fn(async () => [
+          { skillId: 'typescript', proficiency: 80, recencyDays: 5 },
+        ]),
+      },
+    };
+    const svc = makeListService(prisma, prefsStub);
+
+    const out = await svc.list({ userId: USER_ID, limit: 50, offset: 0 });
+
+    expect(out.jobs[0]!.match.total).toBe(1);
+    expect(out.jobs[0]!.match.matched).toBe(1);
+    expect(out.jobs[0]!.match.score).toBeGreaterThan(0);
+    // MUTATION SMOKE: drop `candidate_skill_state` from the list read (or stop
+    // A writing it) and the skill is "missing" → matched=0, score=0.
+  });
+});
+
 // C-P3.7a: injection defence on jobs.skillExtract. The wrap boundary
 // (packages/ai/wrap.ts) already throws InjectionBlockedError on `blocked`
 // severity for any JD carrying "ignore all previous instructions" or similar
@@ -444,5 +482,27 @@ describe('JobsService injection defence (C-P3.7a)', () => {
     // MUTATION SMOKE: remove the extractSkillsForJob InjectionBlockedError
     // catch → the caller gets a 500 (InjectionBlockedError leaks) instead of
     // a 400, and no audit row is written.
+  });
+});
+
+// C: the extractor may return catalogue *names*; resolve id-or-name so those
+// jobs are scored instead of silently landing with an empty skill list.
+describe('JobsService.extractSkillsBatch — accepts catalogue names (C)', () => {
+  it('resolves LLM-returned names to ids and drops unknowns', async () => {
+    const jobs = [jobRow(0, CLEAN_JD)];
+    const m = makeExtractPrismaMock(jobs);
+    const svc = new TestJobsService(m.prisma);
+    (svc as unknown as { tryLoadProvider: () => Promise<unknown> }).tryLoadProvider = async () => ({
+      chatStructured: async () => ({ skillIds: ['TypeScript', 'Kubernetes'] }),
+    });
+
+    const stats = await svc.extractSkillsBatch('user-a', 10);
+
+    expect(stats.extracted).toBe(1);
+    // Catalogue is [{id:'typescript',name:'TypeScript'},{id:'postgres',...}]:
+    // "TypeScript" → typescript, "Kubernetes" unresolved → dropped.
+    expect(m.updates[0]!.skillIds).toEqual(['typescript']);
+    // MUTATION SMOKE: restore the `knownIds.has(id)` filter → [] because the
+    // model returned the display name, not the id.
   });
 });

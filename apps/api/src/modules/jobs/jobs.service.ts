@@ -25,6 +25,7 @@ import { SensitivityGateService } from '../../common/sensitivity-gate.service';
 import { ProviderLoaderService } from '../../common/provider-loader.service';
 import { ProviderConfigService } from '../../common/provider-config.service';
 import { JobPreferencesService } from '../job-prefs/job-prefs.service';
+import { resolveSkillNamesToIds } from '../skills/skill-name-resolver';
 
 export interface JobsSyncStats {
   adapter: string;
@@ -552,13 +553,14 @@ export class JobsService {
       this.logger.warn('skill catalogue empty; extraction is a no-op. Run the worker seed first.');
       return stats;
     }
-    const knownIds = new Set(catalogue.map((s) => s.id));
     const catalogueRendered = catalogue.map((s) => `- ${s.id} (${s.name})`).join('\n');
 
     for (const job of jobs) {
       try {
         const extracted = await this.extractSkillsForOne(userId, provider, job, catalogueRendered);
-        const validIds = extracted.skillIds.filter((id) => knownIds.has(id));
+        // The model may return catalogue *names* rather than ids; resolve either,
+        // drop unknowns. Without this, name-shaped output was silently discarded.
+        const validIds = resolveSkillNamesToIds(extracted.skillIds, catalogue);
         await this.prisma.normalizedJob.update({
           where: { id: job.id },
           data: { skillIds: validIds, skillsExtractedAt: new Date() },
@@ -587,7 +589,6 @@ export class JobsService {
     const provider = await this.tryLoadProvider(userId);
     if (!provider) throw new BadRequestException('LLM provider not configured or paused');
     const catalogue = await this.prisma.skill.findMany({ select: { id: true, name: true } });
-    const knownIds = new Set(catalogue.map((s) => s.id));
     const catalogueRendered = catalogue.map((s) => `- ${s.id} (${s.name})`).join('\n');
     let extracted: JobSkillExtraction;
     try {
@@ -603,7 +604,7 @@ export class JobsService {
       }
       throw err;
     }
-    const validIds = extracted.skillIds.filter((id) => knownIds.has(id));
+    const validIds = resolveSkillNamesToIds(extracted.skillIds, catalogue);
     await this.prisma.normalizedJob.update({
       where: { id: job.id },
       data: { skillIds: validIds, skillsExtractedAt: new Date() },

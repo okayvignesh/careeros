@@ -34,6 +34,8 @@ Async: API enqueues BullMQ job → apps/worker processor → external API
 
 Concretely, a GitHub connect (`docs/architecture.md` §4.2): web `POST /integrations/github/select` → API enqueues `github.sync` → worker lists repos via Octokit → evidence rows → KnowledgeAggregator updates `candidate_skill_state` and appends `skill_state_event` → dashboard reads `/me/skills`.
 
+A resume commit (`POST /resume/confirm` → `ResumeService.commit`) writes `resume_facts`, then rebuilds the resume side of the same graph: each verified `skill` fact is resolved to a catalogue `Skill` id (`apps/api/src/modules/skills/skill-name-resolver.ts`) and written as an idempotent `Evidence` row (`kind=document`, `signal=presence`, `sourceRef.kind=resume_fact`) before `syncSkillState` folds it into `candidate_skill_state` (`apps/api/src/modules/resume/resume-skill-graph.ts`). The same commit fire-and-forget calls `JobPreferencesService.deriveFromResume` to fill blank job-preference fields (roles/locations/seniority/must-have skills) from the resume; `POST /me/job-preferences/derive-from-resume` exposes it to the Settings panel.
+
 An LLM call (`docs/architecture.md` §5.3): build versioned prompt → sensitivity gate → provider fallback chain → `chatStructured<T>({schema})` → Zod validation (one retry) → `llm_calls` audit row → optional fact-check gate before rendering. Untrusted content that trips the wrap/scan boundary additionally writes a `llm_injection_log` row.
 
 ### 3) Layer/Module Responsibilities

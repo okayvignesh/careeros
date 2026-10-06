@@ -21,6 +21,9 @@ import { UsageCache } from '../usage/usage.cache';
 import { findHallucinations } from '@careeros/ai';
 import { COLLECTION_CAREER_FACTS } from '@careeros/shared';
 import { QdrantStore } from '@careeros/embeddings';
+import { syncSkillState } from '@careeros/aggregator';
+import { JobPreferencesService } from '../job-prefs/job-prefs.service';
+import { rebuildResumeSkillGraph, type ResumeGraphPrisma } from './resume-skill-graph';
 
 // Per-user commit lock. Two concurrent `commit()` calls for the same user must
 // serialise so we don't interleave deleteMany/createMany or orphan Qdrant points.
@@ -46,6 +49,7 @@ export class ResumeService {
     private readonly storage: StorageService,
     @InjectPinoLogger(ResumeService.name) private readonly logger: PinoLogger,
     private readonly providerLoader: ProviderLoaderService,
+    private readonly prefs: JobPreferencesService,
   ) {}
 
   /**
@@ -293,6 +297,16 @@ export class ResumeService {
         this.logger.warn({ err: (err as Error).message, userId }, 'enqueue embeddings failed'),
       );
 
+      // A: turn resume `skill` facts into evidence + candidate_skill_state so
+      // match scoring/filtering see the resume alongside GitHub. Non-fatal.
+      await this.rebuildSkillGraphFromResume(userId);
+
+      // B: first-run auto-fill of job preferences from the resume. Fire-and-
+      // forget so the commit stays fast; never overwrites non-empty fields.
+      void this.prefs.deriveFromResume(userId, { onlyFillEmpty: true }).catch((err) =>
+        this.logger.warn({ err: (err as Error).message, userId }, 'derive job prefs failed'),
+      );
+
       return { inserted: rows.length };
     } finally {
       release();
@@ -305,6 +319,33 @@ export class ResumeService {
           if (commitLocks.get(userId) === cur) commitLocks.delete(userId);
         });
       });
+    }
+  }
+
+  /**
+   * A: rebuild the candidate skill graph from the just-committed resume facts.
+   * Bounded by the number of skill facts; any failure logs a warn and is
+   * swallowed so a fragile skill-graph write can never break the resume commit.
+   */
+  private async rebuildSkillGraphFromResume(userId: string, now: Date = new Date()): Promise<void> {
+    try {
+      const result = await rebuildResumeSkillGraph(
+        this.prisma as unknown as ResumeGraphPrisma,
+        userId,
+        now,
+        (skillId) => syncSkillState(this.prisma, userId, skillId, now).then(() => undefined),
+      );
+      if (result.resolved > 0) {
+        this.logger.info(
+          { userId, resolved: result.resolved, inserted: result.inserted },
+          'resume skill graph rebuilt',
+        );
+      }
+    } catch (err) {
+      this.logger.warn(
+        { err: (err as Error).message, userId },
+        'resume skill graph build failed; commit continues',
+      );
     }
   }
 

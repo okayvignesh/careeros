@@ -88,6 +88,7 @@ export function JobsList() {
   const [lastSync, setLastSync] = useState<SyncStats | null>(null);
   const [lastFind, setLastFind] = useState<SyncStats | null>(null);
   const [lastExtract, setLastExtract] = useState<SkillExtractionStats | null>(null);
+  const [extractProgress, setExtractProgress] = useState<string | null>(null);
 
   const load = useCallback(() => {
     const url = skillFilter
@@ -121,9 +122,32 @@ export function JobsList() {
   async function extractSkills() {
     setExtracting(true);
     setError(null);
+    setExtractProgress('Scoring…');
     try {
-      const stats = await apiPost<SkillExtractionStats>('/admin/jobs/extract-skills?limit=100');
-      setLastExtract(stats);
+      // Loop until a batch scans nothing (all jobs attempted). Capped so a
+      // stuck server can't spin forever; stays user-initiated (no auto-LLM).
+      const MAX_BATCHES = 10;
+      const totals: SkillExtractionStats = { scanned: 0, extracted: 0, skipped: 0, errors: 0 };
+      for (let i = 0; i < MAX_BATCHES; i++) {
+        const stats = await apiPost<SkillExtractionStats>('/admin/jobs/extract-skills?limit=100');
+        totals.scanned += stats.scanned;
+        totals.extracted += stats.extracted;
+        totals.skipped += stats.skipped;
+        totals.errors += stats.errors;
+        setLastExtract({ ...totals });
+        setExtractProgress(
+          `Scored ${totals.extracted} of ${totals.scanned} scanned` +
+            (totals.errors > 0 ? `, ${totals.errors} errors` : '') +
+            '…',
+        );
+        if (stats.scanned === 0) break;
+        // No progress this pass (all remaining were injection-blocked): stop so
+        // we don't re-scan the same tail forever.
+        if (stats.extracted === 0 && stats.errors === 0) break;
+      }
+      setExtractProgress(
+        `Done — ${totals.extracted} scored, ${totals.skipped} skipped, ${totals.errors} errors.`,
+      );
       await refetch();
     } catch (e) {
       setError((e as Error).message);
@@ -232,7 +256,13 @@ export function JobsList() {
             </>
           )}
         </Button>
-        <Button size="sm" variant="ghost" onClick={extractSkills} disabled={extracting}>
+        <Button
+          size="sm"
+          variant="ghost"
+          data-testid="jobs-score"
+          onClick={extractSkills}
+          disabled={extracting}
+        >
           {extracting ? (
             <>
               <ThinkingOrb state="working" size={20} /> Extracting
@@ -256,8 +286,14 @@ export function JobsList() {
         )}
         {lastExtract && (
           <span className="text-[12px] text-fg-faint">
-            Last extract: {lastExtract.extracted} of {lastExtract.scanned}
+            Last extract: {lastExtract.extracted} of {lastExtract.scanned} scored
+            {lastExtract.skipped > 0 && `, ${lastExtract.skipped} skipped`}
             {lastExtract.errors > 0 && `, ${lastExtract.errors} errors`}.
+          </span>
+        )}
+        {extractProgress && (
+          <span data-testid="jobs-score-progress" className="text-[12px] text-fg-faint">
+            {extractProgress}
           </span>
         )}
         <Link
