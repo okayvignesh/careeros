@@ -8,6 +8,9 @@ import { cn } from '@careeros/ui';
 import { apiPost } from '@/lib/api-client';
 import { AppNav } from '@/components/AppNav';
 import { BrandMark, BrandWordmark } from '@/components/Brand';
+import { createLocalStore, useLocalStore } from '@/lib/persisted-state';
+
+const sidebarCollapsedStore = createLocalStore<boolean>('careeros:sidebar-collapsed', false);
 
 /**
  * App sidebar. Two collapse levels:
@@ -18,7 +21,7 @@ import { BrandMark, BrandWordmark } from '@/components/Brand';
  */
 export function Sidebar() {
   const router = useRouter();
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useLocalStore(sidebarCollapsedStore);
   const [signingOut, setSigningOut] = useState(false);
 
   async function logout() {

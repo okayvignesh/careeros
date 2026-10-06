@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -39,6 +39,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import { cn } from '@careeros/ui';
+import { createLocalStore, useLocalStore } from '@/lib/persisted-state';
 
 const groups = [
   {
@@ -108,19 +109,20 @@ const groups = [
   },
 ];
 
+const navCollapsedStore = createLocalStore<string[]>('careeros:nav-collapsed', []);
+
 export function AppNav() {
   const pathname = usePathname();
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const [collapsedList, setCollapsedList] = useLocalStore(navCollapsedStore);
+  const collapsed = new Set(collapsedList);
   const groupRefs = useRef(new Map<string, HTMLDivElement>());
 
   function toggle(label: string) {
     const willExpand = collapsed.has(label);
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(label)) next.delete(label);
-      else next.add(label);
-      return next;
-    });
+    const next = new Set(collapsed);
+    if (willExpand) next.delete(label);
+    else next.add(label);
+    setCollapsedList([...next]);
     if (willExpand) {
       // Bring the newly-expanded section into view so the user sees the whole
       // group without scrolling. `nearest` only moves when it would otherwise
@@ -136,7 +138,7 @@ export function AppNav() {
       <div className="flex items-center justify-end gap-1 px-1">
         <button
           type="button"
-          onClick={() => setCollapsed(new Set(groups.map((g) => g.label)))}
+          onClick={() => setCollapsedList(groups.map((g) => g.label))}
           aria-label="Collapse all sections"
           title="Collapse all"
           data-testid="nav-collapse-all"
@@ -146,7 +148,7 @@ export function AppNav() {
         </button>
         <button
           type="button"
-          onClick={() => setCollapsed(new Set())}
+          onClick={() => setCollapsedList([])}
           aria-label="Expand all sections"
           title="Expand all"
           data-testid="nav-expand-all"
