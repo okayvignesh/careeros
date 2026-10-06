@@ -133,13 +133,17 @@ function refreshTray(): void {
 }
 
 function trayIcon(): Electron.NativeImage {
-  // ponytail: 1x1 transparent PNG so the scaffold runs without a bundled
-  // asset today. Upgrade path: ship real tray assets (16/32@1x+2x) under
-  // apps/desktop/assets/ when D.6 packaging work starts.
+  // Brand tray assets (32 @1x, 64 @2x). Real icons ship under
+  // apps/desktop/assets and are packaged via electron-builder `files`.
   try {
     const png = readFileSync(join(__dirname, '..', 'assets', 'tray.png'));
     const img = nativeImage.createFromBuffer(png);
-    if (!img.isEmpty()) return img;
+    if (!img.isEmpty()) {
+      // macOS menubar icons should be template images (alpha-only, tinted by
+      // the system); the source is the dark brand mark on transparency.
+      if (process.platform === 'darwin') img.setTemplateImage(true);
+      return img;
+    }
   } catch {
     // fall through to empty image
   }
